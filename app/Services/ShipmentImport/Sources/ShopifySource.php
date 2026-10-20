@@ -18,6 +18,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\DataSourceLocation;
+use App\Models\Location;
 use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyGoodsFingerprint;
@@ -153,7 +154,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      */
     private const IMPORTED_FULFILLMENT_ORDER_FRAGMENT = <<<'GRAPHQL'
         fragment ImportedFulfillmentOrder on FulfillmentOrder {
-          id status
+          id status fulfillBy
+          deliveryMethod { maxDeliveryDateTime }
           order {
             id name email
             shippingAddress { provinceCode zip }
@@ -937,7 +939,10 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'value' => round($value, 2),
             'channel_id' => $this->config['channel_name'] ?? 'Shopify',
             'shipping_method_id' => $this->config['shipping_method'] ?? null,
-            'deliver_by' => null,
+            // Copied from the rate the buyer chose: set by carrier-calculated or app rates, null for merchant-defined ones.
+            'deliver_by' => Location::localDateFromTimestamp(data_get($fulfillmentOrder, 'deliveryMethod.maxDeliveryDateTime')),
+            // Unset unless a merchant or an app set it on the fulfillment order.
+            'ship_by' => Location::localDateFromTimestamp($fulfillmentOrder['fulfillBy'] ?? null),
             'source_location' => [
                 'external_id' => $shopifyLocation['id'] ?? '',
                 'external_code' => null,

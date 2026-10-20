@@ -531,7 +531,8 @@ out of the box:
 | --- | --- | --- |
 | `source_record_id` | shipment | The key used for dedupe and bound as `:shipment_reference`. Defaults to `shipment_reference`. Map it separately when the ERP's stable internal ID differs from the human-facing order number. |
 | `phone_extension` | shipment | Otherwise parsed out of `phone` |
-| `deliver_by` | shipment | |
+| `deliver_by` | shipment | The date the order must arrive by |
+| `ship_by` | shipment | The date the order must leave by. Shown on the Shipments list, which can filter to orders due to ship today or overdue. |
 | `metadata` | shipment | JSON-encoded as stored |
 | `location_id` | shipment | PolyBag's numeric `Location` ID, not a name or the ERP's warehouse code |
 | `source_item_id` | item | A stable per-line key. Without it, re-imports match lines by product, so two lines of the same SKU collapse. |

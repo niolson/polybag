@@ -4,12 +4,14 @@ namespace App\Models;
 
 use App\Services\AddressReferenceService;
 use App\Services\PhoneParserService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Facades\Cache;
+use Throwable;
 
 class Location extends Model
 {
@@ -60,6 +62,27 @@ class Location extends Model
         return Cache::remember('location_default_timezone', 3600, function () {
             return static::where('is_default', true)->value('timezone') ?? 'America/New_York';
         });
+    }
+
+    /**
+     * Convert an ISO 8601 timestamp to a calendar date in the default
+     * location's timezone. Carriers and marketplaces quote promise windows in
+     * UTC, so taking the raw UTC date would push an evening-local deadline
+     * onto the next day.
+     */
+    public static function localDateFromTimestamp(mixed $timestamp): ?string
+    {
+        if (! is_string($timestamp) || trim($timestamp) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($timestamp)
+                ->setTimezone(static::timezone())
+                ->toDateString();
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

@@ -512,3 +512,56 @@ describe('typed barcodes', function (): void {
         expect(importedWidget()->only(['barcode', 'manufacturer_part_number']))->toBe(['barcode' => 'KEEP-ME', 'manufacturer_part_number' => 'MPN-9']);
     });
 });
+
+describe('ship by', function (): void {
+    it('reads fulfillBy as a date in the default location timezone', function (): void {
+        Location::factory()->create(['is_default' => true, 'timezone' => 'America/New_York']);
+        Location::clearDefaultCache();
+
+        $dataSource = customsFieldsShopifySource();
+        $fulfillmentOrder = customsFieldsFulfillmentOrder() + ['fulfillBy' => '2026-10-22T02:30:00Z'];
+
+        $requests = importCustomsFieldsFulfillmentOrder($dataSource, $fulfillmentOrder);
+
+        expect($requests[0]['query'])->toContain('fulfillBy')
+            ->and(Shipment::firstOrFail()->ship_by->toDateString())->toBe('2026-10-21');
+    });
+
+    it('leaves ship_by null when no fulfillBy is set, and clears it when removed', function (): void {
+        $dataSource = customsFieldsShopifySource();
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder() + ['fulfillBy' => '2026-10-22T12:00:00Z']);
+        expect(Shipment::firstOrFail()->ship_by)->not->toBeNull();
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder() + ['fulfillBy' => null]);
+        expect(Shipment::firstOrFail()->ship_by)->toBeNull();
+    });
+});
+
+describe('deliver by', function (): void {
+    it('reads the delivery method maxDeliveryDateTime as a date in the default location timezone', function (): void {
+        Location::factory()->create(['is_default' => true, 'timezone' => 'America/New_York']);
+        Location::clearDefaultCache();
+
+        $fulfillmentOrder = customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => ['maxDeliveryDateTime' => '2026-10-27T03:00:00Z'],
+        ];
+
+        $requests = importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), $fulfillmentOrder);
+
+        expect($requests[0]['query'])->toContain('maxDeliveryDateTime')
+            ->and(Shipment::firstOrFail()->deliver_by->toDateString())->toBe('2026-10-26');
+    });
+
+    it('leaves deliver_by null for a merchant-defined rate with no estimate or no delivery method', function (): void {
+        $dataSource = customsFieldsShopifySource();
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => ['maxDeliveryDateTime' => null],
+        ]);
+        expect(Shipment::firstOrFail()->deliver_by)->toBeNull();
+
+        importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder() + ['deliveryMethod' => null]);
+        expect(Shipment::firstOrFail()->deliver_by)->toBeNull();
+    });
+});

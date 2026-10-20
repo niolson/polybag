@@ -891,7 +891,8 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             'channel_id' => $this->config['channel_name'] ?? 'Amazon',
             'shipping_method_id' => filled($serviceLevel) ? $serviceLevel : $defaultShippingMethod,
             '_shipping_method_fallback' => $defaultShippingMethod,
-            'deliver_by' => $this->localDateFromTimestamp($fulfillment['deliverByWindow']['latestDateTime'] ?? null),
+            'deliver_by' => Location::localDateFromTimestamp($fulfillment['deliverByWindow']['latestDateTime'] ?? null),
+            'ship_by' => Location::localDateFromTimestamp($fulfillment['shipByWindow']['latestDateTime'] ?? null),
             '_import_status' => $this->isHistoricalImport() ? ShipmentStatus::Shipped->value : ShipmentStatus::Open->value,
             '_preserve_existing_fields' => $preserveExistingFields,
             'metadata' => [
@@ -917,26 +918,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 'amazon_recipient_available' => $recipientAvailable,
             ],
         ];
-    }
-
-    /**
-     * Convert an Amazon ISO 8601 timestamp to a calendar date in the default
-     * location's timezone. Amazon quotes promise windows in UTC, so taking the
-     * raw UTC date would push an evening-local deadline onto the next day.
-     */
-    private function localDateFromTimestamp(mixed $timestamp): ?string
-    {
-        if (! is_string($timestamp) || trim($timestamp) === '') {
-            return null;
-        }
-
-        try {
-            return CarbonImmutable::parse($timestamp)
-                ->setTimezone(Location::timezone())
-                ->toDateString();
-        } catch (Throwable) {
-            return null;
-        }
     }
 
     private function mapOrderItemToShipmentItem(array $item): array

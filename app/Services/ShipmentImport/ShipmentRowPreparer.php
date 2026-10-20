@@ -107,6 +107,7 @@ class ShipmentRowPreparer
                 'channel_reference' => $data['channel_id'] ?? null,
                 'channel_id' => $this->references->channelIdFor($data, $client),
                 'deliver_by' => $data['deliver_by'] ?? null,
+                'ship_by' => $data['ship_by'] ?? null,
                 ...$customs['attributes'],
                 'metadata' => isset($data['metadata']) ? json_encode($data['metadata']) : null,
                 'status' => $status->value,

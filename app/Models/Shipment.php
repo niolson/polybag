@@ -172,6 +172,7 @@ class Shipment extends Model
         'external_tracking_number',
         'picking_status',
         'deliver_by',
+        'ship_by',
         'duties_terms',
         'seller_tax_regime',
         'seller_tax_number',
@@ -195,6 +196,7 @@ class Shipment extends Model
         'status_changed_at' => 'datetime',
         'picking_status' => PickingStatus::class,
         'deliver_by' => 'date',
+        'ship_by' => 'date',
         'duties_terms' => DutiesTerms::class,
         'seller_tax_regime' => TaxRegistrationRegime::class,
         'recipient_tax_id_type' => RecipientTaxIdType::class,
@@ -409,6 +411,36 @@ class Shipment extends Model
      * Open shipments with no shipping method: the *Needs shipping method* view
      * on the Shipments list and the Exceptions widget.
      */
+    /**
+     * Open Shipments whose ship-by date is today or earlier, in the default
+     * location's timezone. `ship_by` is a calendar date, so "today" is too.
+     *
+     * @param  Builder<Shipment>  $query
+     * @return Builder<Shipment>
+     */
+    public function scopeDueToShip(Builder $query, bool $includeToday = true): Builder
+    {
+        $today = now(Location::timezone())->toDateString();
+
+        return $query
+            ->where('status', ShipmentStatus::Open)
+            ->whereNotNull('ship_by')
+            ->whereDate('ship_by', $includeToday ? '<=' : '<', $today);
+    }
+
+    /**
+     * Open Shipments due to ship exactly today.
+     *
+     * @param  Builder<Shipment>  $query
+     * @return Builder<Shipment>
+     */
+    public function scopeShipByToday(Builder $query): Builder
+    {
+        return $query
+            ->where('status', ShipmentStatus::Open)
+            ->whereDate('ship_by', now(Location::timezone())->toDateString());
+    }
+
     public function scopeNeedingShippingMethod(Builder $query): Builder
     {
         return $query->where('status', ShipmentStatus::Open)->whereNull('shipping_method_id');
