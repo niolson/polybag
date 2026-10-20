@@ -494,6 +494,8 @@ it('records the deliver-by date and ship-by window from the Amazon fulfillment b
 
     // 2026-08-16T03:59:59Z is still 2026-08-15 in the default location's timezone.
     expect($shipment->deliver_by->toDateString())->toBe('2026-08-15')
+        // 2026-08-13T03:00:00Z is still 2026-08-12 in the default location's timezone.
+        ->and($shipment->ship_by->toDateString())->toBe('2026-08-12')
         ->and($shipment->metadata['amazon_ship_by_window']['latestDateTime'])->toBe('2026-08-13T03:00:00Z')
         ->and($shipment->metadata['amazon_deliver_by_window']['latestDateTime'])->toBe('2026-08-16T03:59:59Z');
 });

@@ -201,6 +201,8 @@ class ShipmentResource extends Resource
                         Forms\Components\TextInput::make('value')
                             ->numeric()
                             ->prefix('$'),
+                        Forms\Components\DatePicker::make('ship_by')
+                            ->label('Ship By'),
                         Forms\Components\DatePicker::make('deliver_by')
                             ->label('Deliver By'),
                         Forms\Components\Select::make('location_id')
@@ -404,6 +406,15 @@ class ShipmentResource extends Resource
                 Tables\Columns\TextColumn::make('destination')
                     ->label('Destination')
                     ->state(fn (Shipment $record): ?string => self::destinationText($record)),
+                Tables\Columns\TextColumn::make('ship_by')
+                    ->label('Ship By')
+                    ->date()
+                    ->sortable()
+                    ->placeholder('—')
+                    ->color(fn (Shipment $record): ?string => $record->status === ShipmentStatus::Open
+                        && $record->ship_by !== null
+                        && $record->ship_by->toDateString() < now(Location::timezone())->toDateString() ? 'danger' : null)
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('deliver_by')
                     ->label('Deliver By')
                     ->date()
@@ -488,6 +499,19 @@ class ShipmentResource extends Resource
                 Tables\Filters\SelectFilter::make('status_origin')
                     ->label('Status Set By')
                     ->options(ShipmentStatusOrigin::class),
+                Tables\Filters\SelectFilter::make('ship_by_due')
+                    ->label('Ship By')
+                    ->options([
+                        'today' => 'Due to ship today',
+                        'overdue' => 'Past ship-by date',
+                        'today_or_overdue' => 'Today or past due',
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'today' => $query->scopes('shipByToday'),
+                        'overdue' => $query->scopes(['dueToShip' => [false]]),
+                        'today_or_overdue' => $query->scopes('dueToShip'),
+                        default => $query,
+                    }),
                 Tables\Filters\Filter::make('needs_shipping_method')
                     ->label('Needs Shipping Method')
                     ->toggle()
@@ -719,6 +743,10 @@ class ShipmentResource extends Resource
                             ->placeholder('—'),
                         TextEntry::make('value')
                             ->money('USD'),
+                        TextEntry::make('ship_by')
+                            ->label('Ship By')
+                            ->date()
+                            ->placeholder('—'),
                         TextEntry::make('deliver_by')
                             ->label('Deliver By')
                             ->date()
