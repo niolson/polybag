@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\DataSource;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Cache;
 
@@ -61,6 +62,19 @@ class SettingsService
     public function packSlipsEnabled(): bool
     {
         return (bool) $this->get('pack_slips_enabled', true);
+    }
+
+    /**
+     * Whether Amazon-specific screens and columns are shown. On when the
+     * `amazon_features_enabled` setting is on, which an install importing
+     * Amazon orders through a Database connection turns on by hand, or while
+     * any Amazon connection is active. Computed, never written back: turning
+     * the last Amazon connection off hides them again unless the setting is on.
+     * Hiding only; imports, rules and packing behave the same either way.
+     */
+    public function amazonFeaturesEnabled(): bool
+    {
+        return (bool) $this->get('amazon_features_enabled', false) || DataSource::hasActiveAmazonConnection();
     }
 
     private function resolveSandboxMode(mixed $default): bool

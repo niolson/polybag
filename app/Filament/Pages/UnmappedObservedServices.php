@@ -11,6 +11,7 @@ use App\Models\CarrierService;
 use App\Models\Location;
 use App\Models\ObservedService;
 use App\Services\PostageSources\ObservedServiceMapper;
+use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions;
 use Filament\Forms;
@@ -57,6 +58,12 @@ class UnmappedObservedServices extends Page implements HasTable
 
     public static function canAccess(): bool
     {
+        // Hidden with the other Amazon screens, but never stranded: an install that
+        // turned Amazon off still reaches the observations it already has.
+        if (! app(SettingsService::class)->amazonFeaturesEnabled() && ! ObservedService::query()->exists()) {
+            return false;
+        }
+
         // Admin, not Manager: a mapping authorizes spend. Automation buys a
         // mapped Amazon offer whenever the method lists the service
         // (`carrier-catalog-reset/13`).

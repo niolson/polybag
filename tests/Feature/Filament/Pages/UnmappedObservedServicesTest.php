@@ -14,6 +14,7 @@ use App\Models\SourceServiceMapping;
 use App\Models\User;
 use App\Services\PostageSources\ObservedServiceMapper;
 use App\Services\PostageSources\ObservedServiceRecorder;
+use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,7 @@ use Livewire\Livewire;
 uses(RefreshDatabase::class);
 
 beforeEach(function (): void {
+    app(SettingsService::class)->set('amazon_features_enabled', true, 'boolean');
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
 });
 

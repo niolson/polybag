@@ -456,7 +456,8 @@ class ShipmentResource extends Resource
                     ->tooltip(fn (Shipment $record): ?string => $record->isAmazonFulfilled()
                         ? 'Fulfilled by Amazon — Amazon ships this order. It cannot be packed here.'
                         : null)
-                    ->toggleable(isToggledHiddenByDefault: true),
+                    ->toggleable(isToggledHiddenByDefault: true)
+                    ->visible(fn (): bool => app(SettingsService::class)->amazonFeaturesEnabled()),
                 Tables\Columns\TextColumn::make('created_at')
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable()
@@ -700,12 +701,12 @@ class ShipmentResource extends Resource
                             ->color('warning')
                             ->state('Fulfilled by Amazon (FBA)')
                             ->helperText('Amazon picks, packs and ships this order. It cannot be packed or confirmed from here.')
-                            ->visible(fn (Shipment $record): bool => $record->isAmazonFulfilled()),
+                            ->visible(fn (Shipment $record): bool => app(SettingsService::class)->amazonFeaturesEnabled() && $record->isAmazonFulfilled()),
                         TextEntry::make('amazon_programs')
                             ->label('Amazon Program')
                             ->badge()
                             ->state(fn (Shipment $record): array => AmazonOrderProgram::forShipment($record))
-                            ->visible(fn (Shipment $record): bool => AmazonOrderProgram::forShipment($record) !== []),
+                            ->visible(fn (Shipment $record): bool => app(SettingsService::class)->amazonFeaturesEnabled() && AmazonOrderProgram::forShipment($record) !== []),
                         TextEntry::make('picking_status')
                             ->badge()
                             ->visible(fn () => app(SettingsService::class)->get('picking_enabled', false)),

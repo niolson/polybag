@@ -6,9 +6,11 @@ use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\SettingsService;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
+    app(SettingsService::class)->set('amazon_features_enabled', true, 'boolean');
     $this->actingAs(User::factory()->create(['role' => Role::Admin]));
 });
 
