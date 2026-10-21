@@ -2,6 +2,7 @@
 
 namespace App\Http\Integrations\Ups;
 
+use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Http\Integrations\Concerns\HasCachedAuthentication;
 use App\Http\Integrations\Concerns\RetriesTransientErrors;
 use App\Models\CarrierAccount;
@@ -98,6 +99,11 @@ class UpsConnector extends Connector
         $authMode = $account?->secret('auth_mode');
 
         if ($authMode === 'authorization_code') {
+            // The broker's UPS OAuth issues production credentials only.
+            if (app(SettingsService::class)->get('sandbox_mode', false)) {
+                throw new CarrierUnavailableException('UPS', 'UPS is not available in sandbox mode when connected via OAuth. Use a UPS developer app\'s client ID and secret under Advanced / API App Credentials instead.');
+            }
+
             return static::fromOAuthToken($account);
         }
 

@@ -1,6 +1,6 @@
 # Show only the credential fields this install can use
 
-Status: ready-for-agent
+Status: done — 2026-10-21
 Category: enhancement
 Repo: `polybag`
 
@@ -87,10 +87,10 @@ cleared.
 
 ## Acceptance
 
-- [ ] Feature tests per mode × broker configured / not, for each field group above
-- [ ] In Demo with a broker configured, USPS and UPS show their app credentials and no
+- [x] Feature tests per mode × broker configured / not, for each field group above
+- [x] In Demo with a broker configured, USPS and UPS show their app credentials and no
       OAuth connect action; FedEx hides its app credentials
-- [ ] A UPS account connected through OAuth is refused in sandbox with a clear message
-- [ ] A carrier the registry says has no broker path shows its client credentials in
+- [x] A UPS account connected through OAuth is refused in sandbox with a clear message
+- [x] A carrier the registry says has no broker path shows its client credentials in
       Production with a broker configured
-- [ ] Saving an edit form with a hidden secret field keeps the stored secret
+- [x] Saving an edit form with a hidden secret field keeps the stored secret

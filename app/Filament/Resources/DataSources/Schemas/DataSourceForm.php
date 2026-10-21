@@ -20,6 +20,7 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
+use App\Services\CredentialFieldVisibility;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
@@ -171,7 +172,8 @@ class DataSourceForm
                         ->placeholder(fn (?DataSource $record): string => filled($record?->secret('client_id')) ? 'Configured (leave empty to keep)' : 'Not configured — broker credentials used if available')
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
-                        ->helperText('The Shopify app Client ID for this store. Required unless a hosted OAuth broker supplies it.'),
+                        ->helperText('The Shopify app Client ID for this store. Required unless a hosted OAuth broker supplies it.')
+                        ->visible(self::showsAppCredentials(...)),
 
                     TextInput::make('settings.client_secret')
                         ->label('App Client Secret')
@@ -179,7 +181,8 @@ class DataSourceForm
                         ->placeholder(fn (?DataSource $record): string => filled($record?->secret('client_secret')) ? 'Configured (leave empty to keep)' : 'Not configured — broker credentials used if available')
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
-                        ->helperText('The Shopify app Client Secret for this store. Required unless a hosted OAuth broker supplies it.'),
+                        ->helperText('The Shopify app Client Secret for this store. Required unless a hosted OAuth broker supplies it.')
+                        ->visible(self::showsAppCredentials(...)),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === ShopifySource::class)
                 ->columns(2),
@@ -345,7 +348,8 @@ class DataSourceForm
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
                         ->required(fn (?DataSource $record): bool => ! $record?->exists && ! app(OAuthService::class)->isBrokerConfigured())
-                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise save the connection and use Connect Amazon.'),
+                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise save the connection and use Connect Amazon.')
+                        ->visible(self::showsAppCredentials(...)),
 
                     TextInput::make('settings.client_id')
                         ->label('App Client ID')
@@ -353,7 +357,8 @@ class DataSourceForm
                         ->placeholder(fn (?DataSource $record): string => filled($record?->secret('client_id')) ? 'Configured (leave empty to keep)' : 'Not configured — broker credentials used if available')
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
-                        ->helperText('Your own SP-API application credentials. Required when no hosted OAuth broker is configured — see docs/self-hosting.md.'),
+                        ->helperText('Your own SP-API application credentials. Required when no hosted OAuth broker is configured — see docs/self-hosting.md.')
+                        ->visible(self::showsAppCredentials(...)),
 
                     TextInput::make('settings.client_secret')
                         ->label('App Client Secret')
@@ -361,7 +366,8 @@ class DataSourceForm
                         ->placeholder(fn (?DataSource $record): string => filled($record?->secret('client_secret')) ? 'Configured (leave empty to keep)' : 'Not configured — broker credentials used if available')
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
-                        ->helperText('Your own SP-API application credentials. Required when no hosted OAuth broker is configured — see docs/self-hosting.md.'),
+                        ->helperText('Your own SP-API application credentials. Required when no hosted OAuth broker is configured — see docs/self-hosting.md.')
+                        ->visible(self::showsAppCredentials(...)),
                 ])
                 ->visible(fn (Get $get): bool => $get('source_type') === AmazonSource::class)
                 ->columns(2),
@@ -878,6 +884,15 @@ class DataSourceForm
     private static function multiLocationEnabled(): bool
     {
         return (bool) app(SettingsService::class)->get('multi_location_enabled', false);
+    }
+
+    /**
+     * Shopify's and Amazon's own app credentials, and Amazon's refresh token: the
+     * way in only without the broker, or in Dev.
+     */
+    private static function showsAppCredentials(): bool
+    {
+        return app(CredentialFieldVisibility::class)->showsConnectionAppCredentials();
     }
 
     /** @return array<string, string> */

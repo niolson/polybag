@@ -9,6 +9,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\User;
 use App\Services\Carriers\UspsAdapter;
+use App\Services\CredentialFieldVisibility;
 use App\Services\OAuthService;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
@@ -46,7 +47,8 @@ class EditCarrierAccount extends EditRecord
                 ->label(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'Reconnect USPS' : 'Connect USPS')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'warning' : 'primary')
-                ->visible(fn (): bool => $this->record->carrier?->name === Carrier::USPS)
+                ->visible(fn (): bool => $this->record->carrier?->name === Carrier::USPS
+                    && app(CredentialFieldVisibility::class)->offersCarrierOAuth(Carrier::USPS))
                 ->disabled(fn (): bool => ! app(OAuthService::class)->isBrokerConfigured())
                 ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own USPS developer app credentials under Advanced / API App Credentials instead.'))
                 ->requiresConfirmation()
@@ -141,7 +143,8 @@ class EditCarrierAccount extends EditRecord
                 ->label(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'Reconnect UPS' : 'Connect UPS')
                 ->icon('heroicon-o-link')
                 ->color(fn (): string => app(OAuthService::class)->isAccountConnected($this->record) ? 'warning' : 'primary')
-                ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::UPS)
+                ->visible(fn (): bool => $this->carrierAccountRecord()->carrier?->name === Carrier::UPS
+                    && app(CredentialFieldVisibility::class)->offersCarrierOAuth(Carrier::UPS))
                 ->disabled(fn (): bool => ! app(OAuthService::class)->isBrokerConfigured())
                 ->tooltip(fn () => app(OAuthService::class)->brokerlessGuidance('Enter your own UPS developer app credentials under Advanced / API App Credentials instead.'))
                 ->requiresConfirmation()

@@ -43,6 +43,20 @@ class CarrierRegistry
         AmazonBuyShippingAdapter::SOURCE_NAME => AmazonBuyShippingAdapter::class,
     ];
 
+    /**
+     * Carriers whose accounts connect through the hosted broker, and whether that
+     * path works against the carrier's sandbox. USPS and UPS OAuth issues production
+     * credentials only. FedEx registration runs against either environment, and its
+     * credentials work only against the one it registered with.
+     *
+     * @var array<string, bool>
+     */
+    private const BROKER_CONNECTIONS = [
+        Carrier::USPS => false,
+        Carrier::UPS => false,
+        Carrier::FEDEX => true,
+    ];
+
     public function __construct()
     {
         $this->adapters = self::DEFAULT_ADAPTERS;
@@ -186,6 +200,20 @@ class CarrierRegistry
         $adapterClass = self::DEFAULT_ADAPTERS[$carrierName] ?? null;
 
         return $adapterClass !== null && is_subclass_of($adapterClass, UsesConnectionAccount::class);
+    }
+
+    /**
+     * Whether a carrier's accounts can connect through the hosted broker against
+     * the given environment. False for a carrier with no broker path at all, which
+     * keeps its own client credentials everywhere.
+     */
+    public static function connectsThroughBroker(string $carrierName, bool $sandbox = false): bool
+    {
+        if (! array_key_exists($carrierName, self::BROKER_CONNECTIONS)) {
+            return false;
+        }
+
+        return ! $sandbox || self::BROKER_CONNECTIONS[$carrierName];
     }
 
     /**

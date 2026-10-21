@@ -9,6 +9,7 @@ use App\Models\Client;
 use App\Models\Location;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\UspsAdapter;
+use App\Services\CredentialFieldVisibility;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use Carbon\Carbon;
@@ -35,6 +36,24 @@ class CarrierAccountForm
         $name = filled($carrierId) ? Carrier::whereKey($carrierId)->value('name') : null;
 
         return is_string($name) && CarrierRegistry::takesConnection($name);
+    }
+
+    private static function fields(): CredentialFieldVisibility
+    {
+        return app(CredentialFieldVisibility::class);
+    }
+
+    /**
+     * What an "Advanced / API App Credentials" section says. Where the broker's OAuth
+     * cannot connect the account, as in Demo, these are the only way in.
+     */
+    private static function appCredentialsDescription(string $carrierName): string
+    {
+        if (! self::fields()->offersCarrierOAuth($carrierName)) {
+            return "This account signs in with a {$carrierName} developer app's client ID and secret. The hosted OAuth connection issues production credentials only, so it cannot be used against the sandbox.";
+        }
+
+        return "Your own {$carrierName} developer app credentials. Hosted installs normally leave these empty and use the shared OAuth connection; self-hosted installs fill them in — see docs/self-hosting.md.";
     }
 
     public static function configure(Schema $schema): Schema
@@ -116,6 +135,7 @@ class CarrierAccountForm
                         TextEntry::make('usps_oauth_status')
                             ->label('OAuth Status')
                             ->state(fn (?CarrierAccount $record): HtmlString => static::renderAccountOauthStatus($record))
+                            ->visible(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::USPS))
                             ->columnSpanFull(),
                         TextEntry::make('usps_pricing_tier')
                             ->label('Pricing Tier')
@@ -151,7 +171,7 @@ class CarrierAccountForm
                     ->collapsible(),
 
                 Section::make('Advanced / API App Credentials')
-                    ->description('Your own USPS developer app credentials. Hosted installs normally leave these empty and use the shared OAuth connection; self-hosted installs fill them in — see docs/self-hosting.md.')
+                    ->description(fn (): string => self::appCredentialsDescription(Carrier::USPS))
                     ->schema([
                         TextInput::make('usps_adv_client_id')
                             ->label('Client ID')
@@ -166,9 +186,10 @@ class CarrierAccountForm
                             ->afterStateHydrated(fn ($component) => $component->state(null))
                             ->dehydrated(fn ($state): bool => filled($state)),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::USPS)
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::USPS
+                        && self::fields()->showsCarrierAppCredentials(Carrier::USPS))
                     ->columns(2)
-                    ->collapsed()
+                    ->collapsed(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::USPS))
                     ->collapsible(),
 
                 // ── FedEx ───────────────────────────────────────────────────────────
@@ -188,7 +209,8 @@ class CarrierAccountForm
                             ->readOnly(fn (?CarrierAccount $record): bool => $record !== null
                                 && filled($record->secret('child_key'))
                                 && ($record->credential('child_env') ?? 'production') === 'production')
-                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('production'))),
+                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('production')))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('production')),
                         TextInput::make('fedex_sandbox_account_number')
                             ->label('Sandbox Account Number')
                             ->helperText('Use the test account number assigned with your FedEx sandbox API project.')
@@ -196,7 +218,8 @@ class CarrierAccountForm
                             ->readOnly(fn (?CarrierAccount $record): bool => $record !== null
                                 && filled($record->secret('child_key'))
                                 && $record->credential('child_env') === 'sandbox')
-                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('sandbox'))),
+                            ->afterStateHydrated(fn ($component, ?CarrierAccount $record) => $component->state($record?->fedexAccountNumber('sandbox')))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('sandbox')),
                     ])
                     ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::FEDEX)
                     ->columns(2)
@@ -210,27 +233,32 @@ class CarrierAccountForm
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('api_key')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('production')),
                         TextInput::make('fedex_adv_api_secret')
                             ->label('Production API Secret')
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('api_secret')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('production')),
                         TextInput::make('fedex_adv_sandbox_api_key')
                             ->label('Sandbox API Key')
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('sandbox_api_key')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('sandbox')),
                         TextInput::make('fedex_adv_sandbox_api_secret')
                             ->label('Sandbox API Secret')
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('sandbox_api_secret')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->visible(fn (): bool => self::fields()->showsFedexEnvironment('sandbox')),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::FEDEX)
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::FEDEX
+                        && self::fields()->showsCarrierAppCredentials(Carrier::FEDEX))
                     ->columns(2)
                     ->collapsed()
                     ->collapsible(),
@@ -270,11 +298,14 @@ class CarrierAccountForm
                 // ── UPS ─────────────────────────────────────────────────────────────
 
                 Section::make('UPS Account')
-                    ->description('UPS account connection. Use the "Connect UPS" action above to authorize via OAuth.')
+                    ->description(fn (): string => self::fields()->offersCarrierOAuth(Carrier::UPS)
+                        ? 'UPS account connection. Use the "Connect UPS" action above to authorize via OAuth.'
+                        : 'UPS account connection. Enter a UPS developer app\'s client ID and secret under Advanced / API App Credentials.')
                     ->schema([
                         TextEntry::make('ups_oauth_status')
                             ->label('OAuth Status')
                             ->state(fn (?CarrierAccount $record): HtmlString => static::renderAccountOauthStatus($record))
+                            ->visible(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::UPS))
                             ->columnSpanFull(),
                         TextInput::make('ups_account_number')
                             ->label('Account Number')
@@ -285,7 +316,7 @@ class CarrierAccountForm
                     ->collapsible(),
 
                 Section::make('Advanced / API App Credentials')
-                    ->description('Your own UPS developer app credentials. Hosted installs normally leave these empty and use the shared OAuth connection; self-hosted installs fill them in — see docs/self-hosting.md.')
+                    ->description(fn (): string => self::appCredentialsDescription(Carrier::UPS))
                     ->schema([
                         TextInput::make('ups_adv_client_id')
                             ->label('Client ID')
@@ -300,9 +331,10 @@ class CarrierAccountForm
                             ->afterStateHydrated(fn ($component) => $component->state(null))
                             ->dehydrated(fn ($state): bool => filled($state)),
                     ])
-                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::UPS)
+                    ->visible(fn (Get $get): bool => Carrier::find($get('carrier_id'))?->name === Carrier::UPS
+                        && self::fields()->showsCarrierAppCredentials(Carrier::UPS))
                     ->columns(2)
-                    ->collapsed()
+                    ->collapsed(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::UPS))
                     ->collapsible(),
             ]);
     }
