@@ -36,7 +36,7 @@ apply to this install.**
 | Dev Settings page | not reachable | not reachable | available |
 | Multi-client / multi-location | `.env` | `.env` | `.env` |
 | Shopify and Amazon connections, broker configured | OAuth only | OAuth only | every field |
-| Carrier app credentials, broker configured | hidden | hidden | shown |
+| Carrier app credentials, broker configured | hidden | FedEx hidden; USPS and UPS shown (their OAuth is production-only) | shown |
 | Anything, no broker configured | client credentials shown | client credentials shown | shown |
 | FedEx sandbox fields | hidden | shown | shown |
 | FedEx production fields | shown | hidden | shown |
