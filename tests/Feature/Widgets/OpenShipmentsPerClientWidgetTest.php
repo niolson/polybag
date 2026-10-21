@@ -27,7 +27,7 @@ it('is hidden when multi_client_enabled is false', function (): void {
 });
 
 it('is visible when multi_client_enabled is true', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
 
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
 
@@ -35,7 +35,7 @@ it('is visible when multi_client_enabled is true', function (): void {
 });
 
 it('is hidden from shippers even when multi_client_enabled is true', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
 
     $this->actingAs(User::factory()->create(['role' => Role::User]));
 
@@ -43,7 +43,7 @@ it('is hidden from shippers even when multi_client_enabled is true', function ()
 });
 
 it('shows client names and open shipment counts', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
 
     $clientA = Client::factory()->create(['name' => 'Acme Corp', 'active' => true]);
     $clientB = Client::factory()->create(['name' => 'Beta LLC', 'active' => true]);
@@ -61,7 +61,7 @@ it('shows client names and open shipment counts', function (): void {
 });
 
 it('excludes inactive clients', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
 
     $active = Client::factory()->create(['name' => 'Active Co', 'active' => true]);
     $inactive = Client::factory()->create(['name' => 'Inactive Co', 'active' => false]);
@@ -76,7 +76,7 @@ it('excludes inactive clients', function (): void {
 });
 
 it('shows zero for clients with no open shipments', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
 
     $client = Client::factory()->create(['name' => 'Empty Client', 'active' => true]);
     Shipment::factory()->create(['client_id' => $client->id, 'status' => ShipmentStatus::Shipped]);

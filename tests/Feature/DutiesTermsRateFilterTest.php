@@ -24,7 +24,6 @@ use App\Models\ExchangeRate;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
-use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
@@ -351,7 +350,7 @@ it('refuses an unresolved EU Shipment, linking to Settings in single-client mode
 });
 
 it('refuses an unresolved EU Shipment, linking to the client form in multi-client mode', function (): void {
-    Setting::updateOrCreate(['key' => 'multi_client_enabled'], ['value' => true, 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     $client = Client::factory()->create(['name' => 'Northwind Goods', 'duties_policy' => null]);
     $package = dutiesFilterPackage('FR', dutiesFilterMethod(), ['client_id' => $client->id]);
 

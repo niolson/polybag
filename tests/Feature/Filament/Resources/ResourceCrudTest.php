@@ -32,7 +32,6 @@ use App\Models\CarrierService;
 use App\Models\Channel;
 use App\Models\Location;
 use App\Models\Product;
-use App\Models\Setting;
 use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\SettingsService;
@@ -241,7 +240,7 @@ it('can edit a CarrierService', function (): void {
 // LocationResource
 
 it('can render Location list page in multi-location mode', function (): void {
-    Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_location_enabled', true);
     app(SettingsService::class)->clearCache();
 
     Livewire::test(ListLocations::class)->assertSuccessful();

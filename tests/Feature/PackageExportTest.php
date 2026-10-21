@@ -15,7 +15,6 @@ use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageExport;
 use App\Models\Shipment;
-use App\Services\SettingsService;
 use App\Services\ShipmentImport\PackageExportService;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Database\QueryException;
@@ -553,7 +552,7 @@ it('runs export command with validate-only when no export-enabled sources', func
 });
 
 it('exports to global export source even when package has no import source', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $driverClass = fakeExportSource();
 
     $globalSource = DataSource::factory()->create([
@@ -578,7 +577,7 @@ it('exports to global export source even when package has no import source', fun
 });
 
 it('exports to both primary source and global export source', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $driverClass = fakeExportSource();
 
     $primarySource = fakeDataSource($driverClass, ['tracking_number' => 'primary_tracking']);
@@ -607,7 +606,7 @@ it('exports to both primary source and global export source', function (): void 
 });
 
 it('does not resend to a successful destination when another destination is retried', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $successfulDriver = fakeExportSource();
     $failingDriver = new class([]) implements DataSourceInterface, ExportDestinationInterface
     {
@@ -775,7 +774,7 @@ it('backs scheduled retries off after a recent failure', function (): void {
 });
 
 it('does not bypass destination backoff when a sibling destination is already settled', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $failingDriver = fakeExportSource(exportError: 'Connection refused');
     $primary = fakeDataSource($failingDriver);
     $global = DataSource::factory()->create([
@@ -1020,7 +1019,7 @@ it('reserves sweep capacity for an older retry among new packages', function ():
 });
 
 it('exports a newly added global destination despite an existing permanent failure', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $primary = fakeDataSource(fakeExportSource());
     $package = createShippedPackage(importSource: $primary);
     $package->update(['shipped_at' => now()->subDays(2)]);
@@ -1148,7 +1147,7 @@ it('does not reopen permanent failures for already exported packages', function 
 });
 
 it('does not double-export when global source is also the primary source', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $driverClass = fakeExportSource();
 
     $source = DataSource::factory()->create([
@@ -1208,7 +1207,7 @@ it('still exports to the primary source in single-client mode', function (): voi
 });
 
 it('skips inactive global export sources', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $driverClass = fakeExportSource();
 
     DataSource::factory()->create([
@@ -1230,7 +1229,7 @@ it('skips inactive global export sources', function (): void {
 });
 
 it('skips global export sources where export_enabled is false', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $driverClass = fakeExportSource();
 
     DataSource::factory()->create([

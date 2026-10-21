@@ -15,8 +15,14 @@ beforeEach(function (): void {
     app(SettingsService::class)->clearCache();
 });
 
-it('is not accessible in production', function (): void {
-    $this->app['env'] = 'production';
+it('is not accessible outside Dev', function (string $environment): void {
+    $this->app['env'] = $environment;
+
+    expect(DevSettings::canAccess())->toBeFalse();
+})->with(['production', 'demo', 'staging']);
+
+it('is not accessible below Admin', function (): void {
+    $this->actingAs(User::factory()->manager()->create());
 
     expect(DevSettings::canAccess())->toBeFalse();
 });
@@ -35,14 +41,10 @@ it('mounts sandbox_mode and suppress_printing from settings', function (): void 
         ->assertSet('data.suppress_printing', true);
 });
 
-it('mounts multi_client_enabled and multi_location_enabled from settings', function (): void {
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
-    Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
-    app(SettingsService::class)->clearCache();
-
+it('has no multi-client or multi-location toggles', function (): void {
     Livewire::test(DevSettings::class)
-        ->assertSet('data.multi_client_enabled', true)
-        ->assertSet('data.multi_location_enabled', true);
+        ->assertFormFieldDoesNotExist('multi_client_enabled')
+        ->assertFormFieldDoesNotExist('multi_location_enabled');
 });
 
 it('saves sandbox_mode setting', function (): void {
@@ -80,20 +82,6 @@ it('forces suppress_printing to false when sandbox_mode is turned off', function
 
     app(SettingsService::class)->clearCache();
     expect(app(SettingsService::class)->get('suppress_printing'))->toBeFalse();
-});
-
-it('saves multi_client_enabled and multi_location_enabled settings', function (): void {
-    Livewire::test(DevSettings::class)
-        ->fillForm([
-            'multi_client_enabled' => true,
-            'multi_location_enabled' => true,
-        ])
-        ->call('save')
-        ->assertNotified();
-
-    app(SettingsService::class)->clearCache();
-    expect(app(SettingsService::class)->get('multi_client_enabled'))->toBeTrue()
-        ->and(app(SettingsService::class)->get('multi_location_enabled'))->toBeTrue();
 });
 
 it('clears API auth caches when sandbox_mode changes', function (): void {

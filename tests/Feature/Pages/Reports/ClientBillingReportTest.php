@@ -4,7 +4,6 @@ use App\Enums\Role;
 use App\Filament\Pages\Reports\ClientBillingReport;
 use App\Models\Client;
 use App\Models\Package;
-use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
@@ -36,7 +35,7 @@ beforeEach(function (): void {
     );
 
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     app(SettingsService::class)->clearCache();
 });
 
@@ -51,7 +50,7 @@ it('renders the client billing report page', function (): void {
 });
 
 it('restricts access when multi_client_enabled is false', function (): void {
-    Setting::where('key', 'multi_client_enabled')->update(['value' => '0']);
+    config()->set('features.multi_client_enabled', false);
     app(SettingsService::class)->clearCache();
 
     expect(ClientBillingReport::canAccess())->toBeFalse();

@@ -73,7 +73,7 @@ it('hides client and global export fields in single-client mode', function (): v
 });
 
 it('shows client and global export fields in multi-client mode', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $this->actingAs($this->admin);
 
     Livewire::test(CreateDataSource::class)
@@ -96,7 +96,7 @@ it('hides client and global export table columns in single-client mode', functio
 });
 
 it('shows client and global export table columns in multi-client mode', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $this->actingAs($this->admin);
     DataSource::factory()->create();
 

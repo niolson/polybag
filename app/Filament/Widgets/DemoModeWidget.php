@@ -2,7 +2,7 @@
 
 namespace App\Filament\Widgets;
 
-use App\Services\SettingsService;
+use App\Enums\AppMode;
 use Filament\Widgets\Widget;
 
 class DemoModeWidget extends Widget
@@ -17,6 +17,6 @@ class DemoModeWidget extends Widget
 
     public static function canView(): bool
     {
-        return SettingsService::isDemoMode();
+        return AppMode::current() === AppMode::Demo;
     }
 }

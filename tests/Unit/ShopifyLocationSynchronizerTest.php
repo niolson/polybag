@@ -4,7 +4,6 @@ use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Shipment;
-use App\Services\SettingsService;
 use App\Services\ShopifyLocationSynchronizer;
 use Illuminate\Support\Facades\Cache;
 use Saloon\Http\Faking\MockResponse;
@@ -155,7 +154,7 @@ it('surfaces Shopify authentication and GraphQL failures without changing mappin
 });
 
 it('maps a sole shopify location to the only active PolyBag location in multi-location mode', function (int $otherActive, bool $mapped): void {
-    app(SettingsService::class)->set('multi_location_enabled', true, 'boolean');
+    config()->set('features.multi_location_enabled', true);
     $source = createShopifyDataSource();
     Location::factory()->count($otherActive)->create(['active' => true]);
     Location::factory()->create(['active' => false]);

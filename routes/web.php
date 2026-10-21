@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\AppMode;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Auth\AzureController;
 use App\Http\Controllers\Auth\GoogleController;
@@ -100,8 +101,8 @@ Route::get('/auth/sso/{provider}/receive', [SsoCallbackController::class, 'recei
     ->middleware('throttle:20,1');
 
 // Collects browser CSP violation reports for local policy tuning. Enabled only
-// in local/testing; see App\Http\Middleware\ContentSecurityPolicy.
-if (app()->environment(['local', 'testing'])) {
+// in Dev mode; see App\Http\Middleware\ContentSecurityPolicy.
+if (AppMode::current() === AppMode::Dev) {
     Route::post('/csp-report', CspReportController::class)
         ->name('csp.report')
         ->withoutMiddleware([PreventRequestForgery::class]);

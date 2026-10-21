@@ -6,7 +6,6 @@ use App\Filament\Pages\Settings;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\User;
-use App\Services\SettingsService;
 use Filament\Forms\Components\Repeater;
 use Livewire\Livewire;
 
@@ -101,7 +100,7 @@ it('refuses the same country twice in the duties policy on Settings', function (
 });
 
 it('leaves the customs fields off Settings in multi-client mode', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $client = Client::factory()->ddpToEu()->create(['is_default' => true]);
 
     Livewire::test(Settings::class)

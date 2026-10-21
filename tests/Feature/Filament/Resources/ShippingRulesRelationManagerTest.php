@@ -12,7 +12,6 @@ use App\Models\Client;
 use App\Models\ShippingMethod;
 use App\Models\ShippingRule;
 use App\Models\User;
-use App\Services\SettingsService;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\Testing\TestAction;
@@ -321,7 +320,7 @@ it('refuses a Use rule naming a service the method does not list', function (): 
 });
 
 it('creates a rule for one client when multi-client is enabled', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $client = Client::factory()->create();
     $method = ShippingMethod::factory()->create();
     $service = CarrierService::factory()->uspsPriority()->create();
@@ -343,7 +342,7 @@ it('creates a rule for one client when multi-client is enabled', function (): vo
 });
 
 it('leaves a rule for every client when no client is chosen', function (): void {
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
     $method = ShippingMethod::factory()->create();
     $service = CarrierService::factory()->uspsPriority()->create();
     $method->carrierServices()->attach($service);

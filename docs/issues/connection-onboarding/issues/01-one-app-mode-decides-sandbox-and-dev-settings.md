@@ -1,6 +1,6 @@
 # One app mode decides sandbox and Dev Settings
 
-Status: ready-for-agent
+Status: done — 2026-10-21
 Category: enhancement
 Repo: `polybag`
 
@@ -57,11 +57,11 @@ expects.
 
 ## Acceptance
 
-- [ ] `AppMode::current()` returns the case for `production`, `demo`, `local`, `testing`
+- [x] `AppMode::current()` returns the case for `production`, `demo`, `local`, `testing`
       and an unknown value (Production)
-- [ ] Sandbox resolves per mode as above; Dev reads the row
-- [ ] Dev Settings is forbidden in Production and Demo, and has no multi-client or
+- [x] Sandbox resolves per mode as above; Dev reads the row
+- [x] Dev Settings is forbidden in Production and Demo, and has no multi-client or
       multi-location toggles
-- [ ] A `multi_client_enabled` row set to true is ignored in every mode; the config value
+- [x] A `multi_client_enabled` row set to true is ignored in every mode; the config value
       decides
-- [ ] The suite passes after the test migration
+- [x] The suite passes after the test migration

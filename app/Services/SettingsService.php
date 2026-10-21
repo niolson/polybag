@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Enums\AppMode;
 use App\Models\DataSource;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Cache;
@@ -31,18 +32,10 @@ class SettingsService
         return match ($key) {
             'sandbox_mode' => $this->resolveSandboxMode($default),
             'suppress_printing' => $this->resolveSuppressPrinting($default),
-            'multi_client_enabled' => $this->resolveEnvOrDb('features.multi_client_enabled', $key, $default),
-            'multi_location_enabled' => $this->resolveEnvOrDb('features.multi_location_enabled', $key, $default),
+            'multi_client_enabled' => (bool) config('features.multi_client_enabled', $default),
+            'multi_location_enabled' => (bool) config('features.multi_location_enabled', $default),
             default => $this->getAllCached()[$key] ?? $default,
         };
-    }
-
-    /**
-     * Whether the app is running in demo mode (APP_ENV=demo).
-     */
-    public static function isDemoMode(): bool
-    {
-        return app()->environment('demo');
     }
 
     /**
@@ -79,33 +72,20 @@ class SettingsService
 
     private function resolveSandboxMode(mixed $default): bool
     {
-        return match (true) {
-            app()->isProduction() => false,
-            self::isDemoMode() => true,
-            default => (bool) ($this->getAllCached()['sandbox_mode'] ?? $default),
+        return match (AppMode::current()) {
+            AppMode::Production => false,
+            AppMode::Demo => true,
+            AppMode::Dev => (bool) ($this->getAllCached()['sandbox_mode'] ?? $default),
         };
     }
 
     private function resolveSuppressPrinting(mixed $default): bool
     {
-        if (app()->isProduction()) {
+        if (AppMode::current() !== AppMode::Dev) {
             return false;
         }
 
         return (bool) ($this->getAllCached()['suppress_printing'] ?? $default);
-    }
-
-    /**
-     * In local/testing environments, the DB (dev settings UI) controls these toggles.
-     * In production/demo/staging, the env-backed config value is authoritative.
-     */
-    private function resolveEnvOrDb(string $configKey, string $settingKey, mixed $default): bool
-    {
-        if (app()->environment('local', 'testing')) {
-            return (bool) ($this->getAllCached()[$settingKey] ?? $default);
-        }
-
-        return (bool) config($configKey, $default);
     }
 
     /**

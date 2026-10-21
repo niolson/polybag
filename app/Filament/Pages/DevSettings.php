@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Enums\AppMode;
 use App\Enums\Role;
 use App\Models\Setting;
 use App\Services\SettingsService;
@@ -38,7 +39,7 @@ class DevSettings extends Page
 
     public static function canAccess(): bool
     {
-        return app()->environment('local', 'testing') && auth()->user()?->role->isAtLeast(Role::Admin);
+        return AppMode::current() === AppMode::Dev && auth()->user()?->role->isAtLeast(Role::Admin);
     }
 
     /**
@@ -54,8 +55,6 @@ class DevSettings extends Page
             'sandbox_mode' => $settings->get('sandbox_mode', false),
             'suppress_printing' => $settings->get('suppress_printing', false),
             'address_validation_use_real_in_sandbox' => $settings->get('address_validation_use_real_in_sandbox', false),
-            'multi_client_enabled' => $settings->get('multi_client_enabled', false),
-            'multi_location_enabled' => $settings->get('multi_location_enabled', false),
         ]);
     }
 
@@ -82,20 +81,6 @@ class DevSettings extends Page
                                 ->helperText('When enabled, USPS/Google address validation calls are made for real even in sandbox mode (for testing the integration itself). Otherwise sandbox always uses the fake validator.')
                                 ->default(false)
                                 ->visible(fn (Get $get): bool => (bool) $get('sandbox_mode')),
-                        ])
-                        ->columns(1),
-
-                    Section::make('Mode Overrides')
-                        ->description('Toggle multi-tenant features for local testing. In production these are controlled by MULTI_CLIENT_ENABLED and MULTI_LOCATION_ENABLED in .env.')
-                        ->schema([
-                            Toggle::make('multi_client_enabled')
-                                ->label('Multi-Client (3PL)')
-                                ->helperText('When enabled, shipments, products, and shipping rules are scoped per client. Client columns and selectors appear across the UI.')
-                                ->default(false),
-                            Toggle::make('multi_location_enabled')
-                                ->label('Multi-Location')
-                                ->helperText('When enabled, packages are tracked per warehouse and end-of-day processes run per location. Each user can be assigned a default location.')
-                                ->default(false),
                         ])
                         ->columns(1),
                 ])
@@ -125,8 +110,6 @@ class DevSettings extends Page
             'sandbox_mode' => $sandboxMode,
             'suppress_printing' => $suppressPrinting,
             'address_validation_use_real_in_sandbox' => $useRealAddressValidationInSandbox,
-            'multi_client_enabled' => (bool) ($data['multi_client_enabled'] ?? false),
-            'multi_location_enabled' => (bool) ($data['multi_location_enabled'] ?? false),
         ];
 
         foreach ($settings as $key => $value) {
