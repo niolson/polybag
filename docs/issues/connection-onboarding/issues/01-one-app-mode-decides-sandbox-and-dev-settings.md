@@ -30,7 +30,8 @@ expects.
 ## Desired behavior
 
 - An `AppMode` enum, with `Production`, `Demo` and `Dev` cases, resolved from `APP_ENV`:
-  `production` → Production, `demo` → Demo, anything else → Dev. Use it wherever those
+  `demo` → Demo, `local` and `testing` → Dev, anything else (`production`, `staging`, a
+  typo) → Production. Use it wherever those
   four predicates sit today, and in `02`.
 - Sandbox: Production off, Demo on, Dev the `sandbox_mode` row. Same as today.
 - Suppress printing and real address validation in sandbox: Dev only, as the Dev Settings
@@ -43,9 +44,9 @@ expects.
 
 ## Notes
 
-- **Not confirmed with the maintainer:** treating an unknown `APP_ENV` such as `staging`
-  as Dev means it gets the Dev Settings page. The alternative is treating it as
-  Production. Ask before building if either matters.
+- **Decided 2026-10-21:** an unknown `APP_ENV` is Production, so it fails closed. A
+  staging install is not a fourth mode: it is what Demo already is (sandbox postage,
+  no writes to a live store), so it runs as `demo`.
 - About 17 test files turn multi-client or multi-location on through the settings table.
   They move to `config()->set('features.multi_client_enabled', true)`, or to a shared Pest
   helper if one reads better.
@@ -57,7 +58,7 @@ expects.
 ## Acceptance
 
 - [ ] `AppMode::current()` returns the case for `production`, `demo`, `local`, `testing`
-      and an unknown value
+      and an unknown value (Production)
 - [ ] Sandbox resolves per mode as above; Dev reads the row
 - [ ] Dev Settings is forbidden in Production and Demo, and has no multi-client or
       multi-location toggles

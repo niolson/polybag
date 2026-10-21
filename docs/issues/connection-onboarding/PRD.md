@@ -31,7 +31,7 @@ apply to this install.**
 
 | | production | demo | dev |
 |---|---|---|---|
-| `APP_ENV` | `production` | `demo` | anything else (`local`, `testing`) |
+| `APP_ENV` | `production`, or any value not listed | `demo` | `local`, `testing` |
 | Carrier sandbox | always off | always on | Dev Settings toggle |
 | Dev Settings page | not reachable | not reachable | available |
 | Multi-client / multi-location | `.env` | `.env` | `.env` |
@@ -40,6 +40,9 @@ apply to this install.**
 | Anything, no broker configured | client credentials shown | client credentials shown | shown |
 | FedEx sandbox fields | hidden | shown | shown |
 | FedEx production fields | shown | hidden | shown |
+
+An unknown `APP_ENV`, such as `staging`, is Production, so a mistyped value fails closed.
+A staging install that should not buy real postage or write to stores runs as `demo`.
 
 Most of this already holds. `SettingsService::resolveSandboxMode()` forces sandbox off in
 production and on in demo, and `DevSettings::canAccess()` is limited to `local` and

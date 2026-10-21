@@ -1,4 +1,4 @@
-# Demo never writes back to a Shopify or Amazon store
+# Demo never writes back to a live Shopify or Amazon store
 
 Status: ready-for-agent
 Category: bug
@@ -8,8 +8,8 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), decision 1. Uses `AppMode` from `connection-onboarding/01`. If that has
-not landed, `SettingsService::isDemoMode()` answers the same question.
+[PRD](../PRD.md), decisions 1 and 2. Uses `AppMode` from `connection-onboarding/01`, and
+the development-store check from `02` (build it here if this lands first).
 
 ## Problem
 
@@ -40,11 +40,14 @@ Other writes to a store that need the same guard:
 
 ## Desired behavior
 
-- In Demo, an export to a Shopify or Amazon connection is not sent. The `package_exports`
-  row is marked skipped, or succeeded with a "not sent in demo" note, so no retry picks it
-  up and nothing shows as a failed export.
-- In Demo, the Shopify fulfillment cancel mutation is not sent. The local void proceeds,
-  and the replacement lookup (a read) runs as today.
+- In Demo, an export to an Amazon connection, or to a Shopify connection whose store is
+  not a development store, is not sent. The `package_exports` row is marked skipped, or
+  succeeded with a "not sent in demo" note, so no retry picks it up and nothing shows as a
+  failed export.
+- In Demo, the Shopify fulfillment cancel mutation is not sent to a live store. The local
+  void proceeds, and the replacement lookup (a read) runs as today.
+- A development store gets both, as in production. A plan that cannot be read counts as
+  live, so the write is skipped.
 - A Database connection's export runs in Demo as before.
 - A Shopify Shipping purchase is not this issue's to block. It is a write, but `02`
   decides it: allowed on a development store, refused on a live one.
@@ -61,9 +64,11 @@ Other writes to a store that need the same guard:
 
 ## Acceptance
 
-- [ ] In Demo, shipping a Package on a Shopify order with a direct-carrier Label sends no
-      mutation to Shopify, and the export row neither fails nor retries
-- [ ] In Demo, voiding a Label on a Shopify order sends no `fulfillmentCancel`, and still
+- [ ] In Demo, shipping a Package on a live store's Shopify order with a direct-carrier
+      Label sends no mutation to Shopify, and the export row neither fails nor retries
+- [ ] In Demo, the same on a development store sends `fulfillmentCreate` as in production
+- [ ] In Demo, a store whose plan cannot be read is treated as live
+- [ ] In Demo, voiding a Label on a live store's order sends no `fulfillmentCancel`, and still
       re-points the Shipment onto its replacement fulfillment order when Shopify reports
       one
 - [ ] In Demo, `demo:reset`'s write-back still reaches the Database connection and skips a
