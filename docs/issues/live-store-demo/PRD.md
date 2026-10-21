@@ -21,7 +21,7 @@ store is different. Today a demo tenant connected to a live store would do real 
 to it.
 
 The goal: **demo picking, pack slips and labels on a prospect's live orders, with nothing
-written back to their store and no real postage bought.**
+written back to a live store and no real postage bought.**
 
 ## What would go wrong today
 
@@ -47,13 +47,18 @@ Amazon exports go to the sandbox host.
 
 ## Decisions
 
-1. **In Demo, PolyBag never writes to a Shopify or Amazon store,** with one exception: a
-   Shopify Shipping label on a development store (decision 2). It still reads: imports,
-   location sync, fulfillment status, and the replacement fulfillment order after a void.
-   A Database connection's write-back is not a store and is what `demo:reset` relies on,
-   so it is unaffected.
-2. **In Demo, Shopify Shipping is offered only on a development store,** decided from the
-   store's plan, read live.
+1. **In Demo, PolyBag never writes to a live Shopify or Amazon store.** A Shopify
+   development store is not live, and gets every write it would get in production:
+   fulfillments, fulfillment cancels, and Shopify Shipping labels. So a demo on our own
+   development store shows the whole round trip. Amazon has no development store, so in
+   Demo nothing is written to an Amazon store. Reads always run: imports, location sync,
+   fulfillment status, and the replacement fulfillment order after a void. A Database
+   connection's write-back is not a store and is what `demo:reset` relies on, so it is
+   unaffected. *(Changed 2026-10-21 from "never writes to any store, except a Shopify
+   Shipping label on a development store".)*
+2. **A Shopify store is a development store only when its plan says so,** read live and
+   cached briefly. A plan that cannot be read counts as live. One check decides exports,
+   fulfillment cancels and Shopify Shipping alike.
 3. **Connecting a live store in Demo is allowed.** Reading the prospect's orders is the
    point.
 
@@ -61,11 +66,14 @@ Amazon exports go to the sandbox host.
 
 | # | Issue | Status |
 |---|---|---|
-| [01](issues/01-demo-never-writes-back-to-a-store.md) | Demo never writes back to a Shopify or Amazon store | ready-for-agent |
-| [02](issues/02-demo-buys-shopify-shipping-only-on-a-development-store.md) | Demo buys Shopify Shipping only on a development store | ready-for-agent |
+| [01](issues/01-demo-never-writes-back-to-a-store.md) | Demo never writes back to a live Shopify or Amazon store | ready-for-agent |
+| [02](issues/02-demo-buys-shopify-shipping-only-on-a-development-store.md) | Demo buys Shopify Shipping only on a development store; the development-store check | ready-for-agent |
 | [03](issues/03-demo-reads-amazon-orders-from-production.md) | Demo reads Amazon orders from production, buys postage from the sandbox | needs-triage |
 | [04](issues/04-a-demo-tenant-holding-a-prospects-orders.md) | A demo tenant holding a prospect's orders | ready-for-human |
 | [05](issues/05-check-the-marketplace-data-terms-for-a-live-store-demo.md) | Check the marketplace data terms for a live-store demo | ready-for-human |
+
+`02` builds the development-store check that `01` also uses, so build `02` first, or
+build the check in whichever lands first.
 
 **Until `01`, `02` and `05` are done, do not connect a live store to a demo tenant.**
 `03` is needed only for Amazon. `04` must be in place before the first real demo.

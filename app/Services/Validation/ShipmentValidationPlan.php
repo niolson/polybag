@@ -4,6 +4,7 @@ namespace App\Services\Validation;
 
 use App\Contracts\AddressValidationInterface;
 use App\Contracts\AddressValidationPlan;
+use App\Enums\AppMode;
 use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -35,7 +36,7 @@ class ShipmentValidationPlan implements AddressValidationPlan
      */
     public function validatorsFor(Shipment $shipment): array
     {
-        if (config('app.fake_carriers') || SettingsService::isDemoMode()) {
+        if (config('app.fake_carriers') || AppMode::current() === AppMode::Demo) {
             return [new FakeAddressValidator];
         }
 

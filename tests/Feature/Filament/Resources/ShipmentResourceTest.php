@@ -7,7 +7,6 @@ use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
 use App\Models\Location;
-use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
@@ -107,7 +106,7 @@ it('filters shipments by status and deliverability tab groups together', functio
 });
 
 it('shows and filters shipment locations in multi-location mode', function (): void {
-    Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_location_enabled', true);
     app(SettingsService::class)->clearCache();
     $east = Location::factory()->create(['name' => 'East']);
     $west = Location::factory()->create(['name' => 'West']);

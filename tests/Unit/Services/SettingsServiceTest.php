@@ -185,49 +185,40 @@ it('reads sandbox_mode from DB in local environment', function (): void {
     expect(app(SettingsService::class)->get('sandbox_mode'))->toBeTrue();
 });
 
-it('forces suppress_printing to false in production', function (): void {
+it('forces sandbox_mode off for an unknown environment', function (): void {
+    Setting::create(['key' => 'sandbox_mode', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
+    app(SettingsService::class)->clearCache();
+
+    $this->app['env'] = 'staging';
+
+    expect(app(SettingsService::class)->get('sandbox_mode'))->toBeFalse();
+});
+
+it('forces suppress_printing off outside Dev', function (string $environment): void {
     Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
     app(SettingsService::class)->clearCache();
 
-    $this->app['env'] = 'production';
+    $this->app['env'] = $environment;
 
     expect(app(SettingsService::class)->get('suppress_printing'))->toBeFalse();
-});
+})->with(['production', 'demo', 'staging']);
 
-it('reads multi_client_enabled from config in non-local environments', function (): void {
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '0', 'type' => 'boolean', 'group' => 'dev']);
+it('reads suppress_printing from DB in Dev', function (): void {
+    Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
     app(SettingsService::class)->clearCache();
 
-    config(['features.multi_client_enabled' => true]);
-    $this->app['env'] = 'production';
-
-    expect(app(SettingsService::class)->get('multi_client_enabled'))->toBeTrue();
+    expect(app(SettingsService::class)->get('suppress_printing'))->toBeTrue();
 });
 
-it('reads multi_client_enabled from DB in local environment', function (): void {
-    config(['features.multi_client_enabled' => false]);
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
+it('reads multi-client and multi-location from config and ignores a settings row', function (string $environment, string $key): void {
+    Setting::create(['key' => $key, 'value' => '1', 'type' => 'boolean', 'group' => 'dev']);
     app(SettingsService::class)->clearCache();
+    $this->app['env'] = $environment;
 
-    expect(app(SettingsService::class)->get('multi_client_enabled'))->toBeTrue();
-});
+    config()->set("features.{$key}", false);
+    expect(app(SettingsService::class)->get($key))->toBeFalse();
 
-it('reads multi_location_enabled from config in non-local environments', function (): void {
-    Setting::create(['key' => 'multi_location_enabled', 'value' => '0', 'type' => 'boolean', 'group' => 'dev']);
-    app(SettingsService::class)->clearCache();
-
-    config(['features.multi_location_enabled' => true]);
-    $this->app['env'] = 'production';
-
-    expect(app(SettingsService::class)->get('multi_location_enabled'))->toBeTrue();
-});
-
-it('isDemoMode returns true when APP_ENV is demo', function (): void {
-    $this->app['env'] = 'demo';
-
-    expect(SettingsService::isDemoMode())->toBeTrue();
-});
-
-it('isDemoMode returns false when APP_ENV is not demo', function (): void {
-    expect(SettingsService::isDemoMode())->toBeFalse();
-});
+    config()->set("features.{$key}", true);
+    expect(app(SettingsService::class)->get($key))->toBeTrue();
+})->with(['production', 'demo', 'local', 'testing'])
+    ->with(['multi_client_enabled', 'multi_location_enabled']);

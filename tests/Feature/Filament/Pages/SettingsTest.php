@@ -614,7 +614,7 @@ it('enables Azure SSO without a listed tenant when AZURE_TENANT_ID names one', f
 });
 
 it('does not load client fields into settings form in multi-client mode', function (): void {
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     app(SettingsService::class)->clearCache();
 
     Client::factory()->create(['is_default' => true, 'company_name' => 'Should Not Load']);
@@ -624,7 +624,7 @@ it('does not load client fields into settings form in multi-client mode', functi
 });
 
 it('does not overwrite client fields when saving in multi-client mode', function (): void {
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     app(SettingsService::class)->clearCache();
 
     $client = Client::factory()->create([
@@ -719,7 +719,7 @@ it('syncs carrier locations when saving location in single-location mode', funct
 });
 
 it('does not overwrite location fields when saving in multi-location mode', function (): void {
-    Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_location_enabled', true);
     app(SettingsService::class)->clearCache();
 
     $location = Location::factory()->create([
@@ -742,7 +742,7 @@ it('groups the settings into tabs', function (): void {
 });
 
 it('hides the pack slips and picking tab when it would be empty', function (): void {
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     app(SettingsService::class)->clearCache();
 
     Livewire::test(Settings::class)

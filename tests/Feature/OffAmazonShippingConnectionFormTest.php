@@ -210,8 +210,8 @@ it('shows the check result on the form', function (): void {
 
 describe('assignments', function (): void {
     beforeEach(function (): void {
-        app(SettingsService::class)->set('multi_location_enabled', true, 'boolean');
-        app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+        config()->set('features.multi_location_enabled', true);
+        config()->set('features.multi_client_enabled', true);
         $this->undoRepeaterFake = Repeater::fake();
     });
 
@@ -299,7 +299,7 @@ describe('assignments', function (): void {
 });
 
 it('keeps a connection row when a Location is saved', function (): void {
-    app(SettingsService::class)->set('multi_location_enabled', true, 'boolean');
+    config()->set('features.multi_location_enabled', true);
     $location = Location::factory()->create();
     $connection = amazonConnection(['offers_off_amazon_shipping' => true]);
     $connectionScope = CarrierAccountScope::create(['data_source_id' => $connection->id, 'location_id' => $location->id]);
@@ -320,7 +320,7 @@ it('keeps a connection row when a Location is saved', function (): void {
 
 describe('a connection shared across clients', function (): void {
     it('keeps a blank client on create and gets the global assignment', function (): void {
-        app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
+        config()->set('features.multi_client_enabled', true);
         fakeAmazonAnswer(MockResponse::make(['payload' => ['rates' => []]], 200));
 
         Livewire::test(CreateDataSource::class)

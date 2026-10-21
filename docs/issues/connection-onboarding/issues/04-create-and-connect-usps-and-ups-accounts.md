@@ -18,8 +18,8 @@ create, the OAuth status reads "Save the account first, then connect via OAuth."
 
 ## Desired behavior
 
-When the broker is configured, the carrier is USPS or UPS, and no direct app credentials
-were filled (`usps_adv_client_id` / `ups_adv_client_id`):
+When the broker is configured, the mode is Production or Dev, the carrier is USPS or UPS,
+and no direct app credentials were filled (`usps_adv_client_id` / `ups_adv_client_id`):
 
 - The create form's OAuth status says the operator will be sent to the carrier to
   authorize, and brought back.
@@ -33,6 +33,10 @@ were filled (`usps_adv_client_id` / `ups_adv_client_id`):
 Without the broker, the status shows `brokerlessGuidance()`, as the edit page's tooltip
 does today.
 
+In Demo, create never redirects to OAuth: the broker's USPS and UPS credentials work
+against production only, and Demo forces sandbox. The account is saved with the sandbox
+developer app credentials `02` leaves visible there, and create goes to the edit page.
+
 ## Notes
 
 - `afterCreate()` assigns the global scope, or warns that another account holds it. The
@@ -45,5 +49,6 @@ does today.
 
 - [ ] With the broker configured, creating a USPS account redirects to the broker's
       `/oauth/usps/authorize` and stores `oauth_account_id.usps`; same for UPS
-- [ ] With direct credentials filled, or without the broker, create goes to the edit page
+- [ ] With direct credentials filled, without the broker, or in Demo, create goes to the
+      edit page
 - [ ] The no-global-scope warning is still shown to the operator after the round trip

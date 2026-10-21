@@ -31,15 +31,18 @@ apply to this install.**
 
 | | production | demo | dev |
 |---|---|---|---|
-| `APP_ENV` | `production` | `demo` | anything else (`local`, `testing`) |
+| `APP_ENV` | `production`, or any value not listed | `demo` | `local`, `testing` |
 | Carrier sandbox | always off | always on | Dev Settings toggle |
 | Dev Settings page | not reachable | not reachable | available |
 | Multi-client / multi-location | `.env` | `.env` | `.env` |
 | Shopify and Amazon connections, broker configured | OAuth only | OAuth only | every field |
-| Carrier app credentials, broker configured | hidden | hidden | shown |
+| Carrier app credentials, broker configured | hidden | FedEx hidden; USPS and UPS shown (their OAuth is production-only) | shown |
 | Anything, no broker configured | client credentials shown | client credentials shown | shown |
 | FedEx sandbox fields | hidden | shown | shown |
 | FedEx production fields | shown | hidden | shown |
+
+An unknown `APP_ENV`, such as `staging`, is Production, so a mistyped value fails closed.
+A staging install that should not buy real postage or write to stores runs as `demo`.
 
 Most of this already holds. `SettingsService::resolveSandboxMode()` forces sandbox off in
 production and on in demo, and `DevSettings::canAccess()` is limited to `local` and
@@ -69,8 +72,8 @@ against a real store is [`live-store-demo`](../live-store-demo/PRD.md).
 
 | # | Issue | Status |
 |---|---|---|
-| [01](issues/01-one-app-mode-decides-sandbox-and-dev-settings.md) | One `AppMode` decides sandbox and Dev Settings; multi-client and multi-location are `.env`-only | ready-for-agent |
-| [02](issues/02-show-only-the-credential-fields-this-install-can-use.md) | Show only the credential fields this install can use | ready-for-agent |
+| [01](issues/01-one-app-mode-decides-sandbox-and-dev-settings.md) | One `AppMode` decides sandbox and Dev Settings; multi-client and multi-location are `.env`-only | done |
+| [02](issues/02-show-only-the-credential-fields-this-install-can-use.md) | Show only the credential fields this install can use | done |
 | [03](issues/03-create-and-connect-shopify-and-amazon-connections.md) | Create and connect Shopify and Amazon connections | ready-for-agent |
 | [04](issues/04-create-and-connect-usps-and-ups-accounts.md) | Create and connect USPS and UPS accounts | ready-for-agent |
 | [05](issues/05-creating-a-fedex-account-opens-the-connect-wizard.md) | Creating a FedEx account opens the Connect FedEx wizard | ready-for-agent |

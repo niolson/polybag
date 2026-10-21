@@ -19,8 +19,8 @@ use Livewire\Livewire;
 beforeEach(function (): void {
     $this->actingAs(User::factory()->admin()->create());
     app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('multi_client_enabled', true, 'boolean');
-    app(SettingsService::class)->set('multi_location_enabled', true, 'boolean');
+    config()->set('features.multi_client_enabled', true);
+    config()->set('features.multi_location_enabled', true);
 
     Filament::setCurrentPanel('app');
     Filament::bootCurrentPanel();

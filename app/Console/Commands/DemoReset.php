@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\DataTransferObjects\Shipping\AddressData;
+use App\Enums\AppMode;
 use App\Enums\DutiesTerms;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
@@ -109,7 +110,7 @@ class DemoReset extends Command
 
     public function handle(): int
     {
-        if (! app()->environment('demo', 'local', 'testing')) {
+        if (AppMode::current() === AppMode::Production) {
             $this->error('demo:reset can only run when APP_ENV is demo, local, or testing.');
 
             return self::FAILURE;

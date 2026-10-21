@@ -1,5 +1,6 @@
 <?php
 
+use App\Exceptions\Carriers\CarrierUnavailableException;
 use App\Http\Integrations\Ups\UpsConnector;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -67,3 +68,15 @@ it('does not reuse a production token after switching to sandbox mode', function
     expect($authenticator->getAccessToken())->toBe('sandbox-token')
         ->and(Cache::get('ups_authenticator:'.$account->id)['access_token'])->toBe('production-token');
 });
+
+it('refuses an OAuth-connected account in sandbox mode', function (): void {
+    $account = CarrierAccount::factory()->create([
+        'carrier_id' => Carrier::factory()->ups(),
+        'name' => 'UPS Account',
+        'secret_credentials' => ['auth_mode' => 'authorization_code', 'oauth_token' => 'production-token'],
+    ]);
+
+    enableSandboxMode();
+
+    UpsConnector::getAuthenticatedConnector($account);
+})->throws(CarrierUnavailableException::class, 'UPS is not available in sandbox mode when connected via OAuth');

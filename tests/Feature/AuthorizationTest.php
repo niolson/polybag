@@ -39,7 +39,6 @@ use App\Models\CarrierAccountScope;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
-use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
@@ -329,7 +328,7 @@ describe('carrier accounts are Admin-only', function (): void {
 
 describe('assigning carrier accounts to a location', function (): void {
     beforeEach(function (): void {
-        Setting::create(['key' => 'multi_location_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+        config()->set('features.multi_location_enabled', true);
         app(SettingsService::class)->clearCache();
 
         $this->account = createUpsAccount();

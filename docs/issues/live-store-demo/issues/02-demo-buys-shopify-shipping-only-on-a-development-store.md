@@ -48,7 +48,9 @@ answer in Comments, in general terms: no store domain.
 
 - Production and Dev are unchanged.
 - Check the scopes the connection already holds are enough to read `shop.plan`.
-- This is independent of `01`. A live store's labels are blocked here, its exports there.
+- `01` uses the same check for exports and fulfillment cancels, so build it as its own
+  small service, not inside the purchase path. A live store's labels are blocked here,
+  its exports there.
 
 ## Acceptance
 

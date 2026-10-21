@@ -1,6 +1,6 @@
 # Show only the credential fields this install can use
 
-Status: ready-for-agent
+Status: done — 2026-10-21
 Category: enhancement
 Repo: `polybag`
 
@@ -31,7 +31,21 @@ fill one in and route around OAuth by accident.
 
 - Shopify: `settings.client_id`, `settings.client_secret`
 - Amazon: `settings.refresh_token`, `settings.client_id`, `settings.client_secret`
-- USPS, UPS, FedEx: the "Advanced / API App Credentials" section
+- FedEx: the "Advanced / API App Credentials" section
+
+**USPS and UPS, by mode, with the broker configured:**
+
+- Production hides the "Advanced / API App Credentials" section. The account signs in
+  through OAuth.
+- Demo shows that section and hides the OAuth connect action and status. The broker's
+  USPS and UPS OAuth issues production credentials only, and Demo forces sandbox, so an
+  account signed in that way cannot be used there. A demo account uses our sandbox
+  developer app's client ID and secret. *(Decided 2026-10-21.)*
+- Dev shows both.
+
+FedEx differs because its registration wizard runs against whichever environment is
+active, and the credentials it returns work only there. In Demo it registers against the
+sandbox, so its app credential fields can be hidden.
 
 **Sandbox and production FedEx fields, by mode:**
 
@@ -50,6 +64,8 @@ fill one in and route around OAuth by accident.
   the carrier, not the mode: something like
   `CarrierRegistry::connectsThroughBroker(string $carrierName): bool`, true today for
   USPS, UPS and FedEx. A future OnTrac returns false and keeps its fields in production.
+  Whether the broker path works in the active environment is a second question: true for
+  FedEx in both, production-only for USPS and UPS.
 
 A hidden field is not dehydrated, so a hidden secret that is already stored is kept, not
 cleared.
@@ -60,15 +76,21 @@ cleared.
   rule already lines up with when the field is hidden; keep it that way.
 - The Amazon refresh-token helper text ("Otherwise save the connection and use Connect
   Amazon.") changes with `03`.
-- **Check before hiding in Demo:** confirm the broker serves sandbox credentials for USPS
-  and UPS OAuth, and the FedEx registration proxy for the sandbox. If one does not, its
-  app credential section must stay visible in Demo.
+- **Checked 2026-10-21:** USPS and UPS OAuth credentials work against production only;
+  FedEx's registration wizard works against either, and its credentials only against the
+  one it registered with.
+- `USPSConnector::getAuthenticatedConnector()` already refuses an OAuth-connected account
+  in sandbox with a clear message. `UpsConnector` has no such guard and would send a
+  production token to the CIE host. Add the same guard here.
 - No live tenants, so a production record that already holds direct credentials needs no
   migration. Its stored secrets keep working while hidden.
 
 ## Acceptance
 
-- [ ] Feature tests per mode × broker configured / not, for each field group above
-- [ ] A carrier the registry says has no broker path shows its client credentials in
+- [x] Feature tests per mode × broker configured / not, for each field group above
+- [x] In Demo with a broker configured, USPS and UPS show their app credentials and no
+      OAuth connect action; FedEx hides its app credentials
+- [x] A UPS account connected through OAuth is refused in sandbox with a clear message
+- [x] A carrier the registry says has no broker path shows its client credentials in
       Production with a broker configured
-- [ ] Saving an edit form with a hidden secret field keeps the stored secret
+- [x] Saving an edit form with a hidden secret field keeps the stored secret

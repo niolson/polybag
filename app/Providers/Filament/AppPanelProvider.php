@@ -2,6 +2,7 @@
 
 namespace App\Providers\Filament;
 
+use App\Enums\AppMode;
 use App\Filament\Auth\EmailAuthenticationForEmailUsers;
 use App\Filament\AvatarProviders\LocalAvatarProvider;
 use App\Filament\GlobalSearch\ScanCodeGlobalSearchProvider;
@@ -112,7 +113,7 @@ class AppPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::TOPBAR_LOGO_AFTER,
                 fn (): string => match (true) {
-                    SettingsService::isDemoMode() => '<span class="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-full">(demo mode)</span>',
+                    AppMode::current() === AppMode::Demo => '<span class="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-full">(demo mode)</span>',
                     app(SettingsService::class)->get('sandbox_mode', false) => '<span class="text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-950 px-2 py-0.5 rounded-full">(sandbox mode)</span>',
                     default => '',
                 },

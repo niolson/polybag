@@ -691,7 +691,7 @@ it('shows client name when multi_client_enabled is true', function (): void {
     $client = Client::factory()->create(['name' => 'Acme Corp']);
     $shipment = Shipment::factory()->create(['client_id' => $client->id]);
 
-    Setting::create(['key' => 'multi_client_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    config()->set('features.multi_client_enabled', true);
     app(SettingsService::class)->clearCache();
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
