@@ -279,15 +279,20 @@ Amazon Buy Shipping uses the same seller account and additionally requires acces
 Shipping v2 operations for rates, purchase, tracking, and cancellation. Eligible offers
 appear only on Packages belonging to Shipments imported from that Amazon source. Amazon's
 service catalog is discovered from live rate responses rather than maintained as a fixed
-list: an operator may select a new service manually, but unattended flows require an
-administrator to map it under **Integrations → Map Carrier Services** and approve it for
-the Client. Sandbox and production approvals are intentionally separate.
+list. A packer may select any offered service. Automation buys only what the shipping
+method allows: add an **Amazon** row under the method's **Postage Sources**, then either
+map discovered services to catalog services the method lists, under **Integrations → Map
+Amazon Services**, or allow the row any service. The Connection's postage setting must
+also permit automation.
 
-That is the on-Amazon (`channelType: AMAZON`) workflow. Although Shipping v2 also accepts
-off-Amazon orders (`channelType: EXTERNAL`) and can sell Amazon Shipping labels for them,
-PolyBag does not implement that workflow yet. Connecting an Amazon account and completing
-Amazon Shipping onboarding therefore does not currently make Amazon Shipping appear for
-Shopify, database-imported, manual, or other non-Amazon Shipments.
+That is the on-Amazon (`channelType: AMAZON`) workflow. The same Connection can also sell
+Amazon Shipping to Shipments from Shopify, database imports, Manual Ship, and other
+channels (`channelType: EXTERNAL`). Complete Amazon Shipping onboarding in Seller Central,
+then turn on **Offer Amazon Shipping for orders from other channels** on the Connection
+and add **Assignments** choosing the Locations and Clients it sells for. List Amazon
+Shipping Ground on a shipping method to offer it. These rates are treated like any direct
+carrier's, while purchase, tracking, and voids go through the Connection. This path has
+been verified against the Amazon sandbox only.
 
 ## Barcode scanners
 
