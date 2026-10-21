@@ -2,6 +2,7 @@
 
 namespace App\Services\ShipmentImport;
 
+use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Enums\PackageExportStatus;
 use App\Enums\PackageStatus;
@@ -14,8 +15,10 @@ use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\ShopifyAdapter;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Carbon\CarbonInterface;
+use Closure;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -30,6 +33,71 @@ class PackageExportService
     private const int ScheduledFreshPackageLookbackHours = 24;
 
     /**
+     * The values an export can send, and so the parameters a Database export
+     * query may name.
+     *
+     * @var list<string>
+     */
+    public const array ExportValues = [
+        'tracking_number',
+        'weight',
+        'height',
+        'width',
+        'length',
+        'cost',
+        'carrier',
+        'service',
+        'shipment_reference',
+        'fulfillment_order_id',
+        'amazon_order_id',
+    ];
+
+    /**
+     * The Database drivers of the batch in progress, by connection; null outside one.
+     *
+     * @var array<int, DataSourceInterface>|null
+     */
+    private ?array $databaseDrivers = null;
+
+    /**
+     * Run exports as one batch, sharing one driver per Database connection.
+     *
+     * A tunnelled connection then opens one SSH tunnel for the whole batch
+     * rather than one per Package, and every tunnel is closed when the batch
+     * ends, however it ends. A batch inside a batch joins the outer one.
+     *
+     * @template TResult
+     *
+     * @param  Closure(): TResult  $export
+     * @return TResult
+     */
+    public function batch(Closure $export): mixed
+    {
+        if ($this->databaseDrivers !== null) {
+            return $export();
+        }
+
+        $this->databaseDrivers = [];
+
+        try {
+            return $export();
+        } finally {
+            $this->closeDatabaseDrivers();
+        }
+    }
+
+    private function closeDatabaseDrivers(): void
+    {
+        foreach ($this->databaseDrivers ?? [] as $driver) {
+            if ($driver instanceof DatabaseSource) {
+                $driver->closeTunnel();
+            }
+        }
+
+        $this->databaseDrivers = null;
+    }
+
+    /**
      * Export a shipped package's data to all configured destinations:
      *  1. The shipment's originating data source, when its export is enabled.
      *  2. Every active data source with global_export and export enabled (fan-out; deduped against #1).
@@ -37,6 +105,11 @@ class PackageExportService
      *     hidden in the UI and exports are strictly source-scoped.
      */
     public function exportPackage(Package $package): ExportResult
+    {
+        return $this->batch(fn (): ExportResult => $this->exportToDestinations($package));
+    }
+
+    private function exportToDestinations(Package $package): ExportResult
     {
         if ($package->exported) {
             return new ExportResult(success: true);
@@ -83,23 +156,25 @@ class PackageExportService
                 }
 
                 $attempted++;
-                $driver = app(DataSourceFactory::class)->make($source);
+                $driver = $this->driverFor($source);
 
                 if (! $driver instanceof ExportDestinationInterface) {
                     throw new PermanentExportException('Driver does not support package exports.');
                 }
 
-                $fieldMapping = $source->settings['export_field_mapping'] ?? [
-                    'tracking_number' => 'tracking_number',
-                    'carrier' => 'carrier',
-                    'service' => 'service',
-                    'weight' => 'weight',
-                    'shipment_reference' => 'shipment_reference',
-                    'fulfillment_order_id' => 'fulfillment_order_id',
-                    'amazon_order_id' => 'amazon_order_id',
-                ];
-
-                $data = $this->buildExportData($package, $fieldMapping);
+                // A Database query binds what it names, from every value under
+                // its own name; it renames with a column alias, not a mapping.
+                $data = $source->source_type === DatabaseSource::class
+                    ? $this->availableExportData($package)
+                    : $this->buildExportData($package, $source->settings['export_field_mapping'] ?? [
+                        'tracking_number' => 'tracking_number',
+                        'carrier' => 'carrier',
+                        'service' => 'service',
+                        'weight' => 'weight',
+                        'shipment_reference' => 'shipment_reference',
+                        'fulfillment_order_id' => 'fulfillment_order_id',
+                        'amazon_order_id' => 'amazon_order_id',
+                    ]);
 
                 if ($source->source_type === ShopifySource::class) {
                     $data['_package_reference_id'] = (string) $package->getKey();
@@ -216,13 +291,28 @@ class PackageExportService
             ->orderByDesc('id')
             ->get();
 
-        $results = [];
+        return $this->batch(function () use ($packages): array {
+            $results = [];
 
-        foreach ($packages as $package) {
-            $results[$package->id] = $this->exportPackage($package);
+            foreach ($packages as $package) {
+                $results[$package->id] = $this->exportPackage($package);
+            }
+
+            return $results;
+        });
+    }
+
+    /**
+     * A Database connection's driver is kept for the batch, for its tunnel.
+     * Every other driver is built per export, as it always has been.
+     */
+    private function driverFor(DataSource $source): DataSourceInterface
+    {
+        if ($source->source_type !== DatabaseSource::class || $this->databaseDrivers === null) {
+            return app(DataSourceFactory::class)->make($source);
         }
 
-        return $results;
+        return $this->databaseDrivers[$source->id] ??= app(DataSourceFactory::class)->make($source);
     }
 
     /** @return Collection<int, Package> */
@@ -435,11 +525,31 @@ class PackageExportService
     /**
      * Build the export data array from a package using the configured field mapping.
      *
+     * @param  array<string, string>  $fieldMapping
      * @return array<string, mixed>
      */
     private function buildExportData(Package $package, array $fieldMapping): array
     {
-        $available = [
+        $available = $this->availableExportData($package);
+        $mapped = [];
+
+        foreach ($fieldMapping as $internalName => $parameterName) {
+            if (array_key_exists($internalName, $available)) {
+                $mapped[$parameterName] = $available[$internalName];
+            }
+        }
+
+        return $mapped;
+    }
+
+    /**
+     * Every value an export can send, keyed by {@see self::ExportValues}.
+     *
+     * @return array<string, mixed>
+     */
+    private function availableExportData(Package $package): array
+    {
+        return [
             'tracking_number' => $package->tracking_number,
             'weight' => $package->weight,
             'height' => $package->height,
@@ -456,16 +566,6 @@ class PackageExportService
                 ?? null,
             'amazon_order_id' => $package->shipment?->metadata['amazon_order_id'] ?? null,
         ];
-
-        $mapped = [];
-
-        foreach ($fieldMapping as $internalName => $parameterName) {
-            if (array_key_exists($internalName, $available)) {
-                $mapped[$parameterName] = $available[$internalName];
-            }
-        }
-
-        return $mapped;
     }
 
     /**

@@ -2,7 +2,7 @@
 
 # Count a Shopify `auto` label when its carrier's day was never ended
 
-Status: needs-triage
+Status: done
 Category: bug
 Created: 2026-10-02
 
@@ -10,7 +10,7 @@ Repo: `polybag`
 
 ## Parent
 
-Left open by [`carrier-catalog-reset/08`](../../archive/carrier-catalog-reset/issues/08-date-by-expected-carrier-and-end-of-day.md),
+Left open by [`carrier-catalog-reset/08`](../../carrier-catalog-reset/issues/08-date-by-expected-carrier-and-end-of-day.md),
 whose last review comment names the gap. ADR-0006 decision 9: a label is dated by the
 carrier expected to carry it, and End of Day ends one day per carrier across every source.
 
@@ -67,3 +67,15 @@ the carrier the offer names, so their dates always come from their carrier of re
 
 - **2026-10-02** — Filed when `carrier-catalog-reset` was archived, so the gap recorded in
   its `08` is not lost in a closed directory.
+
+- **2026-10-21** — **done**, taking the first option. `ShipDateService::currentBatchStartedAt()`
+  replaces `lastEndOfDayForCurrentBatch()` and always returns a moment. It is the
+  carrier's last End of Day when that ended the current batch (on or after the pickup day
+  before the current ship date), as before. Otherwise it is that previous pickup day's
+  cutoff, or the midnight after it for a carrier with no cutoff: the point where the
+  previous batch closed with nobody ending it. Test 2 on End of Day now always has a start
+  to measure from. The start is never earlier than the last pickup, so a stale End of Day
+  still counts nothing old, and the ship-date test still covers weekend and after-cutoff
+  labels. The manifest count is unchanged. New cases in `ShipDateByExpectedCarrierTest`:
+  the 4 PM UPS / 8 PM USPS example with UPS never ended, and UPS picking up only Tuesday
+  and Thursday.

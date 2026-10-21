@@ -703,14 +703,11 @@ class DataSourceForm
                         ->nullable()
                         ->rows(3)
                         ->rule(RawSqlGuard::rule(RawSqlGuard::EXPORT, 'Export Query'))
-                        // Every key PackageExportService's default
-                        // export_field_mapping supplies, and only those. A
-                        // parameter outside that set is never bound, and PDO then
-                        // rejects the statement with HY093 — so listing one here
-                        // breaks live exports. The last two are null unless the
-                        // package came from a Shopify/Amazon source, which a
-                        // global export destination does receive.
-                        ->helperText('Available parameters: :tracking_number, :carrier, :service, :weight, :shipment_reference, :fulfillment_order_id (Shopify), :amazon_order_id. ⚠️ Runs automatically for every shipped package against the configured database — must be a single INSERT or UPDATE statement.')
+                        ->rule(DatabaseSource::exportQueryParametersRule())
+                        // PackageExportService::ExportValues. The last two are
+                        // null unless the package came from a Shopify/Amazon
+                        // source, which a global export destination does receive.
+                        ->helperText('Available parameters: :tracking_number, :carrier, :service, :weight, :height, :width, :length, :cost, :shipment_reference, :fulfillment_order_id (Shopify), :amazon_order_id. ⚠️ Runs automatically for every shipped package against the configured database — must be a single INSERT or UPDATE statement.')
                         ->dehydrateStateUsing(fn (?string $state): ?string => $state ? str_replace("\u{00A0}", ' ', $state) : $state)
                         ->columnSpanFull()
                         ->visible(fn (Get $get): bool => (bool) $get('settings.export_enabled')),

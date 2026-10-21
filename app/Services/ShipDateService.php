@@ -166,35 +166,42 @@ class ShipDateService
     }
 
     /**
-     * The carrier's last End of Day at a location, if it ended the batch now
-     * waiting: on or after the pickup day before the current ship date.
+     * When the batch now waiting for a carrier's pickup at a location began.
      *
      * End of Day counts a label under its carrier if its ship date is the
      * carrier's current one, or it was bought after this moment. The second
      * test catches a label whose date came from another carrier's policy, as
      * a Shopify `auto` label dated by the connection's carrier does, when
-     * this carrier's day has already moved on. An End of Day older than the
-     * last pickup ended some earlier batch, not this one, so it is ignored
-     * rather than letting everything since then count. Null when the day has
-     * never been ended there, which leaves the ship date alone to decide.
+     * this carrier's day has already moved on.
+     *
+     * The carrier's last End of Day, if it ended this batch: on or after the
+     * pickup day before the current ship date. Otherwise that pickup day's
+     * cutoff, or the midnight after it for a carrier with no cutoff, which is
+     * when the previous batch closed without anyone ending it. Either way
+     * the batch starts no earlier than the last pickup, so an End of Day from
+     * weeks ago cannot count everything bought since.
      */
-    public function lastEndOfDayForCurrentBatch(Carrier $carrier, ?int $locationId = null): ?CarbonImmutable
+    public function currentBatchStartedAt(Carrier $carrier, ?int $locationId = null): CarbonImmutable
     {
         $pivot = $this->getPivot($carrier, $locationId);
-
-        if (! $pivot?->last_end_of_day_at) {
-            return null;
-        }
-
         $location = $this->resolveLocation($locationId);
         $tz = $location !== null ? $location->timezone : 'America/New_York';
-        $lastEndOfDay = CarbonImmutable::parse($pivot->last_end_of_day_at);
         $previousPickupDay = $this->getPreviousPickupDay(
             $this->pickupDaysFor($pivot),
             $this->getShipDate($carrier, $locationId),
         );
 
-        return $lastEndOfDay->tz($tz)->startOfDay()->gte($previousPickupDay) ? $lastEndOfDay : null;
+        if ($pivot?->last_end_of_day_at) {
+            $lastEndOfDay = CarbonImmutable::parse($pivot->last_end_of_day_at);
+
+            if ($lastEndOfDay->tz($tz)->startOfDay()->gte($previousPickupDay)) {
+                return $lastEndOfDay;
+            }
+        }
+
+        return $carrier->pickup_cutoff_hour !== null
+            ? $previousPickupDay->setTime($carrier->pickup_cutoff_hour, 0)
+            : $previousPickupDay->addDay();
     }
 
     /**
