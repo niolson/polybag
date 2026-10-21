@@ -273,6 +273,8 @@ describe('admin role access', function (): void {
     });
 
     it('can access observed services mapping page', function (): void {
+        app(SettingsService::class)->set('amazon_features_enabled', true, 'boolean');
+
         Livewire::test(UnmappedObservedServices::class)->assertSuccessful();
     });
 

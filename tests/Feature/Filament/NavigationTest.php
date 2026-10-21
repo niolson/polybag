@@ -54,7 +54,7 @@ it('groups the sidebar by task, daily work first', function (): void {
         'Reports' => ['Rate Comparison', 'Volume', 'Packages by User', 'Client Billing', 'Prepaid Duties', 'Packing Validation'],
         'Shipping Setup' => ['Shipping Methods', 'Box Sizes', 'Products'],
         'Carriers' => ['Carrier Accounts', 'Carriers', 'Carrier Services', 'Special Services'],
-        'Integrations' => ['Connections', 'Channels', 'Map Shipping Refs', 'Map Channel Refs', 'Map Amazon Services'],
+        'Integrations' => ['Connections', 'Channels', 'Map Shipping Refs', 'Map Channel Refs'],
         'Admin' => ['Users', 'Locations', 'Clients', 'App Settings', 'Audit Log', 'Dev Settings'],
     ]);
 });

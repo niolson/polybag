@@ -94,6 +94,7 @@ class Settings extends Page
             'pack_slip_logo' => $settings->get('pack_slip_logo'),
             'packing_validation_enabled' => $settings->get('packing_validation_enabled', true),
             'scan_to_add_enabled' => $settings->get('scan_to_add_enabled', false),
+            'amazon_features_enabled' => $settings->amazonFeaturesEnabled(),
             'transparency_enabled' => $settings->get('transparency_enabled', true),
             'batch_shipping_enabled' => $settings->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => $settings->get('manual_shipping_enabled', true),
@@ -253,10 +254,19 @@ class Settings extends Page
                                                 ->helperText(self::REQUIRE_PICKING_HELP)
                                                 ->default(false)
                                                 ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
+                                            Toggle::make('amazon_features_enabled')
+                                                ->label('Amazon Features')
+                                                ->helperText(fn (): string => DataSource::hasActiveAmazonConnection()
+                                                    ? 'On automatically while an Amazon connection is active.'
+                                                    : 'Shows Amazon-specific screens and columns: Map Amazon Services, the Amazon column on Shipments, and the Amazon Program shipping rule condition. Turn this on if Amazon orders reach PolyBag through a Database connection. It turns on by itself while an Amazon connection is active.')
+                                                ->default(false)
+                                                ->disabled(fn (): bool => DataSource::hasActiveAmazonConnection())
+                                                ->live(),
                                             Toggle::make('transparency_enabled')
                                                 ->label('Amazon Transparency Program')
                                                 ->helperText('When enabled, shipment items requiring transparency codes will prompt for code scanning during packing.')
-                                                ->default(false),
+                                                ->default(false)
+                                                ->visible(fn (Get $get): bool => (bool) $get('amazon_features_enabled')),
                                         ])
                                         ->columns(1),
                                 ]),
@@ -711,7 +721,12 @@ class Settings extends Page
             'pack_slip_logo' => $data['pack_slip_logo'] ?? null,
             'packing_validation_enabled' => $data['packing_validation_enabled'] ?? true,
             'scan_to_add_enabled' => (bool) ($data['scan_to_add_enabled'] ?? false),
-            'transparency_enabled' => $data['transparency_enabled'] ?? true,
+            // Only the stored value is kept while the toggle is locked on by a connection,
+            // so the computed state is never written back; a hidden toggle submits nothing.
+            'amazon_features_enabled' => DataSource::hasActiveAmazonConnection()
+                ? (bool) app(SettingsService::class)->get('amazon_features_enabled', false)
+                : (bool) ($data['amazon_features_enabled'] ?? false),
+            'transparency_enabled' => $data['transparency_enabled'] ?? app(SettingsService::class)->get('transparency_enabled', true),
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
             'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),

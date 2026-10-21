@@ -539,6 +539,8 @@ class ShippingRulesRelationManager extends RelationManager
                 return self::summarizeAmazonProgram($state) ?? 'Amazon Program';
             })
             ->icon('heroicon-o-star')
+            // Out of the picker, not removed: a rule that already has this condition keeps it.
+            ->maxItems(fn (): ?int => app(SettingsService::class)->amazonFeaturesEnabled() ? null : 0)
             ->schema([
                 Forms\Components\Select::make('program')
                     ->label('Amazon order is')
