@@ -30,6 +30,19 @@ FROM php:8.4.27-fpm@sha256:64aff665308e23ba8804a6c43f75837e9bcdcc31735fc0f74af88
 # security-tracker fixes published after the last build) actually land.
 ARG APT_CACHE_BUST=1
 
+# PIE installs PHP extensions from Packagist and GitHub; PECL is deprecated.
+# Pinned to a release with a hardcoded checksum — update both together from
+# the `digest` of pie.phar on https://github.com/php/pie/releases
+ARG PIE_VERSION=1.5.2
+ARG PIE_SHA256=fe70c59738cf56ec00a818cf9cb9593da171aac86f5f1f859995b8839dfd2cc7
+RUN set -eux; \
+    curl -fsSL -o /usr/local/bin/pie \
+        "https://github.com/php/pie/releases/download/${PIE_VERSION}/pie.phar"; \
+    echo "${PIE_SHA256}  /usr/local/bin/pie" > /tmp/pie.sha256; \
+    sha256sum -c /tmp/pie.sha256; \
+    rm /tmp/pie.sha256; \
+    chmod +x /usr/local/bin/pie
+
 # Install system dependencies
 RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-recommends \
     curl \
@@ -53,8 +66,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
         bcmath \
         pcntl \
         sockets \
-    && pecl install redis \
-    && docker-php-ext-enable redis \
+    && pie install phpredis/phpredis:6.3.0 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -79,8 +91,8 @@ RUN set -eux; \
     sha256sum -c /tmp/msodbcsql18.sha256; \
     ACCEPT_EULA=Y DEBIAN_FRONTEND=noninteractive dpkg -i /tmp/msodbcsql18.deb; \
     rm /tmp/msodbcsql18.deb /tmp/msodbcsql18.sha256; \
-    pecl install pdo_sqlsrv-5.13.3; \
-    docker-php-ext-enable pdo_sqlsrv
+    pie install microsoft/pdo_sqlsrv:5.13.3; \
+    rm /usr/local/bin/pie
 
 WORKDIR /var/www/html
 
