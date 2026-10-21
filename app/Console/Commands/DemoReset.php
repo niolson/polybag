@@ -846,37 +846,41 @@ class DemoReset extends Command
             ->where('exported', false)
             ->orderBy('id');
 
-        $succeeded = 0;
-        $consecutiveFailures = 0;
-
         $bar = $this->output->createProgressBar((clone $packages)->count());
 
-        foreach ($packages->cursor() as $package) {
-            $result = $exportService->exportPackage($package);
+        // One batch, so a tunnelled import database opens one SSH tunnel for
+        // every Package rather than one each.
+        return $exportService->batch(function () use ($exportService, $packages, $bar): int {
+            $succeeded = 0;
+            $consecutiveFailures = 0;
 
-            if ($result->success && $result->destinationsSucceeded > 0) {
-                $succeeded++;
-                $consecutiveFailures = 0;
-            } elseif ($result->deferred) {
-                $consecutiveFailures = 0;
-            } elseif (! $result->success) {
-                if (++$consecutiveFailures >= 10) {
-                    $bar->finish();
-                    $this->newLine();
-                    $this->warn('Aborting export write-back after 10 consecutive failures; last error: '.implode('; ', $result->errors));
-                    $this->warn('Fix the export configuration and re-run, or drop --full-export.');
+            foreach ($packages->cursor() as $package) {
+                $result = $exportService->exportPackage($package);
 
-                    return $succeeded;
+                if ($result->success && $result->destinationsSucceeded > 0) {
+                    $succeeded++;
+                    $consecutiveFailures = 0;
+                } elseif ($result->deferred) {
+                    $consecutiveFailures = 0;
+                } elseif (! $result->success) {
+                    if (++$consecutiveFailures >= 10) {
+                        $bar->finish();
+                        $this->newLine();
+                        $this->warn('Aborting export write-back after 10 consecutive failures; last error: '.implode('; ', $result->errors));
+                        $this->warn('Fix the export configuration and re-run, or drop --full-export.');
+
+                        return $succeeded;
+                    }
                 }
+
+                $bar->advance();
             }
 
-            $bar->advance();
-        }
+            $bar->finish();
+            $this->newLine();
 
-        $bar->finish();
-        $this->newLine();
-
-        return $succeeded;
+            return $succeeded;
+        });
     }
 
     private function pickCarrier(): string

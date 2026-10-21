@@ -99,17 +99,6 @@ class DataSourceFactory
             'export' => [
                 'enabled' => (bool) ($settings['export_enabled'] ?? false),
                 'query' => $settings['export_query'] ?? null,
-                'field_mapping' => [
-                    'tracking_number' => 'tracking_number',
-                    'weight' => 'weight',
-                    'height' => 'height',
-                    'width' => 'width',
-                    'length' => 'length',
-                    'cost' => 'cost',
-                    'carrier' => 'carrier',
-                    'service' => 'service',
-                    'shipment_reference' => 'shipment_reference',
-                ],
             ],
             'ssh' => [
                 'enabled' => (bool) ($settings['ssh_enabled'] ?? false),

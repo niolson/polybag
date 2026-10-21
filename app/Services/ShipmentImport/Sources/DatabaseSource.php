@@ -13,13 +13,17 @@ use App\Models\AuditLog;
 use App\Models\DataSource;
 use App\Services\ShipmentImport\DatabaseClosedRecordCloser;
 use App\Services\ShipmentImport\FieldMapper;
+use App\Services\ShipmentImport\PackageExportService;
 use App\Services\ShipmentImport\RawSqlGuard;
 use App\Services\SshTunnel;
+use Closure;
+use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use Throwable;
 
 class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
 {
@@ -28,6 +32,9 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
     private FieldMapper $fieldMapper;
 
     private ?SshTunnel $tunnel = null;
+
+    /** Why the tunnel would not open, so a batch does not retry it per record. */
+    private ?Throwable $tunnelFailure = null;
 
     /** Status query executions this run, for its one audit entry. */
     private int $statusLookups = 0;
@@ -193,7 +200,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
 
         try {
             $rows = DB::connection($this->config['connection'])->select($query, ['shipment_reference' => $sourceRecordId]);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->failedStatusLookups++;
 
             throw $e;
@@ -254,7 +261,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
 
         try {
             $shipments = $this->previewShipmentRows($limit);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $errors['Shipments query'] = $e->getMessage();
         }
 
@@ -271,7 +278,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
 
                 try {
                     $items = $this->previewItemRows($reference, $limit);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $errors['Items query'] = $e->getMessage();
                 }
             }
@@ -281,7 +288,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
 
                 try {
                     $statusRows = $this->previewStatusRows($reference, $limit);
-                } catch (\Throwable $e) {
+                } catch (Throwable $e) {
                     $errors['Status query'] = $e->getMessage();
                 }
             }
@@ -534,11 +541,24 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         $query = $this->normalizeQuery($exportConfig['query']);
         RawSqlGuard::assertStatementType($query, RawSqlGuard::EXPORT, 'export query');
 
-        // Only pass parameters that the query actually references,
-        // so the field_mapping can be a superset of what the query needs.
-        preg_match_all('/:(\w+)/', $query, $matches);
-        $queryParams = array_flip($matches[1]);
+        // Bind only what the query names, so the export can supply more than
+        // any one query needs. A name it cannot supply is refused here, by
+        // name, rather than left for PDO to reject as HY093.
+        $queryParams = array_flip(self::namedParameters($query));
+        $unsupplied = array_keys(array_diff_key($queryParams, $data));
+
+        if ($unsupplied !== []) {
+            throw new PermanentExportException(
+                'Export query names '.implode(', ', array_map(fn (string $name): string => ':'.$name, $unsupplied))
+                .', which the export does not supply.'
+            );
+        }
+
         $filteredData = array_intersect_key($data, $queryParams);
+
+        // Held open for this driver's life, so a batch sharing one driver
+        // shares one tunnel. See PackageExportService::batch().
+        $this->openTunnelIfConfigured();
 
         // Log the bound parameter keys only — values may contain shipment PII.
         $this->executeLogged(
@@ -551,6 +571,50 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         );
 
         return null;
+    }
+
+    /**
+     * The named parameters a query binds, in order of first use.
+     *
+     * Quoted text and comments are skipped, and so is a `::` cast, the way PDO
+     * skips them, so `'12:30'` or Postgres's `created_at::date` names nothing.
+     *
+     * @return list<string>
+     */
+    public static function namedParameters(string $query): array
+    {
+        $code = preg_replace(
+            "/'(?:[^'\\\\]|\\\\.|'')*'|\"(?:[^\"\\\\]|\\\\.|\"\")*\"|`[^`]*`|--[^\\n]*|\\/\\*.*?\\*\\//s",
+            ' ',
+            $query,
+        ) ?? $query;
+
+        preg_match_all('/(?<!:):(\w+)/', $code, $matches);
+
+        return array_values(array_unique($matches[1]));
+    }
+
+    /**
+     * Refuse an export query that names a parameter the export cannot supply.
+     */
+    public static function exportQueryParametersRule(): ValidationRule
+    {
+        return new class implements ValidationRule
+        {
+            public function validate(string $attribute, mixed $value, Closure $fail): void
+            {
+                if (! is_string($value)) {
+                    return;
+                }
+
+                $unsupplied = array_diff(DatabaseSource::namedParameters($value), PackageExportService::ExportValues);
+
+                if ($unsupplied !== []) {
+                    $fail('Export Query names '.implode(', ', array_map(fn (string $name): string => ':'.$name, $unsupplied))
+                        .', which the export does not supply.');
+                }
+            }
+        };
     }
 
     public function validateExportConfiguration(): void
@@ -607,7 +671,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
     {
         try {
             $result = $run();
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             $this->logQueryExecution($operation, $query, $parameterKeys, 'failed', $extra);
             throw $e;
         }
@@ -678,7 +742,7 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
                     'parameters' => $parameterKeys,
                 ], $extra),
             );
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             // Audit logging must never break an import/export run.
             logger()->warning('Failed to record DataSource query audit log', [
                 'operation' => $operation,
@@ -705,6 +769,10 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
             return;
         }
 
+        if ($this->tunnelFailure !== null) {
+            throw $this->tunnelFailure;
+        }
+
         $sshConfig = $this->config['ssh'] ?? [];
 
         if (empty($sshConfig['enabled'])) {
@@ -720,18 +788,26 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         $connection = $this->config['connection'];
         $dbConfig = config("database.connections.{$connection}");
 
-        $this->tunnel = SshTunnel::fromConfig([
-            'ssh_host' => $sshConfig['host'],
-            'ssh_port' => (int) ($sshConfig['port'] ?? 22),
-            'ssh_user' => $sshConfig['user'],
-            'ssh_key' => $sshConfig['key'],
-            'remote_host' => $sshConfig['remote_host'] ?? $dbConfig['host'],
-            'remote_port' => (int) ($sshConfig['remote_port'] ?? $dbConfig['port']),
-            'known_hosts_entry' => $sshConfig['host_key'],
-            'known_hosts_file' => $sshConfig['known_hosts_file'] ?? storage_path('app/private/ssh/import_known_hosts'),
+        $tunnel = app()->make(SshTunnel::class, [
+            'sshHost' => $sshConfig['host'],
+            'sshPort' => (int) ($sshConfig['port'] ?? 22),
+            'sshUser' => $sshConfig['user'],
+            'sshKey' => $sshConfig['key'],
+            'remoteHost' => $sshConfig['remote_host'] ?? $dbConfig['host'],
+            'remotePort' => (int) ($sshConfig['remote_port'] ?? $dbConfig['port']),
+            'knownHostsEntry' => $sshConfig['host_key'],
+            'knownHostsFile' => $sshConfig['known_hosts_file'] ?? storage_path('app/private/ssh/import_known_hosts'),
         ]);
 
-        $localPort = $this->tunnel->open();
+        try {
+            $localPort = $tunnel->open();
+        } catch (Throwable $e) {
+            $this->tunnelFailure = $e;
+
+            throw $e;
+        }
+
+        $this->tunnel = $tunnel;
 
         // Point the DB connection through the tunnel
         config([

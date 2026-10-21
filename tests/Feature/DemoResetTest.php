@@ -338,6 +338,7 @@ it('does not abort demo write-back when package exports are deferred', function 
     }
 
     $exportService = Mockery::mock(PackageExportService::class);
+    $exportService->shouldReceive('batch')->andReturnUsing(fn (Closure $export): mixed => $export());
     $exportService->shouldReceive('exportPackage')
         ->andReturn(new ExportResult(success: false, deferred: true));
     app()->instance(PackageExportService::class, $exportService);

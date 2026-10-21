@@ -109,8 +109,11 @@ restrict,port-forwarding,permitopen="erp-db.internal:1433" ssh-ed25519 AAAA... p
 That `permitopen` is worth adding. It means a compromised PolyBag can forward to the
 database and nothing else on that network.
 
-The tunnel is opened per import run and torn down after it, and the connection's host and
-port are rewritten to the local end for the duration.
+The tunnel carries imports and the tracking write-back alike. It is opened once per import
+run, and once per export batch — a label purchase's single export, or a scheduled
+`packages:export` run over its backlog — and torn down after it, and the connection's host
+and port are rewritten to the local end for the duration. A tunnel that will not open
+fails the export as `SSH tunnel failed: …`, and the export is retried.
 
 ### Where the password is stored
 
@@ -327,6 +330,8 @@ Available bound parameters:
 | `:carrier` | Carrier of record |
 | `:service` | **Confirmed** service only — never an inferred guess (ADR-0003, decision 7) |
 | `:weight` | Package weight |
+| `:height`, `:width`, `:length` | Package dimensions |
+| `:cost` | What the Label cost |
 | `:shipment_reference` | The originating shipment's reference |
 | `:fulfillment_order_id` | The shipment's Shopify fulfillment order ID |
 | `:amazon_order_id` | The shipment's Amazon order ID |
@@ -335,14 +340,11 @@ The last two are read from the shipment's metadata, so they are null for a shipm
 source imported itself — but *not* for one that came from a Shopify or Amazon source,
 which is exactly what a **Global Export Destination** receives.
 
-Only the parameters your query actually names are bound, so you can use any subset. But
-**naming a parameter that is not on that list fails the export** with
-`SQLSTATE[HY093]: Invalid parameter number` — the parameter is simply not supplied, and
-PDO rejects the mismatch. `:cost`, `:height`, `:width` and `:length` are *not* available
-by default; asking for them is the most likely way to break a working export.
-
-Widening the list means setting `settings.export_field_mapping` directly (there is no
-form field); the derivable values are in `PackageExportService::buildExportData()`.
+Only the parameters your query names are bound, so you can use any subset, and a value
+your query does not name never reaches your database. To write one under another name, use
+it under that name in your SQL. Saving the connection refuses a query that names a
+parameter not on this list, and names it; a query saved before that check fails its
+export with the same message. Quoted text, comments and `::` casts are not parameters.
 
 Export is dispatched per package after shipping and retried by
 `php artisan packages:export --scheduled`, which the scheduler runs every five minutes.
@@ -928,8 +930,8 @@ UPDATE orders
  WHERE order_no = :shipment_reference
 ```
 
-Note there is no `:cost` — see the [parameter list](#export_query). Add `cost` to the
-schema and to `settings.export_field_mapping` if you need it.
+With a column for it, add `postage_cost = :cost` to write what the Label cost — see the
+[parameter list](#export_query).
 
 ### Settings not on the form
 
