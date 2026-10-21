@@ -11,13 +11,13 @@
     "dev": "vite"
   },
   "devDependencies": {
-    "@playwright/test": "^1.64.0",
+    "@playwright/test": "^1.64.1",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^26.6.5",
     "axios": "^1.20.0",
     "concurrently": "^10.0.6",
     "laravel-vite-plugin": "^3.2.0",
-    "playwright": "^1.63.0",
+    "playwright": "^1.64.1",
     "tailwindcss": "^4.3.1",
     "vite": "^8.3.4"
   },
