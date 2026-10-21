@@ -106,13 +106,12 @@ class EndOfDay extends Page
                 // on the manifest count below.
                 $supportsManifest = $registry->policyFor($carrier->name)?->supportsCarrierManifest() ?? false;
 
-                $endedAt = $shipDateService->lastEndOfDayForCurrentBatch($carrier, $locationId);
+                $batchStartedAt = $shipDateService->currentBatchStartedAt($carrier, $locationId);
 
                 $packageCount = $this->shippedPackages($carrier, $locationId)
                     ->where(fn (Builder $query): Builder => $query
                         ->whereDate('ship_date', $shipDate)
-                        ->when($endedAt, fn (Builder $query): Builder => $query
-                            ->orWhere('shipped_at', '>', $endedAt->setTimezone(config('app.timezone')))))
+                        ->orWhere('shipped_at', '>', $batchStartedAt->setTimezone(config('app.timezone'))))
                     ->count();
 
                 $unmanifestedCount = $supportsManifest

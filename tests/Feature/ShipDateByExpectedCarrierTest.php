@@ -350,6 +350,63 @@ describe('End of Day', function (): void {
             ->and($summary[Carrier::USPS]['package_count'])->toBe(0);
     });
 
+    it('counts a Shopify auto label dated by USPS under UPS when UPS day was never ended', function (): void {
+        // UPS's 4 PM cutoff has passed, so UPS dates Thursday, but nobody
+        // ended its day. USPS is open until 8 PM and dates the label Wednesday.
+        $this->ups->update(['pickup_cutoff_hour' => 16]);
+
+        onWednesdayAt('15:00');
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::UPS,
+            'normalized_carrier_id' => $this->ups->id,
+            'ship_date' => '2026-04-01',
+        ]);
+
+        onWednesdayAt('17:00');
+        [$package, $offer] = shopifyChoiceToDate();
+        $shipDate = ShipRequest::fromPackageAndBlindOffer($package, $offer)->shipDate;
+
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::UPS,
+            'normalized_carrier_id' => $this->ups->id,
+            'postage_source' => PostageSource::PostageDataSource,
+            'postage_data_source_id' => $package->shipment->data_source_id,
+            'ship_date' => $shipDate,
+        ]);
+
+        $summary = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->keyBy('carrier');
+
+        // The 3 PM label went out on Wednesday's pickup.
+        expect($shipDate->toDateString())->toBe('2026-04-01')
+            ->and($summary[Carrier::UPS]['ship_date'])->toBe('Apr 2')
+            ->and($summary[Carrier::UPS]['package_count'])->toBe(1)
+            ->and($summary[Carrier::USPS]['package_count'])->toBe(0);
+    });
+
+    it('counts a label dated by another carrier when the carriers pick up on different days', function (): void {
+        // UPS picks up Tuesday and Thursday only, and has no cutoff, so its
+        // Tuesday batch closed at midnight. USPS dates the label Wednesday.
+        $this->ups->locations()->attach(Location::getDefault()->id, ['pickup_days' => json_encode([2, 4])]);
+
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::UPS,
+            'normalized_carrier_id' => $this->ups->id,
+            'shipped_at' => CarbonImmutable::parse('2026-03-31 23:00', 'America/New_York'),
+            'ship_date' => '2026-03-31',
+        ]);
+        Package::factory()->shipped()->create([
+            'carrier' => Carrier::UPS,
+            'normalized_carrier_id' => $this->ups->id,
+            'shipped_at' => now(),
+            'ship_date' => '2026-04-01',
+        ]);
+
+        $ups = collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->firstWhere('carrier', Carrier::UPS);
+
+        expect($ups['ship_date'])->toBe('Apr 2')
+            ->and($ups['package_count'])->toBe(1);
+    });
+
     it('counts a carrier labels from its last End of Day', function (): void {
         // Bought after Tuesday's End of Day, so dated Wednesday and still
         // waiting for Wednesday's pickup.
