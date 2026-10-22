@@ -1,6 +1,6 @@
 # Sync an Amazon product catalog
 
-Status: needs-info
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -8,8 +8,8 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), *Amazon*. Blocked by `01`, `02` (the job, action and run status) and `03`
-(the facts below marked *from `03`*). `needs-info` until `03` reports.
+[PRD](../PRD.md), *Amazon*. Blocked by `01` and `02` (the job, action and run status). The
+facts marked *from `03`* come from its probe of a 29,728-SKU production account.
 
 ## Problem
 
@@ -22,42 +22,60 @@ scan-to-add cannot find it.
 no seller ID: the action is hidden with a note to connect through OAuth.
 `AmazonSource` implements `02`'s catalog interface.
 
-**Listing every SKU.** One of these, chosen from `03`'s results:
+**Listing every SKU: date windows.** `searchListingsItems` with
+`includedData=summaries,attributes`, `pageSize=20`, `sortBy=createdDate`, and
+`createdAfter`/`createdBefore`, starting from one window over the account's whole
+history. Amazon returns at most 1,000 listings per search, pages included.
 
-- **Date windows** (the default). `searchListingsItems` with
-  `includedData=summaries,attributes`, `pageSize=20`, `sortBy=createdDate`, and
-  `createdAfter`/`createdBefore`. Amazon returns at most 1,000 listings per search, pages
-  included. A window that reaches 1,000 is discarded and its two halves searched instead.
-  A one-second window that still reaches 1,000 cannot be split. The run continues, and it
-  ends `incomplete` and names that window.
-  Both `createdAfter` and `createdBefore` include their endpoint, so a listing created
-  exactly on a split point is returned by both halves. Split into `[a, m]` and `[m, b]`,
-  sharing the boundary, and deduplicate by SKU within a run, so the counts never include
-  a Product twice. Never offset the second half (`[m + 1s, b]`): creation times carry
-  fractional seconds, and a listing at `m + 0.5s` would fall into neither window.
-- **The merchant listings report**, if `03` finds the app may request it. It lists every
-  SKU with no cap. Listing attributes are then fetched 20 SKUs at a time with
-  `identifiers`. **A SKU containing a comma cannot be put in that list:** `identifiers`
-  is comma-delimited and Amazon cannot distinguish an encoded comma (`%2C`) from a literal
-  one. Such SKUs are fetched one at a time with `getListingsItem`
-  (`GET /listings/2021-08-01/items/{sellerId}/{sku}`, SKU URL-encoded in the path).
-  The date-window path is not affected, because it never sends SKUs.
+- **Split from the first page.** If its `numberOfResults` is 1,000 or more, discard the
+  window and search its two halves. Do not page to the cap first: `numberOfResults` is the
+  window's true total *(from `03`: it matched the listings fetched in all 157 windows; a
+  30k account split 156 times, and paging each to the cap would have cost about 7,800
+  wasted calls)*. If `numberOfResults` is missing, fall back to paging and treat
+  1,000 fetched as at the cap.
+- A one-second window that still reaches 1,000 cannot be split. The run continues, and it
+  ends `incomplete` and names that window *(`03`'s busiest second held 310)*.
+- Both `createdAfter` and `createdBefore` include their endpoint, so a listing created
+  exactly on a split point is returned by both halves *(`03`: 205 such repeats)*. Split
+  into `[a, m]` and `[m, b]`, sharing the boundary, and deduplicate by SKU within a run,
+  so the counts never include a Product twice. Never offset the second half
+  (`[m + 1s, b]`): creation times carry fractional seconds, and a listing at `m + 0.5s`
+  would fall into neither window.
+- Every listing the search returns is synced, whatever its status. An inactive listing
+  is still something a packer can scan *(`03`'s account was on vacation, and the search
+  returned all of its listings, none `BUYABLE`)*.
+
+The merchant listings report is **not** used. The app's roles allow it, but *(from `03`)*
+it left out 525 of 29,728 listings, mostly recent ones. Its only rows search lacked were
+listings with no ASIN.
 
 Requests are paced and retried by the rate-limit handling now in `sendCatalogRequest()`,
-generalized for both endpoints, not copied.
+generalized for both endpoints, not copied. Pace from `x-amzn-RateLimit-Limit` (`5.0` for
+listings, `2.0` for catalog in `03`).
 
 **From each listing:** `sku`, `name` (summary `itemName`), ASIN, and weight. Attribute
 values are lists. Take the connection's marketplace entry, else the first.
 
 **Weight.** The listing's `item_package_weight`, else its `item_weight`. Never the
-catalog's. Convert `pounds`, `ounces`, `grams`, `kilograms`. Ignore other units, values that
-are not positive, and values over the ceiling *(from `03`)*.
+catalog's, and not `website_shipping_weight` (*from `03`*: a copy of `item_weight`). Convert
+`pounds`, `ounces`, `grams`, `kilograms`. Ignore other units, values that are not positive,
+and values over **150 lb** *(from `03`: listing weights were all pounds, at most 16 lb,
+with two zeros)*.
 
-**Customs fields.** If `03` finds origin or HS codes in a listing or catalog attribute
-with a usable fill rate, read them here, as fill-only. Origins must be ISO-3166 alpha-2.
-Otherwise this issue reads none.
+**Customs fields: none.** *(From `03`)*: listings carry no origin or HS attribute, and the
+catalog no HS code. Its origin fields (`country_as_labeled` 3%, which includes the non-ISO
+`UK`; `import_designation`, free text such as "Made in the USA or Imported") are too
+sparse and loose to fill `country_of_origin` from. A catalog sample across about 40 other
+display groups found the same: no HS code, no `country_of_origin` even on apparel, and
+apparel's `import_designation` mostly "Imported", which names no country.
 
-**Then the catalog.** The existing `SearchCatalogItems` lookup runs over the synced SKUs
+**Then the catalog, as its own job.** *(From `03`)*: a 29,728-SKU account took 16 minutes
+of listing calls and 11.5 minutes of catalog calls. Together that is close to the
+30-minute timeout `02`'s job inherits. So when the listing sync finishes, it queues a
+catalog look-up job on the `imports` queue, with the same lock and timeout settings,
+for the run's SKUs. The run's status covers the listings. A failed look-up is logged as
+the order import's look-up failures are, and leaves `identifiers_checked_at` as it was, so
+the next run asks again. The existing `SearchCatalogItems` lookup runs over the synced SKUs
 under `asinsNeedingCatalogLookup()`'s rule as it stands: a SKU whose Product is missing a
 barcode **or** a part number, and whose `identifiers_checked_at` is older than
 `CATALOG_RECHECK_DAYS`. Extract that rule so the order import and the sync share it.
@@ -71,15 +89,18 @@ barcode **or** a part number, and whose `identifiers_checked_at` is older than
 - [ ] Weight prefers `item_package_weight`, falls back to `item_weight`, converts each
       unit, and skips unknown units, values that are not positive, and values over the
       ceiling
-- [ ] With date windows: a window answering 1,000 listings is split and both halves are
-      fetched; more than 1,000 listings in total are all synced; a one-second window at the
-      cap ends the run `incomplete` and names the window
+- [ ] A window whose first page reports `numberOfResults` of 1,000 or more is split
+      without fetching its second page, and both halves are fetched; more than 1,000
+      listings in total are all synced; a one-second window at the cap ends the run
+      `incomplete` and names the window
+- [ ] A first page with no `numberOfResults` is paged, and 1,000 fetched splits the window
 - [ ] A listing created exactly on a split boundary is synced once and counted once
 - [ ] A listing created a fraction of a second after a split boundary (for example
       `m + 0.500s`) is synced
-- [ ] With the report path: a SKU containing a comma (for example `ABC,123`) is fetched on
-      its own through `getListingsItem` and synced; the other SKUs in its batch are
-      still fetched 20 at a time
+- [ ] A listing whose summary status is not `BUYABLE` is synced
+- [ ] A weight of 151 lb is skipped; one of 150 lb is kept
+- [ ] The listing sync queues the catalog look-up job; a failed look-up leaves
+      `identifiers_checked_at` unchanged and the listing run's outcome unchanged
 - [ ] The catalog step looks up a SKU missing only its part number, and one missing only
       its barcode, and skips one checked within the recheck window
 - [ ] A Product whose `identifiers_checked_at` has expired is looked up and the stamp moves
@@ -89,3 +110,9 @@ barcode **or** a part number, and whose `identifiers_checked_at` is older than
 - [ ] Fixtures use synthetic SKUs, ASINs and seller IDs
 
 ## Comments
+
+**2026-10-22 — `03` reported; `ready-for-agent`.** Date windows are the only path. The
+report path and its comma-SKU handling are removed: the report is allowed but missed 525
+recent listings. Windows split from the first page's `numberOfResults`. The ceiling is
+150 lb. No customs fields are read. The catalog look-up became its own job, because
+listings and catalog together took about 28 minutes on a 30k-SKU account.

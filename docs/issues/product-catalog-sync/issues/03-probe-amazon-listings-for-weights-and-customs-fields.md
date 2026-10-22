@@ -1,6 +1,6 @@
 # Probe Amazon listings for weights and customs fields
 
-Status: ready-for-human
+Status: done
 Category: research
 Repo: `polybag`
 
@@ -57,3 +57,97 @@ A comment here with the counts, and the scratch path of the captures. Update the
 Nothing with real SKUs, ASINs, seller IDs or product names goes into the repo.
 
 ## Comments
+
+**2026-10-22 — probed.** One production OAuth connection, US marketplace, read-only. The
+account is a defunct supplements and personal-care seller in vacation mode: almost every
+listing is inactive, and one seller in one category is a narrow sample for fill rates.
+Captures (about 800 MB, every response raw) and the scripts that read them are in
+`.scratch/product-catalog-sync/`. `analysis.json` and `followup.json` hold the numbers
+below.
+
+*Listings.* The whole account: **29,728 SKUs**, created 2012-11 to 2026-10, over 264
+product types. The window walk split 156 times into 157 windows, made 1,762 calls in
+16 minutes (latency-bound at about 1.8 per second; the reported limit is 5, with no 429s),
+and never hit a one-second window at the cap. **Most created in one second: 310.** Bulk
+days reach 7,946 (one day in 2016) and 2,663, but none comes close to 1,000 within a
+second. An unwindowed search stops at exactly 1,000 (page 50 has no `nextToken`).
+`numberOfResults` on the first page is the window's true total, not capped: it equaled
+the listings fetched in all 157 windows, so a window can be split from its first page
+without paging to the cap. Shared boundaries returned 205 listings twice, so the
+dedupe-by-SKU rule is needed. No SKU contains a comma, and every listing returned has an
+ASIN. Summary status is `DISCOVERABLE` or empty on every listing (none `BUYABLE` while
+the account is on vacation), so the search returns inactive listings as well.
+
+*Report.* `createReport` for `GET_MERCHANT_LISTINGS_ALL_DATA` returned **202** and was
+`DONE` within a minute, so the app's roles allow it. It has 29 columns (`seller-sku`,
+`asin1`, `status`, `fulfillment-channel`, `open-date`, …), no weight, and a UTF-8 BOM
+before the first header. **It is not a complete SKU list:** 29,209 rows against
+29,728 from search. 525 search SKUs are missing, 507 of them created in 2026. The 6 rows
+search did not return were 5 listings with no summary or ASIN (listing errors such as
+8541) and 1 that `getListingsItem` answers 404.
+
+*Catalog.* 25,533 distinct ASINs, 1,277 calls in 11.5 minutes at 2 per second (25 429s,
+all recovered). **2,583 ASINs (10%) have no catalog record.**
+
+*Customs fields.* Listing attributes (62 names in all): **no origin, country, tariff, HS,
+customs, commodity or import attribute at all.** Catalog attributes (441 names): no HS or
+tariff code anywhere. Origin-like fields are sparse or free text:
+
+| Catalog attribute | ASINs | Values |
+|---|---|---|
+| `country_as_labeled` | 729 (3.2%) | Two-letter codes, mostly `US`. Includes the non-ISO `UK` |
+| `import_designation` | 1,441 (6.3%) | Free text: "Made in the USA", "Imported", "Made in the USA or Imported" |
+| `region_of_origin` | 118 (0.5%) | Free text and junk: "North America", "South Asia", an ASIN |
+
+Not usable as an origin source. The catalog's `unspsc_code` (UNSPSC, an 8-digit product
+classification that is not HS) is filled on **22,446 ASINs (98%)**, with 234 distinct
+codes. That is noted for `05`.
+
+*Weights* (pounds; the 04 column is listing `item_package_weight`, else `item_weight`):
+
+| Source | Fill | Units seen | p50 | p99 | Max | > 150 lb | < 0.01 lb |
+|---|---|---|---|---|---|---|---|
+| Listing `item_package_weight` | 1 / 29,728 | pounds | — | — | 0.4 | 0 | 0 |
+| Listing `item_weight` | 27,752 (93.4%) | pounds only | 0.30 | 2.54 | 16 | 0 | 2 (both 0) |
+| Listing `website_shipping_weight` | 21,788 (73.3%) | pounds only | 0.29 | 2.54 | 16 | 0 | 0 |
+| Catalog `item_weight` | 19,594 / 22,950 (85.4%) | pounds, ounces, kilograms, grams, milligrams (104 values), `hundredths_pounds` | 0.20 | 2.5 | 1,102 | 7 | 546 |
+| Catalog `item_package_weight` | 22,057 (96.1%) | mostly kilograms | 0.26 | 2.91 | 2,410 | 2 | 45 |
+| `dimensions.item.weight` / `.package.weight` | 85.8% / 96.1% | pounds (the same values, converted) | | | | | |
+
+- `website_shipping_weight` equals `item_weight` on 99.6% of listings that have both and
+  is never present without it, so it adds nothing as a fallback.
+- Listing against catalog: `item_weight` against catalog `item_weight` differs by more
+  than ×2 on **26.5%** of 21,889 pairs (32% exactly equal). The 04 weight against catalog
+  package weight differs by more than ×2 on **15.7%** of 24,494. Which side is right can't be
+  told without weighed parcels, but the catalog's own outliers (milligram net contents,
+  weights in the thousands of pounds) support never reading it.
+- Listing weights carry two decimals (25,650), one (2,008) or none (94).
+
+*Cost.* Listings plus catalog for this account took about 28 minutes run back to back.
+That is close to the 30-minute job timeout `04` inherits from `02`.
+
+Result for `04`: date windows, split from `numberOfResults`; no report path; ceiling
+150 lb; no customs fields; catalog step in its own job. The PRD and `04` are updated.
+
+**2026-10-22 — catalog sample beyond this account.** A keyword sample of products the
+account does not sell: 58 keywords, up to 100 results each, for 5,574 ASINs in about 40
+display groups (apparel, electronics, kitchen, furniture, appliances, grocery, toys and so
+on). Captures are in `raw/keywords/`, and `analyze-keywords.php` reads them.
+
+- **No HS code anywhere.** No attribute name matches, and no value of any attribute has
+  the shape `NNNN.NN`.
+- **No `country_of_origin` attribute, even on apparel.** The origin-like fields are:
+  `import_designation` (apparel 95%, shoes 81%, sports 59%, beauty 53%, elsewhere low),
+  but 86% of its values are just "Imported", which names no country; `country_as_labeled`
+  (grocery and beauty about 20%, ISO-like two-letter codes); and free-text
+  `region_of_origin` ("We source from 17 different countries"). `garment_size_country` and
+  `version_for_country` matched the search but are a sizing system and a market version,
+  not origin. The only origin derivable at any scale is US, from "Made in the USA" wording
+  (about 7% of `import_designation` values). It is not worth the parsing.
+- **Weights over 150 lb are real, and freight.** 83 catalog package weights over 150 lb,
+  all refrigerators, washers, treadmills, sofas, gun safes, grills and kayaks. None
+  outside those. So the 150 lb ceiling only blanks items no parcel carrier takes.
+- **`unspsc_code` is filled on 99–100% in every display group.** 60% of codes are at
+  class level and 36% at commodity level, and they are consistent within a product kind
+  (men's t-shirts 83% `53101600` shirts, running shoes 100% `53111600`, dog collars 98%
+  `10111300`). Some groceries carry only the segment (`50000000`). For `05`.
