@@ -70,10 +70,13 @@ Amazon exports go to the sandbox host.
 | [02](issues/02-demo-buys-shopify-shipping-only-on-a-development-store.md) | Demo buys Shopify Shipping only on a development store; the development-store check | done |
 | [03](issues/03-demo-reads-amazon-orders-from-production.md) | Demo reads Amazon orders from production, buys postage from the sandbox | done |
 | [04](issues/04-a-demo-tenant-holding-a-prospects-orders.md) | A demo tenant holding a prospect's orders | done |
-| [05](issues/05-check-the-marketplace-data-terms-for-a-live-store-demo.md) | Check the marketplace data terms for a live-store demo | ready-for-human |
+| [05](issues/05-check-the-marketplace-data-terms-for-a-live-store-demo.md) | Check the marketplace data terms for a live-store demo | done |
 
 `02` builds the development-store check that `01` also uses, so build `02` first, or
 build the check in whichever lands first.
 
 **Until `01`, `02` and `05` are done, do not connect a live store to a demo tenant.**
 `03` is needed only for Amazon. `04` must be in place before the first real demo.
+*(All five done 2026-10-22. Before connecting a prospect's Shopify store, get their
+written agreement, and confirm the production app's protected customer data approval
+covers the fields the demo reads; see `05`.)*
