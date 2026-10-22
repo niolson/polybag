@@ -66,7 +66,7 @@ Amazon exports go to the sandbox host.
 
 | # | Issue | Status |
 |---|---|---|
-| [01](issues/01-demo-never-writes-back-to-a-store.md) | Demo never writes back to a live Shopify or Amazon store | ready-for-agent |
+| [01](issues/01-demo-never-writes-back-to-a-store.md) | Demo never writes back to a live Shopify or Amazon store | done |
 | [02](issues/02-demo-buys-shopify-shipping-only-on-a-development-store.md) | Demo buys Shopify Shipping only on a development store; the development-store check | done |
 | [03](issues/03-demo-reads-amazon-orders-from-production.md) | Demo reads Amazon orders from production, buys postage from the sandbox | needs-triage |
 | [04](issues/04-a-demo-tenant-holding-a-prospects-orders.md) | A demo tenant holding a prospect's orders | ready-for-human |

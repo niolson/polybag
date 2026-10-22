@@ -22,6 +22,10 @@ use App\Services\ShipmentImport\Sources\ShopifySource;
  * Runs after the void is recorded and never undoes it: the carrier has already
  * voided the label, so failing the void would only leave a dead label marked
  * live. A failed cancel is reported to the operator instead.
+ *
+ * In Demo, a live store is sent no cancel ({@see StoreWriteGuard},
+ * `live-store-demo/01`). The replacement lookup still runs: it only reads, and
+ * a shipment left naming a closed fulfillment order cannot be bought for again.
  */
 class ShopifyFulfillmentCanceller
 {
@@ -29,6 +33,7 @@ class ShopifyFulfillmentCanceller
         private readonly ShopifyShippingLabelService $labelService,
         private readonly ShopifyFulfillmentOrderReplacer $replacer,
         private readonly DataSourceFactory $dataSourceFactory,
+        private readonly StoreWriteGuard $storeWriteGuard,
     ) {}
 
     /**
@@ -51,6 +56,18 @@ class ShopifyFulfillmentCanceller
             ]);
 
             return self::manualCancelMessage('its Shopify connection is inactive or gone');
+        }
+
+        if (! $this->storeWriteGuard->allowsWritesTo($dataSource)) {
+            logger()->info('Not cancelling a voided label\'s Shopify fulfillment: demo mode writes nothing to a live store', [
+                'package_id' => $package->id,
+                'shopify_fulfillment_id' => $fulfillmentId,
+            ]);
+
+            $this->replacer->repoint($package);
+
+            return 'Demo mode sends nothing to a live store, so PolyBag did not cancel this order\'s fulfillment, '
+                .'and Shopify still shows the voided tracking number.';
         }
 
         try {
