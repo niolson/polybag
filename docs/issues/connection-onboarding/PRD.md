@@ -51,7 +51,7 @@ Settings, credential fields follow the table, and one `AppMode` answers the mode
 
 Demo uses the production rules for connections on purpose. Only its postage is sandbox:
 a demo connection is signed in through OAuth like a production one. What makes that safe
-against a real store is [`live-store-demo`](../live-store-demo/PRD.md).
+against a real store is [`live-store-demo`](../archive/live-store-demo/PRD.md).
 
 ## Decisions
 
