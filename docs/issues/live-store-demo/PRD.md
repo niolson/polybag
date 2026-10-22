@@ -69,7 +69,7 @@ Amazon exports go to the sandbox host.
 | [01](issues/01-demo-never-writes-back-to-a-store.md) | Demo never writes back to a live Shopify or Amazon store | done |
 | [02](issues/02-demo-buys-shopify-shipping-only-on-a-development-store.md) | Demo buys Shopify Shipping only on a development store; the development-store check | done |
 | [03](issues/03-demo-reads-amazon-orders-from-production.md) | Demo reads Amazon orders from production, buys postage from the sandbox | done |
-| [04](issues/04-a-demo-tenant-holding-a-prospects-orders.md) | A demo tenant holding a prospect's orders | ready-for-human |
+| [04](issues/04-a-demo-tenant-holding-a-prospects-orders.md) | A demo tenant holding a prospect's orders | ready-for-agent |
 | [05](issues/05-check-the-marketplace-data-terms-for-a-live-store-demo.md) | Check the marketplace data terms for a live-store demo | ready-for-human |
 
 `02` builds the development-store check that `01` also uses, so build `02` first, or
