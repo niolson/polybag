@@ -47,6 +47,31 @@ Points against the split, to weigh:
 - `OffAmazonShippingCheck` notes that `sandbox_mode` is one setting for every carrier.
   The split must not let a production read leak into a postage call.
 
+## Decision
+
+Chosen 2026-10-22: **per-call environment**, with two narrowings.
+
+- **Demo imports no buyer PII from Amazon.** The order read in Demo keeps only the
+  destination's city, state or region, postal code and country: no buyer or recipient
+  name, street lines, phone or email. That keeps a live-Amazon demo within Amazon's Data
+  Protection Policy without making the demo tenant a PII store, which also shrinks what
+  `04`'s purge has to cover for Amazon. In practice this means Demo does not ask for the
+  restricted data token that releases the shipping address.
+- **Postage stays on sandboxes.** Buy Shipping in Demo is shown with the Amazon Shipping
+  carrier only, from the SP-API sandbox, or the order is rated and bought through the
+  USPS, UPS and FedEx sandbox accounts as direct postage. Shipment confirmation is never
+  sent (`01`).
+
+Still to settle before this is `ready-for-agent`:
+
+- Whether the direct-carrier sandboxes, and address validation, accept a destination
+  with no street line, or whether Demo fills a placeholder street that is never shown as
+  the buyer's. A placeholder must not look like real data on a pack slip or label.
+- Where the per-call split lives (for example `SourceEnvironment::forAmazonRead()` /
+  `forAmazonPostage()`), and how an Offer's environment binding treats a
+  production-read order quoted on sandbox.
+- The Ship page note that Amazon sandbox rates are canned and ignore the order.
+
 ## Acceptance
 
-Written once the design is chosen.
+Written once the open points above are settled.
