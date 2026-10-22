@@ -18,6 +18,11 @@ use Illuminate\Database\Eloquent\Builder;
  * ({@see ShopifyFulfillmentCanceller}). Either way the goods come back on a
  * fulfillment order Shopify chooses, and the shipment has to name it before it
  * can be shipped again.
+ *
+ * In Demo, a live store's fulfillment is not cancelled
+ * ({@see ShopifyFulfillmentCanceller}), so the fulfillment order stays closed
+ * by it and there is no replacement to find. The audit note says only what was
+ * found, not that the void closed anything.
  */
 class ShopifyFulfillmentOrderReplacer
 {
@@ -191,7 +196,7 @@ class ShopifyFulfillmentOrderReplacer
             auditable: $shipment,
             metadata: [
                 'reason' => $replacement === null
-                    ? 'Shopify closed the fulfillment order on the void and offered no replacement'
+                    ? 'After the void, Shopify offered no open fulfillment order for this shipment\'s goods'
                     : 'Shopify replaced the fulfillment order on the void; the shipment was re-pointed at the replacement',
                 'superseded_fulfillment_order_id' => $superseded,
                 'fulfillment_order_id' => $replacement,

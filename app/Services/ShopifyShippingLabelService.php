@@ -15,6 +15,7 @@ use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Services\Carriers\ShopifyAdapter;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Support\Collection;
@@ -76,6 +77,7 @@ class ShopifyShippingLabelService
     public function __construct(
         private readonly PostageSourceResolver $postageSourceResolver,
         private readonly ShopifyGoodsFingerprint $goods,
+        private readonly StoreWriteGuard $storeWrites,
     ) {}
 
     /**
@@ -389,6 +391,15 @@ class ShopifyShippingLabelService
             ]);
 
             return $this->awaitLabel($connector, (string) $pendingResultId, null, $package);
+        }
+
+        // Rating already withholds the offer, and the purchase re-derives it,
+        // so this is the last word rather than the first: nothing reaches the
+        // mutation below for a live store in Demo, whoever sent it
+        // (`live-store-demo/02`). Recovering or resuming a label already
+        // bought, above, buys nothing new.
+        if (! $this->storeWrites->allowsWritesTo($dataSource)) {
+            throw new ShopifyLabelPurchaseException(ShopifyAdapter::DEMO_LIVE_STORE_MESSAGE);
         }
 
         $totalWeight = $this->totalWeightFor($package, $request, $connector, $fulfillmentOrderId);

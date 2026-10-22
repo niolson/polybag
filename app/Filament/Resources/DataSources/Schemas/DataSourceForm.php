@@ -5,6 +5,7 @@ namespace App\Filament\Resources\DataSources\Schemas;
 use App\DataTransferObjects\QueryPreviewResult;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
 use App\Enums\AmazonMarketplace;
+use App\Enums\AppMode;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSetting;
@@ -30,6 +31,7 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\SshTunnel;
+use App\Services\StoreWriteGuard;
 use Carbon\Carbon;
 use Closure;
 use Filament\Actions\Action;
@@ -144,6 +146,14 @@ class DataSourceForm
                         ->helperText(fn (Get $get): string => $get('source_type') === AmazonSource::class
                             ? 'Packer only shows Amazon\'s offers on the Ship page and keeps them from auto-ship, batch ship and shipping rules, whatever the shipping method allows. Packer and automation lets automation buy the services the shipping method allows. The shipping method still decides whether Amazon is asked.'
                             : 'Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. Packer only shows it on the Ship page. Packer and automation also lets auto-ship and batch ship buy it, when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
+                        ->columnSpanFull(),
+
+                    Placeholder::make('demo_development_store')
+                        ->label('Demo Mode')
+                        ->content(fn (DataSource $record): HtmlString => self::renderDemoDevelopmentStore($record))
+                        ->visible(fn (Get $get, ?DataSource $record): bool => AppMode::current() === AppMode::Demo
+                            && (bool) $record?->exists
+                            && $get('source_type') === ShopifySource::class)
                         ->columnSpanFull(),
                 ])
                 ->visible(fn (Get $get): bool => PostageSetting::defaultFor($get('source_type')) !== null),
@@ -873,6 +883,26 @@ class DataSourceForm
             '<span class="'.$class.' font-medium">'.e($status->label()).'</span>'
                 .($checkedAt ? ' — checked '.e($checkedAt) : '')
                 .'<br><span class="text-sm text-gray-500 dark:text-gray-400">'.e($explanation).'</span>'
+        );
+    }
+
+    /**
+     * Whether Shopify Shipping is on for this store in Demo, read from the
+     * store's plan (`live-store-demo/02`). Shown in Demo only, so no other mode
+     * asks Shopify.
+     */
+    private static function renderDemoDevelopmentStore(DataSource $record): HtmlString
+    {
+        if (app(StoreWriteGuard::class)->isDevelopmentStore($record)) {
+            return new HtmlString(
+                '<span class="text-success-600 dark:text-success-400 font-medium">Development store</span>'
+                    .'<br><span class="text-sm text-gray-500 dark:text-gray-400">Shopify Shipping is available in demo mode.</span>'
+            );
+        }
+
+        return new HtmlString(
+            '<span class="text-danger-600 dark:text-danger-400 font-medium">Not a development store</span>'
+                .'<br><span class="text-sm text-gray-500 dark:text-gray-400">Shopify Shipping is off in demo mode, because its labels would be real postage charged to the store. A store whose plan cannot be read counts as live.</span>'
         );
     }
 

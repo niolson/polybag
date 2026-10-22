@@ -81,6 +81,12 @@ class ShopifyAdapter implements BlindPurchaseSource
     public const SOURCE_LABEL = 'Shopify Shipping';
 
     /**
+     * Why Shopify Shipping is withheld in Demo from a store that is not a
+     * development store (`live-store-demo/02`).
+     */
+    public const DEMO_LIVE_STORE_MESSAGE = 'Shopify Shipping is not available in demo mode on a live store.';
+
+    /**
      * Service codes Shopify only quotes inside a weight band, as
      * `[minimum inclusive, maximum exclusive]` in pounds.
      *

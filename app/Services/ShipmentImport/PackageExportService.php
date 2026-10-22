@@ -6,6 +6,7 @@ use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Enums\PackageExportStatus;
 use App\Enums\PackageStatus;
+use App\Enums\StoreWritePermission;
 use App\Exceptions\PermanentExportException;
 use App\Models\DataSource;
 use App\Models\Package;
@@ -17,6 +18,7 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\StoreWriteGuard;
 use Carbon\CarbonInterface;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
@@ -24,6 +26,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 class PackageExportService
@@ -31,6 +34,12 @@ class PackageExportService
     private const int MaxAttempts = 32;
 
     private const int ScheduledFreshPackageLookbackHours = 24;
+
+    /**
+     * Why a Shopify store whose plan could not be read was sent nothing in
+     * Demo. Recorded as a retryable failure, so the export asks again.
+     */
+    public const string UnknownStoreError = 'could not read the Shopify store\'s plan to tell whether it is a development store; not sent in demo';
 
     /**
      * The values an export can send, and so the parameters a Database export
@@ -103,6 +112,12 @@ class PackageExportService
      *  2. Every active data source with global_export and export enabled (fan-out; deduped against #1).
      *     Global fan-out is a multi-client feature; in single-client mode the toggle is
      *     hidden in the UI and exports are strictly source-scoped.
+     *
+     * A destination {@see StoreWriteGuard} refuses, a live store in Demo, is
+     * claimed and marked skipped without being sent anything. One whose plan
+     * could not be read is sent nothing either, but fails retryably, so a
+     * passing Shopify failure does not settle a development store's export
+     * for good.
      */
     public function exportPackage(Package $package): ExportResult
     {
@@ -142,6 +157,7 @@ class PackageExportService
 
         $attempted = 0;
         $succeeded = 0;
+        $skipped = 0;
         $errors = [];
         $retryableErrors = [];
 
@@ -153,6 +169,19 @@ class PackageExportService
 
                 if (! $export) {
                     continue;
+                }
+
+                $permission = app(StoreWriteGuard::class)->permissionFor($source);
+
+                if ($permission === StoreWritePermission::Refused) {
+                    $this->skipDestination($package, $source, $export);
+                    $skipped++;
+
+                    continue;
+                }
+
+                if ($permission === StoreWritePermission::Unknown) {
+                    throw new RuntimeException(self::UnknownStoreError);
                 }
 
                 $attempted++;
@@ -247,7 +276,7 @@ class PackageExportService
         }
 
         $destinationIds = $destinations->pluck('id')->all();
-        $this->markPackageExportedWhenAllDestinationsSucceeded($package, $destinationIds);
+        $this->markPackageExportedWhenAllDestinationsSettled($package, $destinationIds);
 
         if ($errors === []) {
             $permanentFailures = PackageExport::query()
@@ -270,6 +299,7 @@ class PackageExportService
             success: $success,
             destinationsAttempted: $attempted,
             destinationsSucceeded: $succeeded,
+            destinationsSkipped: $skipped,
             errors: $errors,
             retryableErrors: $retryableErrors,
             deferred: $deferred,
@@ -407,7 +437,7 @@ class PackageExportService
                 ->orWhere(function (Builder $query): void {
                     $query->whereHas('packageExports')
                         ->whereDoesntHave('packageExports', fn (Builder $query) => $query
-                            ->where('status', '!=', PackageExportStatus::Succeeded));
+                            ->whereNotIn('status', PackageExportStatus::settled()));
                 })
                 ->orWhere(fn (Builder $query) => $this->constrainToMissingDestinations($query));
 
@@ -616,7 +646,7 @@ class PackageExportService
             ->where('data_source_id', $source->id)
             ->firstOrFail();
 
-        if (in_array($export->status, [PackageExportStatus::Succeeded, PackageExportStatus::PermanentlyFailed], true)) {
+        if (in_array($export->status, [...PackageExportStatus::settled(), PackageExportStatus::PermanentlyFailed], true)) {
             return null;
         }
 
@@ -638,18 +668,45 @@ class PackageExportService
         return $claimed === 1 ? $export->refresh() : null;
     }
 
-    /** @param list<int> $destinationIds */
-    private function markPackageExportedWhenAllDestinationsSucceeded(Package $package, array $destinationIds): void
+    /**
+     * Mark the package exported once every destination is settled, so a
+     * skipped destination counts as done rather than leaving the package to be
+     * selected again on every run.
+     *
+     * @param  list<int>  $destinationIds
+     */
+    private function markPackageExportedWhenAllDestinationsSettled(Package $package, array $destinationIds): void
     {
-        $succeededCount = PackageExport::query()
+        $settledCount = PackageExport::query()
             ->where('package_id', $package->id)
             ->whereIn('data_source_id', $destinationIds)
-            ->where('status', PackageExportStatus::Succeeded)
+            ->whereIn('status', PackageExportStatus::settled())
             ->count();
 
-        if ($succeededCount === count($destinationIds)) {
+        if ($settledCount === count($destinationIds)) {
             $package->update(['exported' => true]);
         }
+    }
+
+    /**
+     * Settle a claimed destination without sending it anything: in Demo,
+     * PolyBag writes nothing to a live store (`live-store-demo/01`). The row is
+     * kept rather than never made, or the package would look forever unsent to
+     * that destination and be selected again on every run.
+     */
+    private function skipDestination(Package $package, DataSource $source, PackageExport $export): void
+    {
+        $export->update([
+            'status' => PackageExportStatus::Skipped,
+            'last_error' => null,
+            'locked_at' => null,
+            'completed_at' => now(),
+        ]);
+
+        $this->log('info', "Export to {$source->name} not sent: demo mode writes nothing to a live store", [
+            'package_id' => $package->id,
+            'data_source_id' => $source->id,
+        ]);
     }
 
     /**

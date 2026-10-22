@@ -24,6 +24,7 @@ use App\Models\DataSource;
  * A direct candidate is a carrier's integration and the account it rates on.
  * The account is null when none resolves for this package: a real integration
  * then quotes nothing, as it always has, while fake carriers quote without one.
+ * A connection's candidate carries the connection the same way.
  *
  * An off-Amazon candidate is an Amazon connection selling Amazon Shipping for
  * an order from another channel (`channelType: EXTERNAL`). The sale is direct
@@ -44,6 +45,7 @@ readonly class PostageSourceCandidate
         public ?OffAmazonShippingStatus $offAmazonShippingStatus = null,
         public ?CarrierAccount $carrierAccount = null,
         public ?string $dataSourceType = null,
+        public ?DataSource $dataSource = null,
     ) {}
 
     /**
@@ -68,6 +70,7 @@ readonly class PostageSourceCandidate
             name: (string) $source->name,
             postageDataSourceId: $source->id,
             dataSourceType: $source->source_type,
+            dataSource: $source,
         );
     }
 
@@ -88,6 +91,7 @@ readonly class PostageSourceCandidate
             offAmazon: true,
             offAmazonShippingStatus: $source->off_amazon_shipping_status,
             dataSourceType: $source->source_type,
+            dataSource: $source,
         );
     }
 

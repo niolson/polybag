@@ -8,6 +8,7 @@ class ExportResult
         public readonly bool $success,
         public readonly int $destinationsAttempted = 0,
         public readonly int $destinationsSucceeded = 0,
+        public readonly int $destinationsSkipped = 0,
         public readonly array $errors = [],
         public readonly array $retryableErrors = [],
         public readonly bool $deferred = false,

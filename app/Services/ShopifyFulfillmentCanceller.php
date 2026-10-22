@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AuditAction;
+use App\Enums\StoreWritePermission;
 use App\Models\AuditLog;
 use App\Models\Package;
 use App\Services\ShipmentImport\DataSourceFactory;
@@ -22,6 +23,12 @@ use App\Services\ShipmentImport\Sources\ShopifySource;
  * Runs after the void is recorded and never undoes it: the carrier has already
  * voided the label, so failing the void would only leave a dead label marked
  * live. A failed cancel is reported to the operator instead.
+ *
+ * In Demo, a live store is sent no cancel ({@see StoreWriteGuard},
+ * `live-store-demo/01`), and neither is a store whose plan could not be read,
+ * though the operator is not told that one is live. The replacement lookup
+ * still runs: it only reads, and a shipment left naming a closed fulfillment
+ * order cannot be bought for again.
  */
 class ShopifyFulfillmentCanceller
 {
@@ -29,6 +36,7 @@ class ShopifyFulfillmentCanceller
         private readonly ShopifyShippingLabelService $labelService,
         private readonly ShopifyFulfillmentOrderReplacer $replacer,
         private readonly DataSourceFactory $dataSourceFactory,
+        private readonly StoreWriteGuard $storeWriteGuard,
     ) {}
 
     /**
@@ -51,6 +59,24 @@ class ShopifyFulfillmentCanceller
             ]);
 
             return self::manualCancelMessage('its Shopify connection is inactive or gone');
+        }
+
+        $permission = $this->storeWriteGuard->permissionFor($dataSource);
+
+        if ($permission !== StoreWritePermission::Allowed) {
+            logger()->info('Not cancelling a voided label\'s Shopify fulfillment in demo mode', [
+                'package_id' => $package->id,
+                'shopify_fulfillment_id' => $fulfillmentId,
+                'store_write_permission' => $permission->name,
+            ]);
+
+            $this->replacer->repoint($package);
+
+            return $permission === StoreWritePermission::Unknown
+                ? 'PolyBag could not read this Shopify store\'s plan to tell whether it is a development store, '
+                    .'so demo mode left this order\'s fulfillment in place, and Shopify still shows the voided tracking number.'
+                : 'Demo mode sends nothing to a live store, so PolyBag did not cancel this order\'s fulfillment, '
+                    .'and Shopify still shows the voided tracking number.';
         }
 
         try {

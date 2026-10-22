@@ -4,10 +4,12 @@ use App\Console\Commands\DemoReset;
 use App\Enums\CarrierPackaging;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
+use App\Enums\PackageExportStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
 use App\Enums\TrackingStatus;
+use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\BoxSize;
 use App\Models\ChannelAlias;
 use App\Models\Client;
@@ -16,6 +18,7 @@ use App\Models\LabelBatch;
 use App\Models\Location;
 use App\Models\Manifest;
 use App\Models\Package;
+use App\Models\PackageExport;
 use App\Models\PackageLabel;
 use App\Models\RateQuote;
 use App\Models\Shipment;
@@ -29,6 +32,9 @@ use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Saloon\Http\Faking\MockResponse;
+use Saloon\Http\PendingRequest;
+use Saloon\Laravel\Facades\Saloon;
 
 uses(RefreshDatabase::class);
 
@@ -326,6 +332,45 @@ it('marks fabricated packages exported without touching the import database when
 
     expect(Package::where('exported', false)->count())->toBe(0)
         ->and(DB::connection($connection)->table('shipments')->where('exported', 'y')->count())->toBe(0);
+});
+
+it('writes back to the Database connection in demo and skips a live store with global export on', function (): void {
+    $this->app['env'] = 'demo';
+    config()->set('features.multi_client_enabled', true);
+
+    // A live store: its plan is not a development store's, and nothing else
+    // may be sent to it.
+    Saloon::fake([GraphQL::class => function (PendingRequest $request): MockResponse {
+        $query = (string) ($request->body()?->all()['query'] ?? '');
+
+        if (str_contains($query, 'plan {')) {
+            return MockResponse::make(['data' => ['shop' => ['plan' => ['partnerDevelopment' => false, 'publicDisplayName' => 'Basic']]]]);
+        }
+
+        throw new LogicException('Unexpected Shopify request: '.$query);
+    }]);
+
+    $store = createShopifyDataSource(['export_enabled' => true], ['oauth_access_token' => 'shpat_test_token']);
+    $store->update(['global_export' => true]);
+
+    insertImportShipment($this->dataSource, 'D00LIVE0001', now('UTC')->subDays(5)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00LIVE0002', now('UTC')->subDays(3)->format('Y-m-d H:i:s'));
+
+    $this->artisan('demo:reset', ['--full-export' => true])
+        ->doesntExpectOutputToContain('Aborting export write-back')
+        ->assertSuccessful();
+
+    $shipped = Package::where('status', PackageStatus::Shipped)->count();
+
+    expect($shipped)->toBeGreaterThan(0)
+        ->and(DB::connection(importConnectionFor($this->dataSource))->table('shipments')->where('exported', 'y')->whereNotNull('tracking_number')->count())
+        ->toBe(2)
+        ->and(PackageExport::where('data_source_id', $this->dataSource->id)->where('status', PackageExportStatus::Succeeded)->count())->toBe($shipped)
+        ->and(PackageExport::where('data_source_id', $store->id)->where('status', PackageExportStatus::Skipped)->count())->toBe($shipped)
+        ->and(PackageExport::where('data_source_id', $store->id)->where('status', '!=', PackageExportStatus::Skipped)->count())->toBe(0)
+        ->and(Package::where('exported', false)->count())->toBe(0);
+
+    Saloon::assertNotSent(fn (GraphQL $request): bool => str_contains((string) ($request->body()->all()['query'] ?? ''), 'mutation'));
 });
 
 it('does not abort demo write-back when package exports are deferred', function (): void {
