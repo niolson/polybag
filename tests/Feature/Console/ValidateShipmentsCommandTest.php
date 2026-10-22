@@ -125,6 +125,21 @@ it('does not select an attempted international shipment again', function (): voi
     Saloon::mockClient()->assertSentCount(1, GoogleValidateAddress::class);
 });
 
+it('counts a withheld demo shipment apart from those no validator can check', function (): void {
+    $this->app['env'] = 'demo';
+    Saloon::fake([]);
+
+    $shipment = Shipment::factory()->create(['address1' => Shipment::WITHHELD_ADDRESS_LINE, 'checked' => false]);
+
+    $this->artisan('shipments:validate')
+        ->assertSuccessful()
+        ->expectsOutputToContain('Left out 1 shipment(s) with a withheld address (demo).')
+        ->doesntExpectOutputToContain('no address validator')
+        ->expectsOutputToContain('No pending shipments');
+
+    expect($shipment->fresh()->validation_attempted_at)->toBeNull();
+});
+
 it('leaves out an international shipment no validator can check, without failing', function (): void {
     Saloon::fake([]);
 

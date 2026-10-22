@@ -20,7 +20,8 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
  * - **Shipping v2** has NA test cases, so the FE host is wrong for it.
  *
  * Production is unaffected: it is North America for both, and this contract is only
- * consulted while `sandbox_mode` is on.
+ * consulted for a request going to the sandbox ({@see AmazonSpApiEnvironment}). In Demo
+ * an order search goes to production, so its FE region is not used there.
  */
 interface DeclaresSandboxRegion
 {

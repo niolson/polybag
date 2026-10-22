@@ -32,10 +32,19 @@ class ShipmentValidationPlan implements AddressValidationPlan
     ) {}
 
     /**
+     * None for a withheld address (`live-store-demo/03`): a placeholder
+     * street is not the buyer's, so no answer about it could be true, and an
+     * undeliverable one would hold the Shipment from purchase. It is left
+     * not checked, which holds nothing.
+     *
      * @return list<AddressValidationInterface>
      */
     public function validatorsFor(Shipment $shipment): array
     {
+        if ($shipment->isAddressWithheld()) {
+            return [];
+        }
+
         if (config('app.fake_carriers') || AppMode::current() === AppMode::Demo) {
             return [new FakeAddressValidator];
         }

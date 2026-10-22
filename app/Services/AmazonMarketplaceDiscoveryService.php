@@ -5,6 +5,7 @@ namespace App\Services;
 use App\DataTransferObjects\AmazonMarketplaceDiscoveryResult;
 use App\Enums\AmazonMarketplace;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Http\Integrations\Amazon\Requests\GetMarketplaceParticipations;
 use App\Models\DataSource;
 use Illuminate\Support\Facades\Log;
@@ -14,10 +15,14 @@ class AmazonMarketplaceDiscoveryService
 {
     /**
      * Discover the supported retail marketplaces available to an Amazon seller.
+     *
+     * Refused where the seller's data is read from the sandbox, which knows
+     * nothing of the seller's marketplaces. In Demo it is read from production
+     * ({@see AmazonSpApiEnvironment}), so discovery runs there.
      */
     public function discover(DataSource $dataSource): AmazonMarketplaceDiscoveryResult
     {
-        if ((bool) app(SettingsService::class)->get('sandbox_mode', false)) {
+        if (app(AmazonSpApiEnvironment::class)->readsFromSandbox()) {
             return new AmazonMarketplaceDiscoveryResult(
                 succeeded: false,
                 marketplaces: [],

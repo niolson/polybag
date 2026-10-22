@@ -4,6 +4,7 @@ namespace App\Filament\Resources\DataSources\Pages;
 
 use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Jobs\RunDataSourceImportJob;
 use App\Models\DataSource;
 use App\Models\Shipment;
@@ -96,8 +97,8 @@ class EditDataSource extends EditRecord
                 ->visible(fn (): bool => config('app.env') === 'local'
                     && $this->dataSource()->source_type === AmazonSource::class
                     && $this->dataSource()->import_enabled)
-                ->disabled(fn (): bool => ! $this->dataSource()->active || $this->amazonMarketplaceIsMissing() || (bool) app(SettingsService::class)->get('sandbox_mode', false))
-                ->tooltip(fn (): ?string => app(SettingsService::class)->get('sandbox_mode', false) ? 'Disable sandbox mode in App Settings to import real Amazon orders.' : null)
+                ->disabled(fn (): bool => ! $this->dataSource()->active || $this->amazonMarketplaceIsMissing() || app(AmazonSpApiEnvironment::class)->readsFromSandbox())
+                ->tooltip(fn (): ?string => app(AmazonSpApiEnvironment::class)->readsFromSandbox() ? 'Disable sandbox mode in App Settings to import real Amazon orders.' : null)
                 ->modalHeading('Import historical shipped Amazon orders')
                 ->modalDescription('Imports up to 1,000 shipped orders as historical shipped shipments. Large imports use multiple Amazon API pages and may take several minutes. This does not confirm anything back to Amazon or affect scheduled import settings.')
                 ->schema([
@@ -221,8 +222,8 @@ class EditDataSource extends EditRecord
                 ->color('gray')
                 ->visible(fn (): bool => $this->dataSource()->source_type === AmazonSource::class
                     && app(OAuthService::class)->isDataSourceConnected($this->dataSource()))
-                ->disabled(fn (): bool => (bool) app(SettingsService::class)->get('sandbox_mode', false))
-                ->tooltip(fn (): ?string => app(SettingsService::class)->get('sandbox_mode', false)
+                ->disabled(fn (): bool => app(AmazonSpApiEnvironment::class)->readsFromSandbox())
+                ->tooltip(fn (): ?string => app(AmazonSpApiEnvironment::class)->readsFromSandbox()
                     ? 'Disable sandbox mode in App Settings before refreshing Amazon marketplaces.'
                     : null)
                 ->action(function (): void {

@@ -8,6 +8,8 @@ use App\Enums\PackageExportStatus;
 use App\Enums\PackageStatus;
 use App\Enums\StoreWritePermission;
 use App\Exceptions\PermanentExportException;
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
+use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageExport;
@@ -231,7 +233,7 @@ class PackageExportService
                     // sandbox export would otherwise sail past the refusal.
                     $data['_amazon_fulfilled_by'] = $package->shipment?->metadata['amazon_fulfilled_by'] ?? null;
 
-                    if (! (bool) app(SettingsService::class)->get('sandbox_mode', false)) {
+                    if (! app(AmazonSpApiEnvironment::class)->usesSandbox(ConfirmShipment::class)) {
                         $data = array_merge($data, $this->buildAmazonExportContext($package));
                     }
                 }

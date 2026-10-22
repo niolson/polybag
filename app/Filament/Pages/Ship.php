@@ -9,7 +9,9 @@ use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\Enums\AppMode;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSourceKind;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
 use App\Exceptions\PackageDraftIncompleteException;
@@ -55,6 +57,12 @@ class Ship extends Page
     private const RATE_LOCK_SECONDS = 75;
 
     private const RATE_LOCK_WAIT_SECONDS = 70;
+
+    /**
+     * Shown in Demo beside Amazon Buy Shipping rates, which come from the
+     * sandbox while the order was read from production (`live-store-demo/03`).
+     */
+    public const CANNED_AMAZON_RATES_NOTICE = 'Amazon\'s sandbox returns the same fixed offers whatever the order, so these Amazon rates are not this order\'s. A Label bought from them is a sandbox specimen.';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-paper-airplane';
 
@@ -387,7 +395,25 @@ class Ship extends Page
             $this->notifyWarning($exclusion['carrier'].' excluded', $exclusion['reason']);
         }
 
+        if ($this->showsCannedAmazonRates($options)) {
+            $this->notifyWarning('Amazon sandbox rates', self::CANNED_AMAZON_RATES_NOTICE);
+        }
+
         $this->applyRateOptions($options);
+    }
+
+    /**
+     * Whether these are Amazon Buy Shipping rates from the sandbox for an
+     * Amazon order, read in Demo from production (`live-store-demo/03`). The
+     * sandbox answers every order with the same offers, so the page says so
+     * rather than let them pass for this order's.
+     */
+    private function showsCannedAmazonRates(PackageShippingOptions $options): bool
+    {
+        return AppMode::current() === AppMode::Demo
+            && collect($options->rateOptions)->contains(
+                fn (array $rate): bool => ($rate['observedService']['source'] ?? null) === PostageSourceKind::Amazon->value
+            );
     }
 
     /**

@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use Saloon\Contracts\Body\HasBody;
 use Saloon\Enums\Method;
 use Saloon\Exceptions\Request\FatalRequestException;
@@ -21,7 +22,7 @@ use Saloon\Traits\Body\HasJsonBody;
  *
  * `ineligibleRates` names services that exist but did not apply, with reason codes.
  */
-class GetShippingRates extends Request implements DeclaresSandboxRegion, HasBody
+class GetShippingRates extends Request implements DeclaresSandboxRegion, HasBody, PostageRequest
 {
     use HasJsonBody;
 

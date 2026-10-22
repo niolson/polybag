@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AddressValidationOutcome;
 use App\Enums\AddressValidator;
+use App\Enums\AppMode;
 use App\Enums\Deliverability;
 use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
@@ -81,6 +82,15 @@ class Shipment extends Model
         'validated_residential' => null,
         'validated_carrier_route' => null,
     ];
+
+    /**
+     * Line 1 of an address imported without the buyer's street, name, phone
+     * or email: in Demo an Amazon order keeps only its city, state, postal
+     * code and country (`live-store-demo/03`). It reads as a placeholder on a
+     * pack slip and a Label, and could never be mistaken for a street. Ask
+     * {@see isAddressWithheld()} rather than comparing it.
+     */
+    public const WITHHELD_ADDRESS_LINE = 'Address withheld';
 
     /**
      * Recipient data `PurgePiiCommand` clears once retention passes
@@ -477,6 +487,20 @@ class Shipment extends Model
     public function isAmazonFulfilled(): bool
     {
         return ($this->metadata['amazon_fulfilled_by'] ?? null) === AmazonSource::FULFILLED_BY_AMAZON;
+    }
+
+    /**
+     * Whether this address was imported withheld: no street, name, phone or
+     * email, so no validator checks it and a carrier is told only where it
+     * is going ({@see self::WITHHELD_ADDRESS_LINE}). Only a Demo install
+     * withholds an address: elsewhere the same text is an ordinary street
+     * someone typed, and it is validated like any other. The single test
+     * every other withheld check reads.
+     */
+    public function isAddressWithheld(): bool
+    {
+        return AppMode::current() === AppMode::Demo
+            && $this->address1 === self::WITHHELD_ADDRESS_LINE;
     }
 
     /**

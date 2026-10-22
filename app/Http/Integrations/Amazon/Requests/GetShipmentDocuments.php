@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use Saloon\Enums\Method;
 use Saloon\Http\Request;
 
@@ -17,7 +18,7 @@ use Saloon\Http\Request;
  * Amazon Shipping on an order from another channel, where the sandbox took
  * `format` (`amazon-shipping-external-orders/01`).
  */
-class GetShipmentDocuments extends Request implements DeclaresSandboxRegion
+class GetShipmentDocuments extends Request implements DeclaresSandboxRegion, PostageRequest
 {
     protected Method $method = Method::GET;
 

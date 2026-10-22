@@ -9,6 +9,7 @@ use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\ShipmentStatus;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\SearchCatalogItems;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
@@ -16,8 +17,10 @@ use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Product;
+use App\Models\Shipment;
 use App\Services\ClientContext;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\AmazonBuyerDataFilter;
 use App\Services\ShipmentImport\AmazonClosedOrderCloser;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -153,7 +156,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         }
 
         if ($this->isHistoricalImport()) {
-            if ((bool) app(SettingsService::class)->get('sandbox_mode', false)) {
+            if ($this->readsFromSandbox()) {
                 throw new RuntimeException('Historical Amazon order imports require production mode. Disable sandbox mode in App Settings and try again.');
             }
 
@@ -184,7 +187,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         $this->hasSentCatalogRequest = false;
         $this->closedOrders = [];
         $this->pendingReadState = null;
-        $sandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        $sandbox = $this->readsFromSandbox();
         $marketplaceId = (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER');
 
         if ($sandbox) {
@@ -428,7 +431,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 throw $exception;
             }
 
-            array_push($orders, ...($json['orders'] ?? []));
+            array_push($orders, ...$this->buyerDataFilter()->filter($json['orders'] ?? []));
             $read['token'] = $json['pagination']['nextToken'] ?? null;
             $read['token_at'] = $read['token'] === null ? null : $now->toIso8601String();
         } while ($read['token'] !== null);
@@ -499,7 +502,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
 
             $json = $this->connector->send(new SearchOrders($pageQuery))->json();
 
-            $orders = $json['orders'] ?? [];
+            $orders = $this->buyerDataFilter()->filter($json['orders'] ?? []);
             $paginationToken = $sandbox ? null : ($json['pagination']['nextToken'] ?? null);
 
             foreach ($orders as $order) {
@@ -671,7 +674,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             );
         }
 
-        $sandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        $sandbox = app(AmazonSpApiEnvironment::class)->usesSandbox(ConfirmShipment::class);
         $carrier = trim((string) ($data['carrier'] ?? ''));
         $carrierCode = self::CARRIER_MAP[$carrier] ?? self::CARRIER_MAP[strtoupper($carrier)] ?? 'Other';
 
@@ -824,6 +827,12 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     private function mapOrderToShipment(array $order): array
     {
         $address = $order['recipient']['deliveryAddress'] ?? [];
+
+        // Already reduced to where the order is going when it was read.
+        if ($this->buyerDataFilter()->withholds()) {
+            $address['addressLine1'] = Shipment::WITHHELD_ADDRESS_LINE;
+        }
+
         $items = $order['orderItems'] ?? [];
         $recipientAvailable = filled($address['addressLine1'] ?? null) && filled($address['city'] ?? null);
         $addressType = is_string($address['addressType'] ?? null) ? $address['addressType'] : null;
@@ -845,8 +854,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         }
 
         // Sum line item values using proceeds breakdowns.
-        $sandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
-        $useOrderedQuantity = $sandbox || $this->isHistoricalImport();
+        $useOrderedQuantity = $this->readsFromSandbox() || $this->isHistoricalImport();
         $totalValue = 0;
         foreach ($items as $item) {
             $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
@@ -859,9 +867,10 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             $totalValue += $unitPrice * $qty;
         }
 
-        // Split name into first/last
-        $fullName = $address['name'] ?? '';
-        $nameParts = preg_split('/\s+/', trim($fullName), 2);
+        // Split name into first/last. No name, as in Demo, is no first name
+        // rather than an empty one.
+        $fullName = trim((string) ($address['name'] ?? ''));
+        $nameParts = $fullName === '' ? [] : preg_split('/\s+/', $fullName, 2);
         $firstName = $nameParts[0] ?? null;
         $lastName = $nameParts[1] ?? null;
 
@@ -923,8 +932,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     private function mapOrderItemToShipmentItem(array $item): array
     {
         $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
-        $sandbox = (bool) app(SettingsService::class)->get('sandbox_mode', false);
-        $qtyRemaining = ($sandbox || $this->isHistoricalImport())
+        $qtyRemaining = ($this->readsFromSandbox() || $this->isHistoricalImport())
             ? $qtyOrdered
             : max(0, $qtyOrdered - (int) ($item['fulfillment']['quantityFulfilled'] ?? 0));
 
@@ -1227,6 +1235,22 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 'asin_count' => $asinCount,
                 'error' => $error,
             ]);
+    }
+
+    /**
+     * Whether the order search returns Amazon's static sandbox test cases
+     * rather than the seller's orders. Asked of the same place the connector
+     * picks its host from, so the two never disagree: in Demo the orders are
+     * read from production and are real, though postage is on the sandbox.
+     */
+    private function readsFromSandbox(): bool
+    {
+        return app(AmazonSpApiEnvironment::class)->readsFromSandbox();
+    }
+
+    private function buyerDataFilter(): AmazonBuyerDataFilter
+    {
+        return app(AmazonBuyerDataFilter::class);
     }
 
     private function isHistoricalImport(): bool

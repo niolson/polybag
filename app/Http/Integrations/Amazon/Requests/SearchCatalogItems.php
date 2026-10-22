@@ -2,10 +2,11 @@
 
 namespace App\Http\Integrations\Amazon\Requests;
 
+use App\Http\Integrations\Amazon\ReadsSellerData;
 use Saloon\Enums\Method;
 use Saloon\Http\Request;
 
-class SearchCatalogItems extends Request
+class SearchCatalogItems extends Request implements ReadsSellerData
 {
     protected Method $method = Method::GET;
 

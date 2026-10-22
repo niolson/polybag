@@ -61,9 +61,9 @@ class AmazonSpApiConnector extends Connector
     }
 
     /**
-     * The host every request starts from. A request implementing
-     * {@see DeclaresSandboxRegion} moves off it in {@see self::boot()}; production is
-     * North America for every API we call, so nothing moves off it there.
+     * The host a request starts from: the one a request that declares no kind
+     * goes to. {@see self::boot()} then moves each request to the host
+     * {@see AmazonSpApiEnvironment} gives it.
      */
     public function resolveBaseUrl(): string
     {
@@ -71,26 +71,32 @@ class AmazonSpApiConnector extends Connector
     }
 
     /**
-     * Amazon scopes sandbox test cases by region, so the host has to be resolved per
-     * API rather than once for the connector. Only a request that says which region
-     * its test cases live in gets moved, and only in sandbox.
+     * Resolve the host per request. In Demo a request that only reads the
+     * seller's data goes to production while postage stays on the sandbox
+     * ({@see AmazonSpApiEnvironment}), so one connector serves both.
+     *
+     * Amazon also scopes sandbox test cases by region, so a sandbox request
+     * that says which region its test cases live in is moved there.
+     * Production is North America for every API and marketplace we call
+     * (`sellingpartnerapi-na` serves the US, Canada, Mexico and Brazil), so
+     * nothing moves off it there.
      */
     public function boot(PendingRequest $pendingRequest): void
     {
         $request = $pendingRequest->getRequest();
 
-        if (! $request instanceof DeclaresSandboxRegion || ! $this->inSandbox()) {
-            return;
-        }
+        $host = match (true) {
+            ! app(AmazonSpApiEnvironment::class)->usesSandbox($request) => $this->baseUrl,
+            $request instanceof DeclaresSandboxRegion => $request->sandboxRegion()->sandboxUrl(),
+            default => $this->sandboxUrl,
+        };
 
-        $pendingRequest->setUrl(
-            $request->sandboxRegion()->sandboxUrl().$request->resolveEndpoint()
-        );
+        $pendingRequest->setUrl(rtrim($host, '/').'/'.ltrim($request->resolveEndpoint(), '/'));
     }
 
     private function inSandbox(): bool
     {
-        return (bool) app(SettingsService::class)->get('sandbox_mode', false);
+        return app(SettingsService::class)->isSandboxMode();
     }
 
     protected function defaultHeaders(): array
