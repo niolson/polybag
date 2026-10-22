@@ -627,6 +627,34 @@ it('sends only destination postal code and country on sandbox rate requests', fu
     });
 });
 
+it('offers the sandbox ground rate to a residence as Home Delivery', function (bool $sandbox, bool $residential, string $expected): void {
+    app(SettingsService::class)->set('sandbox_mode', $sandbox);
+
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(['output' => ['rateReplyDetails' => [[
+            'serviceType' => 'FEDEX_GROUND',
+            'serviceName' => 'FedEx Ground®',
+            'ratedShipmentDetails' => [['totalNetCharge' => 18.10]],
+        ]]]]),
+    ]);
+
+    $rates = $this->adapter->getRates(new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '30332',
+        residential: $residential,
+        packages: [new PackageData(weight: 0.7, length: 6, width: 6, height: 6)],
+    ), ['FEDEX_GROUND', 'GROUND_HOME_DELIVERY']);
+
+    expect($rates)->toHaveCount(1)
+        ->and($rates->first()->serviceCode)->toBe($expected)
+        ->and($rates->first()->metadata['serviceType'])->toBe($expected);
+})->with([
+    'sandbox residence' => [true, true, 'GROUND_HOME_DELIVERY'],
+    'sandbox business' => [true, false, 'FEDEX_GROUND'],
+    'production residence' => [false, true, 'FEDEX_GROUND'],
+]);
+
 it('cancels a FedEx shipment', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),

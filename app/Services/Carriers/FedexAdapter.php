@@ -1337,6 +1337,8 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
         $results = collect();
 
         foreach ($rateReplyDetails as $detail) {
+            $detail = $this->asSandboxHomeDelivery($detail, $request);
+
             if (! empty($serviceCodes) && ! in_array($detail['serviceType'] ?? '', $serviceCodes)) {
                 continue;
             }
@@ -1370,6 +1372,28 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
         }
 
         return $results;
+    }
+
+    /**
+     * The sandbox rate request carries no residential flag (see
+     * buildRateApiRequest()), so its canned reply offers FEDEX_GROUND to a
+     * residence. The sandbox Ship API checks the flag the label sends and
+     * refuses that pairing (SERVICETYPEANDADDRESS.MISMATCH), so offer the
+     * ground rate as Home Delivery, as production rating would.
+     *
+     * @param  array<string, mixed>  $detail
+     * @return array<string, mixed>
+     */
+    private function asSandboxHomeDelivery(array $detail, RateRequest $request): array
+    {
+        if (! $this->isSandbox()
+            || ! $request->residential
+            || $request->destinationCountry !== 'US'
+            || ($detail['serviceType'] ?? null) !== 'FEDEX_GROUND') {
+            return $detail;
+        }
+
+        return [...$detail, 'serviceType' => 'GROUND_HOME_DELIVERY', 'serviceName' => 'FedEx Home Delivery®'];
     }
 
     /**
