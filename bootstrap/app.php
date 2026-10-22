@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\ContentSecurityPolicy;
+use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\EnsureUserIsManager;
 use Illuminate\Console\Scheduling\Schedule;
@@ -71,6 +72,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->redirectGuestsTo(fn (): string => route('filament.app.auth.login'));
         $middleware->append(ContentSecurityPolicy::class);
+        // The panel registers it too, since its routes carry their own stack.
+        $middleware->appendToGroup('web', EnsureDemoHasNotEnded::class);
         // polybag_last_instance is read by polybag-connect, a separate app with
         // its own APP_KEY — Laravel's default cookie encryption would make it
         // undecipherable there, defeating the whole point of the cookie.

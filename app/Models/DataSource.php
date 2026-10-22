@@ -6,6 +6,7 @@ use App\Enums\OffAmazonShippingStatus;
 use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
+use App\Services\DemoLifetime;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\DataSourceFactory;
@@ -82,14 +83,17 @@ class DataSource extends Model
     /**
      * Connections whose orders are imported: active, with import turned on.
      * Postage bound to the originating connection needs only `active`, so this
-     * is for the import paths alone.
+     * is for the import paths alone. None, once a demo has ended
+     * ({@see DemoLifetime}).
      *
      * @param  Builder<DataSource>  $query
      * @return Builder<DataSource>
      */
     public function scopeImporting(Builder $query): Builder
     {
-        return $query->where('active', true)->where('import_enabled', true);
+        return $query->where('active', true)
+            ->where('import_enabled', true)
+            ->when(app(DemoLifetime::class)->hasEnded(), fn (Builder $q) => $q->whereRaw('1 = 0'));
     }
 
     /**
@@ -107,7 +111,7 @@ class DataSource extends Model
 
     public function importsOrders(): bool
     {
-        return $this->active && $this->import_enabled;
+        return $this->active && $this->import_enabled && ! app(DemoLifetime::class)->hasEnded();
     }
 
     /**
