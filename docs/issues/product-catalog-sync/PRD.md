@@ -31,11 +31,11 @@ What each source can supply:
 | Product field | Shopify | Amazon |
 |---|---|---|
 | `sku`, `name` | Yes | Yes |
-| `weight` | Variant weight | Seller's listing (`03` checks how often) |
+| `weight` | Variant weight | Seller's listing (93% of listings in `03`) |
 | `barcode`, `gtin` | Variant barcodes | Catalog identifiers |
 | `manufacturer_part_number` | Typed `NS_PID`, else the connection's metafield | Catalog summary |
-| `hs_tariff_number` | `inventoryItem` | **No.** Not known to be anywhere; `03` looks |
-| `country_of_origin` | `inventoryItem` | **No.** Zero in the 2026-10-05 probe, catalog and listings |
+| `hs_tariff_number` | `inventoryItem` | **No.** In neither listings nor catalog (`03`) |
+| `country_of_origin` | `inventoryItem` | **No.** None in listings. The catalog's origin fields cover under 7% of ASINs and are mostly free text (`03`) |
 
 So a synced Shopify Product can be customs-ready. A synced Amazon Product will normally
 still need an HS code and an origin. The existing *Missing Customs Data* filter cannot
@@ -115,23 +115,29 @@ listings per search, however it is paged
 ([Amazon](https://developer-docs.amazon/sp-api/docs/search-for-listings-items-by-id)).
 It also accepts `createdAfter`, `createdBefore` and `sortBy=createdDate`. So:
 
-1. Search a creation-date window with `pageSize=20`, following `nextToken`.
-2. If the window reaches 1,000 listings, discard it and search its two halves instead.
-3. Start from one window covering the account's whole history, and move on when a window
-   comes back under the cap.
+1. Search a creation-date window with `pageSize=20`.
+2. If the first page's `numberOfResults` is 1,000 or more, discard the window and search
+   its two halves instead. `numberOfResults` is the window's true total, not capped, so
+   this needs no paging to the cap (`03`: it equaled the listings fetched in 157 of 157
+   windows).
+3. Otherwise follow `nextToken` to the end. Start from one window covering the account's
+   whole history.
 
 This fails in one case: a bulk upload can create more than 1,000 listings within a
 single second, and no window can split them. If a one-second window still reaches the
 cap, the run carries on but is recorded as **incomplete**, naming the window. It is never
-reported as complete.
+reported as complete. In `03` the busiest second held 310.
 
-The merchant listings report (`GET_MERCHANT_LISTINGS_ALL_DATA`) lists every SKU with no
-cap and would avoid windows entirely, but it needs the Reports API, and whether the app's
-roles allow that report is unknown. `03` finds out. If it is available, `04` may use it
-to enumerate SKUs and fetch listing attributes 20 SKUs at a time by `identifiers`.
+The merchant listings report (`GET_MERCHANT_LISTINGS_ALL_DATA`) is open to the app's
+roles, but `03` found it is **not a complete SKU list**: it left out 525 of 29,728 listings,
+most of them recent. Its only extra rows were listings with no ASIN. It is not used.
 
-Rate: 5 requests a second by default. A 20,000-SKU seller is about 1,000 listing calls,
-a few minutes on a queue.
+A listing with no summary (no ASIN, typically one Amazon rejected) has no `createdDate`
+and is never returned by a date search. It has nothing to scan by, so that is accepted.
+
+Rate: `03` measured a 29,728-SKU account at 1,762 listing calls in 16 minutes. The
+calls are latency-bound well under the 5-per-second limit. The catalog step for the same
+account took 1,277 calls in 11.5 minutes at 2 per second.
 
 ### What to read
 
@@ -150,14 +156,19 @@ to connect through OAuth.
 order:
 
 1. The listing's `item_package_weight`. The item ready to ship is the closer match to what
-   goes in the box.
-2. The listing's `item_weight`.
+   goes in the box. Rare in practice: 1 listing in 29,728 in `03`.
+2. The listing's `item_weight` (93% filled in `03`, all in pounds, at most 16 lb).
+   `website_shipping_weight` is not a further fallback: in `03` it repeated `item_weight`
+   and was never present without it.
 3. Nothing from the catalog. Its merged ASIN record carries obviously wrong weights often
    enough that a blank is better: a blank shows up under *Missing weight* and gets fixed,
-   but a wrong weight goes onto a customs declaration.
+   but a wrong weight goes onto a customs declaration. `03` found weights in milligrams
+   and up to 2,410 lb in it, and listing and catalog differing by more than ×2 on 16–27%
+   of products.
 
 Convert `pounds`, `ounces`, `grams` and `kilograms`. Ignore other units, values that are
-not positive, and values above a sanity ceiling, which `04` sets from `03`'s numbers.
+not positive, and values above **150 lb**, the largest parcel the direct carriers accept.
+No listing weight in `03` came near it.
 
 ## Shared
 
@@ -222,8 +233,8 @@ not fixed here:
 |---|---|---|---|
 | [01](issues/01-make-products-unique-by-sku.md) | Make Products unique by client and SKU | `ready-for-agent` | — |
 | [02](issues/02-sync-a-shopify-product-catalog.md) | Sync a Shopify product catalog | `ready-for-agent` | `01` |
-| [03](issues/03-probe-amazon-listings-for-weights-and-customs-fields.md) | Probe Amazon listings for weights and customs fields | `ready-for-human` | — |
-| [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `needs-info` | `01`, `02`, `03` |
+| [03](issues/03-probe-amazon-listings-for-weights-and-customs-fields.md) | Probe Amazon listings for weights and customs fields | `done` | — |
+| [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `ready-for-agent` | `01`, `02` |
 | [05](issues/05-suggest-hs-codes.md) | Suggest HS codes for Products without one | `needs-triage` | — |
 
 About four to five days for `01`–`04`. `05` is unsized.
@@ -260,3 +271,10 @@ filters include both ends, so `04` deduplicates by SKU.
 **2026-10-21 — third review.** Windows now share their boundary (`[a, m]`, `[m, b]`):
 an offset of one second dropped listings created a fraction of a second after it. `02`
 now says an order import, not only a manual edit, replaces a synced name.
+
+**2026-10-22 — `03` probed a production account.** Date windows are complete and are the
+only path: the report is allowed but misses recent listings, so `04` loses its report
+path and the comma-SKU handling with it. Windows split from `numberOfResults`. The weight
+ceiling is 150 lb. Amazon has no HS codes, and only sparse free-text origin, so `04`
+reads no customs fields. Listings and catalog for a 30k-SKU account take about
+28 minutes, so `04` runs the catalog step as its own job.

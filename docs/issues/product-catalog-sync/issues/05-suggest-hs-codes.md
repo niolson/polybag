@@ -8,8 +8,8 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), *Goal*. Not blocked. `03` may find HS codes in Amazon's data, which would
-narrow this.
+[PRD](../PRD.md), *Goal*. Not blocked. `03` found no HS code anywhere in Amazon's listings
+or catalog, so every Amazon Product needs one from elsewhere.
 
 ## Problem
 
@@ -55,6 +55,16 @@ hand before its first EU or GB parcel.
   form built from an `exportList` copy of the schedule held locally, not called on each
   keystroke. Whatever does the suggesting, this checks what is accepted and shows what it
   means.
+
+- **Amazon's UNSPSC code**, as an input, not an answer. `03` found the catalog's
+  `unspsc_code` filled on 98% of one seller's 22,950 ASINs, and on 99–100% in every
+  display group of a 5,574-ASIN sample across categories. Codes are mostly class level
+  (60%) or commodity level (36%), and consistent within a product kind: men's t-shirts
+  `53101600` (shirts), running shoes `53111600`. Some groceries carry only the segment.
+  UNSPSC is a product taxonomy, not a tariff schedule, and has no official mapping to HS.
+  A class narrows the HS chapter but not the 6-digit code (a shirt's heading depends on
+  knit or woven, and its subheading on fiber), so it could seed a picker or a classifier's
+  prompt. The catalog's browse-node `classifications` are another such signal.
 
 For each: inputs (title, description, category, image?), output (6-digit HS, or a
 10-digit national tariff code, and for which countries), confidence, price, and rate limits.
