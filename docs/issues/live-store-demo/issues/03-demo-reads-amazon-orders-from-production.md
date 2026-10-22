@@ -1,6 +1,6 @@
 # Demo reads Amazon orders from production, buys postage from the sandbox
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -129,23 +129,92 @@ the sandbox returns fixed offers whatever the order, and the Label is a sandbox 
 
 ## Acceptance
 
-- [ ] In Demo, an Amazon connection's order search, order items, catalog lookups and
+- [x] In Demo, an Amazon connection's order search, order items, catalog lookups and
       marketplace discovery go to the production host, and the seller's open orders
       import
-- [ ] In Demo, every Shipping v2 request goes to the sandbox host, including through
+- [x] In Demo, every Shipping v2 request goes to the sandbox host, including through
       `AmazonShippingAdapter`, and a request class that declares neither kind does too
-- [ ] In Demo, a test proves no postage request can reach the production host, whatever
+- [x] In Demo, a test proves no postage request can reach the production host, whatever
       host the order was read from
-- [ ] In Demo, `AmazonSource` treats the imported orders as real: no JP test search, the
+- [x] In Demo, `AmazonSource` treats the imported orders as real: no JP test search, the
       quantity left to ship, product auto-update as in production, and historical
       import allowed
-- [ ] In Demo, an imported Amazon Shipment holds only city, state or region, postal code
+- [x] In Demo, an imported Amazon Shipment holds only city, state or region, postal code
       and country from the buyer's address, with `Address withheld` as line 1, and no
       name, phone or email. Nothing beyond those fields is logged
-- [ ] In Demo, an Offer quoted on the sandbox for a production-read order redeems
-- [ ] In Demo, a withheld address is not run through address validation, the Shipment
+- [x] In Demo, an Offer quoted on the sandbox for a production-read order redeems
+- [x] In Demo, a withheld address is not run through address validation, the Shipment
       is not held as invalid, and a sandbox Label can be bought for it from USPS (with
       `ignoreBadAddress`), UPS and FedEx (as Home Delivery to a residence)
-- [ ] In Demo, the Ship page notes that Amazon sandbox rates are canned
-- [ ] In Production and Dev, every Amazon request follows `sandbox_mode` as today, and
+- [x] In Demo, the Ship page notes that Amazon sandbox rates are canned
+- [x] In Production and Dev, every Amazon request follows `sandbox_mode` as today, and
       USPS never sends `ignoreBadAddress` in production
+
+## Comments
+
+**2026-10-22 — implemented.**
+
+- **The split.** Two marker interfaces in `app/Http/Integrations/Amazon/`:
+  `ReadsSellerData` (`SearchOrders`, `SearchCatalogItems`,
+  `GetMarketplaceParticipations`) and `PostageRequest` (`GetShippingRates`,
+  `PurchaseShipment`, `CancelAmazonShipment`, `GetShipmentDocuments`,
+  `GetShipmentTracking`, `GetAdditionalInputsSchema`). `ConfirmShipment` declares neither.
+  `AmazonSpApiEnvironment::usesSandbox()` is the one answer: outside Demo it is
+  `sandbox_mode`; in Demo a read goes to production and everything else, a request marked
+  both included, stays on the sandbox. `AmazonSpApiConnector::boot()` sets every
+  request's host from it, then applies `DeclaresSandboxRegion` only to a sandbox request,
+  so the order search's Far East sandbox region is not used in Demo. Production stays the
+  North America host, which serves every marketplace `AmazonMarketplace` lists. Nothing
+  else is sandbox-specific: the LWA token endpoint and the broker refresh are the same in
+  both, so a connection's credentials work against production unchanged.
+- **One source of truth.** `AmazonSpApiEnvironment::readsFromSandbox()` asks the same
+  method about `SearchOrders`. `AmazonSource` keys the JP test search, ordered versus
+  remaining quantity, the catalog auto-update and the historical-import refusal on it;
+  `AmazonMarketplaceDiscoveryService` and the connection page's historical-import and
+  marketplace-refresh actions do too. The export's sandbox payload and context ask
+  `usesSandbox(ConfirmShipment::class)`.
+- **Offers.** `SourceEnvironment` is unchanged in behavior and documented as the postage
+  environment. A Demo test imports an order from the production host, quotes it on the
+  sandbox, and buys it: the Offer is stamped Sandbox and redeems.
+- **No buyer data.** `AmazonBuyerDataFilter` runs on each page of the order search as
+  soon as it is decoded, so the import, its order cache and the closed-order closer never
+  hold more. In Demo it drops the buyer block and the delivery preference, keeps only
+  city, state or region, postal code and country of the delivery address, and drops item
+  gift messages and customizations. `AmazonSource` then writes
+  `Shipment::WITHHELD_ADDRESS_LINE` (`Address withheld`) as line 1; name, company, line 2,
+  phone, email and the address type stay null. `Shipment::isAddressWithheld()` and
+  `AddressData::isWithheld()` recognize it. Keyed on `AppMode::Demo`.
+- **`RECIPIENT`.** The v2026-01-01 schema in `tests/Fixtures/Schemas/` puts the delivery
+  address only in `recipient.deliveryAddress`, so city, state, postal code and country
+  cannot be had without `RECIPIENT`. The same dataset carries the recipient's name,
+  company, every street line, phone, address type and delivery instructions, and the
+  import reads all of them today with no restricted data token, so `RECIPIENT` releases
+  the full address to this app. Settled from the code and schema, with no live call. Demo
+  keeps asking for `RECIPIENT` and strips the response; it never asks for `BUYER`, since
+  the JP test search that does is not used in Demo.
+- **The street line.** A withheld address reaches a carrier as residential, whatever the
+  order said, and with the name "Name withheld", never stored. USPS, UPS and FedEx each
+  refuse a recipient with no name or company, and a company would make it a business.
+  USPS sets `toAddress.ignoreBadAddress` on a domestic label only in sandbox and only for
+  a withheld address; the hand-written USPS label schema allows it. UPS sends
+  `nonvalidate` and a residential indicator. FedEx rates it residential, so the sandbox
+  Ground rate is offered as Home Delivery (914af49f), and the label carries
+  `residential: true`. `ShipmentValidationPlan` names no validator for a withheld address,
+  so it stays not checked, records no attempt, and is never held.
+- **Ship page.** In Demo, rates that include an Amazon Buy Shipping offer show the
+  "Amazon sandbox rates" warning on load, the way `02`'s exclusion warning shows.
+
+Tests: `tests/Feature/DemoAmazonReadsProductionTest.php` (host per request class,
+enumerating every postage request; an unmarked request; Production and Dev; the Demo
+import, catalog, historical import and discovery; buyer data kept out of Shipments and
+logs; validation skipped; the Offer redeemed; Amazon Shipping for another channel; the
+Ship page note) and `tests/Feature/DemoWithheldAddressLabelTest.php` (USPS
+`ignoreBadAddress` and never in production, UPS `nonvalidate`, FedEx Home Delivery to a
+residence).
+
+Not checked live. Before the first live-Amazon demo, a person should check that a
+production order search in Demo returns the seller's open orders and that the stored
+Shipment holds only the four address fields. They should also buy one sandbox Label from
+each of USPS, UPS and FedEx for an `Address withheld` Shipment with the "Name withheld"
+stand-in, since the 2026-10-22 sandbox runs used a made-up name. A withheld address to
+another country is not handled: USPS's international label gets no `ignoreBadAddress`.
