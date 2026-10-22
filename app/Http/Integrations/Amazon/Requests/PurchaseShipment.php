@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use App\Models\ShippingOffer;
 use Saloon\Contracts\Body\HasBody;
 use Saloon\Enums\Method;
@@ -26,7 +27,7 @@ use Saloon\Traits\Body\HasJsonBody;
  * comes back `TOKEN_EXPIRED`. That is what {@see ShippingOffer::$expires_at}
  * tracks, since the quote publishes no expiry of its own.
  */
-class PurchaseShipment extends Request implements DeclaresSandboxRegion, HasBody
+class PurchaseShipment extends Request implements DeclaresSandboxRegion, HasBody, PostageRequest
 {
     use HasJsonBody;
 

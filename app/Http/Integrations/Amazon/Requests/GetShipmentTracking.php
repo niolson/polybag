@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use Saloon\Enums\Method;
 use Saloon\Http\Request;
 
@@ -16,7 +17,7 @@ use Saloon\Http\Request;
  * this: a parcel carried by a courier we hold no row for still has to be
  * trackable, and Amazon holds the entitlement we do not.
  */
-class GetShipmentTracking extends Request implements DeclaresSandboxRegion
+class GetShipmentTracking extends Request implements DeclaresSandboxRegion, PostageRequest
 {
     protected Method $method = Method::GET;
 

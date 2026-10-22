@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use Saloon\Enums\Method;
 use Saloon\Http\Request;
 
@@ -21,7 +22,7 @@ use Saloon\Http\Request;
  *
  * The one sandbox case is static and returns `payload: {}`.
  */
-class GetAdditionalInputsSchema extends Request implements DeclaresSandboxRegion
+class GetAdditionalInputsSchema extends Request implements DeclaresSandboxRegion, PostageRequest
 {
     protected Method $method = Method::GET;
 

@@ -30,7 +30,7 @@
       }
     },
     "DomesticAddress": {
-      "description": "UspsAdapter::buildDomesticAddress(). ZIPCode is the first five characters of the postal code and is a string, never a number. The party is named either by firstName and lastName together or by firm; addNameFields() folds a lone first or last name into firm.",
+      "description": "UspsAdapter::buildDomesticAddress(). ZIPCode is the first five characters of the postal code and is a string, never a number. The party is named either by firstName and lastName together or by firm; addNameFields() folds a lone first or last name into firm. ignoreBadAddress is set only by createDomesticShipment(), on a sandbox label to a withheld address (live-store-demo/03), and only ever true.",
       "type": "object",
       "required": ["streetAddress", "city", "state", "ZIPCode"],
       "additionalProperties": false,
@@ -42,7 +42,8 @@
         "ZIPCode": { "type": "string", "pattern": "^[0-9]{5}$" },
         "firstName": { "type": "string", "minLength": 1, "maxLength": 30 },
         "lastName": { "type": "string", "minLength": 1, "maxLength": 30 },
-        "firm": { "type": "string", "minLength": 1, "maxLength": 38 }
+        "firm": { "type": "string", "minLength": 1, "maxLength": 38 },
+        "ignoreBadAddress": { "const": true }
       },
       "anyOf": [
         { "required": ["firstName", "lastName"] },

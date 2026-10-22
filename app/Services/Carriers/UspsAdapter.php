@@ -55,6 +55,7 @@ use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Services\SettingsService;
 use App\Services\Shipping\ContentsFilter;
 use App\Support\LabelText;
 use App\Support\UspsProductIdentifier;
@@ -936,6 +937,10 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
 
             $toAddress = $this->buildDomesticAddress($request->toAddress, $request);
             $fromAddress = $this->buildDomesticAddress($request->fromAddress, $request);
+
+            if ($this->ignoresBadAddress($request->toAddress)) {
+                $toAddress['ignoreBadAddress'] = true;
+            }
 
             $metadata = $request->selectedRate->metadata;
 
@@ -2249,6 +2254,18 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         return false;
+    }
+
+    /**
+     * Whether the label asks USPS to print an address it cannot match. Only a
+     * withheld address (`live-store-demo/03`), and only in sandbox: USPS
+     * refuses its placeholder street ("Primary Address Number missing")
+     * unless told to ignore it, and production must keep refusing a bad
+     * address.
+     */
+    private function ignoresBadAddress(AddressData $address): bool
+    {
+        return $address->isWithheld() && app(SettingsService::class)->isSandboxMode();
     }
 
     /**

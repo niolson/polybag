@@ -27,11 +27,29 @@ readonly class AddressData
         public ?bool $residential = null,
     ) {}
 
+    /**
+     * The name a carrier is given for a withheld address, which names no one
+     * (`live-store-demo/03`). USPS, UPS and FedEx each refuse a recipient
+     * with neither a name nor a company, and a company would make the
+     * recipient a business. Never stored: the Shipment keeps no name.
+     */
+    public const WITHHELD_FIRST_NAME = 'Name';
+
+    public const WITHHELD_LAST_NAME = 'withheld';
+
+    /**
+     * A withheld address ({@see Shipment::isAddressWithheld()}) is always
+     * residential: no validator classifies it, and an imported order's own
+     * classification is withheld with the rest.
+     */
     public static function fromShipment(Shipment $shipment): self
     {
+        $withheld = $shipment->isAddressWithheld();
+        $named = filled($shipment->first_name) || filled($shipment->last_name) || filled($shipment->company);
+
         return new self(
-            firstName: $shipment->first_name ?? '',
-            lastName: $shipment->last_name ?? '',
+            firstName: $withheld && ! $named ? self::WITHHELD_FIRST_NAME : ($shipment->first_name ?? ''),
+            lastName: $withheld && ! $named ? self::WITHHELD_LAST_NAME : ($shipment->last_name ?? ''),
             streetAddress: $shipment->validated_address1 ?? $shipment->address1,
             streetAddress2: $shipment->validated_address2 ?? $shipment->address2,
             city: $shipment->validated_city ?? $shipment->city,
@@ -43,8 +61,17 @@ readonly class AddressData
             email: $shipment->email,
             phoneExtension: $shipment->phone_extension,
             uspsCarrierRoute: $shipment->validated_carrier_route,
-            residential: $shipment->validated_residential ?? $shipment->residential,
+            residential: $withheld ? true : ($shipment->validated_residential ?? $shipment->residential),
         );
+    }
+
+    /**
+     * Whether this is a withheld address: where the parcel is going, with no
+     * street, name, phone or email ({@see Shipment::WITHHELD_ADDRESS_LINE}).
+     */
+    public function isWithheld(): bool
+    {
+        return $this->streetAddress === Shipment::WITHHELD_ADDRESS_LINE;
     }
 
     public static function fromLocation(Location $location): self

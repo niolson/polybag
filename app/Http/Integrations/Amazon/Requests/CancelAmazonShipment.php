@@ -4,6 +4,7 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\PostageRequest;
 use Saloon\Enums\Method;
 use Saloon\Http\Request;
 
@@ -17,7 +18,7 @@ use Saloon\Http\Request;
  * Takes the `shipmentId` `purchaseShipment` returned — not a tracking number
  * and not a rate. A successful cancel returns 200 with an empty payload.
  */
-class CancelAmazonShipment extends Request implements DeclaresSandboxRegion
+class CancelAmazonShipment extends Request implements DeclaresSandboxRegion, PostageRequest
 {
     protected Method $method = Method::PUT;
 

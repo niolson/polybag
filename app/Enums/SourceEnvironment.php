@@ -2,6 +2,7 @@
 
 namespace App\Enums;
 
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Services\SettingsService;
 
 /**
@@ -16,9 +17,15 @@ use App\Services\SettingsService;
  * `carrier-catalog-reset/13`).
  *
  * Derived from the shared `sandbox_mode` setting rather than stored per source,
- * because that setting is what actually decides which host a connector talks
- * to. Recorded on the row at write time so a later flip cannot retroactively
- * relabel what was already observed.
+ * because that setting is what actually decides which host a postage request
+ * goes to. Recorded on the row at write time so a later flip cannot
+ * retroactively relabel what was already observed.
+ *
+ * It is the *postage* environment, not where the order was read. In Demo an
+ * Amazon order is read from production while every quote and purchase stays
+ * on the sandbox (`live-store-demo/03`, {@see AmazonSpApiEnvironment}), so an
+ * Offer quoted there is stamped Sandbox and redeems on the sandbox, whatever
+ * host the order came from.
  */
 enum SourceEnvironment: string
 {

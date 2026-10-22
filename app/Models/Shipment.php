@@ -83,6 +83,15 @@ class Shipment extends Model
     ];
 
     /**
+     * Line 1 of an address imported without the buyer's street, name, phone
+     * or email: in Demo an Amazon order keeps only its city, state, postal
+     * code and country (`live-store-demo/03`). It reads as a placeholder on a
+     * pack slip and a Label, and could never be mistaken for a street. Ask
+     * {@see isAddressWithheld()} rather than comparing it.
+     */
+    public const WITHHELD_ADDRESS_LINE = 'Address withheld';
+
+    /**
      * Recipient data `PurgePiiCommand` clears once retention passes
      * (`pii-retention/02`). `external_tracking_number` is deliberately absent:
      * like a Label's tracking number it identifies a parcel, not a person.
@@ -477,6 +486,16 @@ class Shipment extends Model
     public function isAmazonFulfilled(): bool
     {
         return ($this->metadata['amazon_fulfilled_by'] ?? null) === AmazonSource::FULFILLED_BY_AMAZON;
+    }
+
+    /**
+     * Whether this address was imported withheld: no street, name, phone or
+     * email, so no validator checks it and a carrier is told only where it
+     * is going ({@see self::WITHHELD_ADDRESS_LINE}).
+     */
+    public function isAddressWithheld(): bool
+    {
+        return $this->address1 === self::WITHHELD_ADDRESS_LINE;
     }
 
     /**

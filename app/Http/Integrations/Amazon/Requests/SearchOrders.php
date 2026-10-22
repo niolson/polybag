@@ -4,12 +4,13 @@ namespace App\Http\Integrations\Amazon\Requests;
 
 use App\Enums\AmazonSpApiRegion;
 use App\Http\Integrations\Amazon\DeclaresSandboxRegion;
+use App\Http\Integrations\Amazon\ReadsSellerData;
 use Saloon\Enums\Method;
 use Saloon\Exceptions\Request\FatalRequestException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Request;
 
-class SearchOrders extends Request implements DeclaresSandboxRegion
+class SearchOrders extends Request implements DeclaresSandboxRegion, ReadsSellerData
 {
     protected Method $method = Method::GET;
 
