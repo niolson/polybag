@@ -1,6 +1,6 @@
 # Demo reads Amazon orders from production, buys postage from the sandbox
 
-Status: needs-triage
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -18,56 +18,90 @@ Buy Shipping, and the shipment confirmation. Under sandbox the order search retu
 Amazon's static test cases (JP marketplace) instead of the seller's orders. Demo forces
 sandbox on, so a connected seller's real orders never appear.
 
-## Design question
+## Decision
 
-A live-Amazon demo needs the reads on production and the postage on sandbox:
+Chosen 2026-10-22. In Demo, Amazon **reads from production and buys postage on the
+sandbox**:
 
 | Call | In Demo |
 |---|---|
 | Orders search, order items, catalog | production |
 | Marketplace discovery | production |
-| Buy Shipping `getRates` / `purchaseShipment` | sandbox |
+| Shipping v2 `getRates`, `purchaseShipment`, `cancelShipment`, documents, tracking | sandbox |
 | Shipment confirmation | not sent (`01`) |
 
-Options to decide between:
+The rejected option was to keep Amazon fully sandboxed in Demo and make the live-store
+demo Shopify-only. It was rejected because a seller's own orders are the point of the
+demo, and the split can be made safe.
 
-- **Per-call environment.** `AmazonSource` asks for the environment per operation, from
-  something like `SourceEnvironment::forAmazonRead()` / `forAmazonPostage()`. Demo answers
-  production for reads and sandbox for postage.
-- **Keep Amazon fully sandbox in Demo.** Demo Amazon only with the demo data tools'
-  orders, and the live-store demo is Shopify only.
+### The split lives on the request class
 
-Points against the split, to weigh:
+Each SP-API request class declares whether it is a read or postage, and
+`AmazonSpApiConnector` picks the host from that, the way `DeclaresSandboxRegion` already
+moves a request's sandbox host. The other option, where each call site asks for an
+environment, was rejected because every current and future call site would have to
+choose, and a wrong choice copied into a new call could send a postage request to
+production.
 
-- The sandbox `getRates` ignores the order it is given and returns canned offers, so an
-  offer shown against a real order is fiction. That is acceptable in a demo, but say so
-  on the Ship page.
-- An Offer is bound to its environment (`SourceEnvironment`). An order imported from
-  production with postage quoted on sandbox must not trip that binding.
-- `OffAmazonShippingCheck` notes that `sandbox_mode` is one setting for every carrier.
-  The split must not let a production read leak into a postage call.
+- A **read** request (`SearchOrders`, `SearchCatalogItems`,
+  `GetMarketplaceParticipations`, and any other order or catalog read) goes to production
+  in Demo.
+- A **postage** request (`GetShippingRates`, `PurchaseShipment`,
+  `CancelAmazonShipment`, `GetShipmentDocuments`, `GetShipmentTracking`,
+  `GetAdditionalInputsSchema`) follows `sandbox_mode` as today, which Demo forces on.
+- A request that declares neither follows `sandbox_mode` too, so a new request someone
+  forgets to mark fails safe on the sandbox in Demo.
+- `ConfirmShipment` is a write to the seller's order, not postage. `01` already stops it
+  in Demo, before any connector is built.
+- Outside Demo nothing changes: every request follows `sandbox_mode`.
 
-## Decision
+The Amazon Shipping sale to other channels (`AmazonShippingAdapter`) uses the same
+postage requests, so it stays on the sandbox with no extra work.
 
-Chosen 2026-10-22: **per-call environment**, with two narrowings.
+### `AmazonSource`'s own sandbox branches follow the read environment
 
-- **Demo imports no buyer PII from Amazon.** The order read in Demo keeps only the
-  destination's city, state or region, postal code and country: no buyer or recipient
-  name, street lines, phone or email. That keeps a live-Amazon demo within Amazon's Data
-  Protection Policy without making the demo tenant a PII store, which also shrinks what
-  `04`'s purge has to cover for Amazon. In practice this means Demo does not ask for the
-  restricted data token that releases the shipping address.
-- **Postage stays on sandboxes.** Buy Shipping in Demo is shown with the Amazon Shipping
-  carrier only, from the SP-API sandbox, or the order is rated and bought through the
-  USPS, UPS and FedEx sandbox accounts as direct postage. Shipment confirmation is never
-  sent (`01`).
+`AmazonSource` reads `sandbox_mode` in several places that are really asking "are these
+Amazon's canned test orders?", not "is postage fake?":
+
+- searching the JP test marketplace, with its fixed `includedData`
+- using ordered quantity instead of the quantity left to ship
+- skipping the product auto-update from the catalog
+- refusing a historical import
+
+In a live-Amazon demo the orders are real, so these key on the environment the read
+went to, not on `sandbox_mode`. The same goes for `AmazonMarketplaceDiscoveryService`.
+Put the answer in one place, the same one the connector uses, so the import and the host
+can never disagree.
+
+### Offers and observed services record the postage environment
+
+`SourceEnvironment` stamps an Offer and an observed service with where it was quoted,
+and redemption rejects an Offer whose environment has changed. It stays the postage
+environment. In Demo every Amazon quote and purchase is on the sandbox, so the binding
+holds whatever host the order was read from. Say this in `SourceEnvironment`'s doc
+comment.
+
+### No buyer data is imported in Demo
+
+The order read in Demo keeps only the destination's city, state or region, postal code
+and country: no buyer or recipient name, street lines, phone or email. That keeps a
+live-Amazon demo within Amazon's Data Protection Policy without making the demo tenant a
+PII store, and it shrinks what `04`'s purge has to cover for Amazon.
+
+- In Demo, the order search does not ask for buyer or recipient data beyond what the
+  address fields above need. Check what `RECIPIENT` in `includedData` releases without a
+  restricted data token, and ask for less if the city, state, postal code and country
+  are available another way.
+- Whatever Amazon returns, nothing beyond those four fields is written to a Shipment,
+  logged, or kept in an error context. Drop the rest as soon as the order is parsed.
+- This depends on the mode (Demo), not on the environment.
 
 ### The street line
 
 Settled 2026-10-22 by testing against the carrier sandboxes. Demo imports an Amazon order
 with `Address withheld` as address line 1, which reads as a placeholder on a pack slip
 and a label and could never be mistaken for the buyer's street. Each direct-carrier
-sandbox accepts it, as follows:
+sandbox accepts it:
 
 - **USPS** ships it when the label request sets `ignoreBadAddress`. The adapter does not
   send that flag today, so this issue adds it. Send it only in sandbox, and only for a
@@ -77,21 +111,41 @@ sandbox accepts it, as follows:
 - **FedEx** rates on a canned origin and destination in sandbox, which answers
   `FEDEX_GROUND`. A label to a residence must be bought as `GROUND_HOME_DELIVERY`, and
   914af49f already offers the sandbox Ground rate to a residential US destination as Home
-  Delivery. The label prints the address PolyBag sends, placeholder included. Check that a
-  withheld address still reaches the label request as residential: address validation is
-  what usually classifies it, and it must not run against a placeholder.
+  Delivery. The label prints the address PolyBag sends, placeholder included. A withheld
+  address must still reach the label request as residential, since address validation,
+  which usually classifies it, must not run against a placeholder.
 
-Address validation must skip a withheld address rather than record it as undeliverable.
-In Demo it already uses the fake validator, but the Shipment should not come out marked
-invalid and held from purchase.
+Address validation skips a withheld address rather than recording it as undeliverable,
+so the Shipment is not marked invalid and held from purchase.
 
-Still to settle before this is `ready-for-agent`:
+Buy Shipping in Demo offers the Amazon Shipping carrier from the SP-API sandbox, and the
+order can also be rated and bought through the USPS, UPS and FedEx sandbox accounts as
+direct postage.
 
-- Where the per-call split lives (for example `SourceEnvironment::forAmazonRead()` /
-  `forAmazonPostage()`), and how an Offer's environment binding treats a
-  production-read order quoted on sandbox.
-- The Ship page note that Amazon sandbox rates are canned and ignore the order.
+### The Ship page says the rates are canned
+
+In Demo, when the Ship page shows Amazon sandbox rates for an Amazon order, it says so:
+the sandbox returns fixed offers whatever the order, and the Label is a sandbox specimen.
 
 ## Acceptance
 
-Written once the open points above are settled.
+- [ ] In Demo, an Amazon connection's order search, order items, catalog lookups and
+      marketplace discovery go to the production host, and the seller's open orders
+      import
+- [ ] In Demo, every Shipping v2 request goes to the sandbox host, including through
+      `AmazonShippingAdapter`, and a request class that declares neither kind does too
+- [ ] In Demo, a test proves no postage request can reach the production host, whatever
+      host the order was read from
+- [ ] In Demo, `AmazonSource` treats the imported orders as real: no JP test search, the
+      quantity left to ship, product auto-update as in production, and historical
+      import allowed
+- [ ] In Demo, an imported Amazon Shipment holds only city, state or region, postal code
+      and country from the buyer's address, with `Address withheld` as line 1, and no
+      name, phone or email. Nothing beyond those fields is logged
+- [ ] In Demo, an Offer quoted on the sandbox for a production-read order redeems
+- [ ] In Demo, a withheld address is not run through address validation, the Shipment
+      is not held as invalid, and a sandbox Label can be bought for it from USPS (with
+      `ignoreBadAddress`), UPS and FedEx (as Home Delivery to a residence)
+- [ ] In Demo, the Ship page notes that Amazon sandbox rates are canned
+- [ ] In Production and Dev, every Amazon request follows `sandbox_mode` as today, and
+      USPS never sends `ignoreBadAddress` in production
