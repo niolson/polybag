@@ -1,6 +1,6 @@
 # A demo tenant holding a prospect's orders
 
-Status: ready-for-human
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -8,66 +8,123 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), "What would go wrong today" point 4. Part of it is operations for our
-own hosting, which is tracked privately. The app half is here.
+[PRD](../PRD.md), "What would go wrong today" point 4. This is the app half. Provisioning
+and teardown of the tenant are operations for our own hosting and are tracked privately.
 
 ## Problem
 
 Once a prospect's store is connected, the demo tenant holds their customers' names,
-addresses and order contents. The demo has been treated as fake data: shared logins, and
-`demo:reset` as the only cleanup.
+addresses and order contents. Until now the demo has been treated as fake data: shared
+logins, and `demo:reset` as the only cleanup.
 
-## What is needed
+`demo:reset` is not enough to end a live-store demo:
 
-**Before the first live-store demo (operations, decided by a human):**
+- It truncates the transactional tables, but **not `products`**. Imports upsert a
+  `Product` per SKU (`ImportReferenceResolver::productIdFor()`), so the prospect's catalog
+  survives. Nor does it truncate `address_validation_answers`, and its `shipment_id`
+  cascade never fires because the truncate runs with foreign-key checks off.
+- The connection stays signed in, and the next scheduled import reads the orders again.
+  `OAuthService::disconnectDataSource()` leaves `active` and `import_enabled` on, and
+  removes only the OAuth token, so direct credentials stay.
+- An import already running holds the fetched orders in memory and can write them back
+  after a truncate.
 
-- The demo tenant runs with production posture: MFA required (Amazon already demands it),
-  encryption at rest, backups and their retention treated as holding PII.
-- No shared or public demo login while a real store is connected.
+## Decision (2026-10-22)
 
-**In the app:**
+**A live-store demo runs on its own tenant, and the demo ends by destroying that tenant,**
+not by purging rows inside it. Stopping the containers ends any running import, and
+dropping the database removes every table without anyone keeping a list of them. So the
+in-app purge this issue first proposed is dropped: no shared per-connection import lock,
+no ordered truncate. A demo ends either at the end of the call, by hand, or when its time
+limit runs out. Both use the same teardown.
 
-- **A purge that ends the demo.** `demo:reset` truncates the transactional tables, which
-  removes the imported Shipments, but the connection stays signed in and the next
-  scheduled import reads the orders again. Disconnecting first is not enough either. An
-  import already running holds the credentials and the fetched orders in memory, and can
-  write Shipments again after the truncate. And `OAuthService::disconnectDataSource()`
-  leaves `active` and `import_enabled` on, and removes only the OAuth token (plus the
-  refresh token of an OAuth Amazon connection), so direct credentials stay. The purge
-  needs to, in this order:
-  1. turn off `import_enabled` and `active` on the store's connection, so neither the
-     scheduler nor `shipments:import` selects it (`DataSource::importing()`)
-  2. wait for a running import to finish, and hold the import lock through the remaining
-     steps. That takes **one per-connection lock shared by every import path and the
-     purge**, which does not exist today. Imports run two ways:
-     - `RunDataSourceImportJob`, behind `WithoutOverlapping("data-source-import:{id}")`,
-       rechecks `importsOrders()` in `handle()`, after the lock
-     - the scheduler runs `shipments:import --source-id={id}` (`routes/console.php`),
-       which calls `ShipmentImportService::import()` directly
-       (`ImportShipmentsCommand::runRecord()`). Its `withoutOverlapping()` is the
-       scheduler's own mutex, keyed on the command, so it never meets the job's lock.
-       It also never rechecks eligibility after it starts: `runAll()` reads
-       `DataSource::importing()` once, up front
+Other decisions:
 
-     So an import already running in the command can write Shipments again after the
-     purge, even with the connection switched off. Take the lock inside
-     `ShipmentImportService::import()`, where every path meets it. Recheck
-     `importsOrders()` after acquiring it, and return without fetching if the connection
-     is no longer eligible. The job's middleware can then use the same key, or be
-     dropped in its favor. The purge takes the same lock, blocking until a running
-     import releases it. Cover any other job that reads the store into local rows, such
-     as fulfillment sync, the same way
-  3. disconnect, revoking the token where the provider supports it, and clear every
-     stored secret on the connection, not just the OAuth ones
-  4. then truncate what `demo:reset` truncates
-  5. leave no order data in the logs, the audit log, or `.scratch`-style captures
-- Check `pii-retention` covers a demo tenant. Its purge may already handle most of the
-  data, on a schedule that is too slow for a demo.
-- Optional: a connection in Demo whose store is live disconnects itself after a set time,
-  so a forgotten demo does not keep reading a merchant's orders.
+- **A live-store demo tenant holds only the live store.** No `demo:reset` data or demo
+  import database alongside it, so "delete everything" is correct by construction.
+- **No backups of demo tenants.**
+- **No shared logins.** Each demo gets its own presenter and prospect users, with MFA.
+- **Setup takes no typing beyond the prospect connecting their store.** Sandbox carrier
+  credentials come from the environment, not from someone entering them in the UI per
+  demo. The QZ signing certificate is shared across hosted tenants already, so a
+  workstation trusts it once for every demo.
+
+## What is needed in the app
+
+### 1. `demo:provision`
+
+An internal command, refusing to run unless `AppMode::current()` is Demo, and idempotent.
+It sets up everything a demo needs except the store connection:
+
+- **Sandbox `CarrierAccount`s** for USPS, UPS and FedEx, each with a global
+  `CarrierAccountScope`, read from config backed by environment variables (USPS: client
+  ID and secret, CRID, MID; UPS and FedEx: client ID and secret, account number). A
+  carrier whose values are missing is skipped with a warning, not created empty. The env
+  values only seed the accounts. Adapters keep reading `CarrierAccount` as they do now.
+- **A Client and a Location** whose ship-from address the carrier sandboxes rate from.
+  Optional arguments let the presenter set the prospect's name. The address can be edited
+  live in the UI.
+- **Box sizes and shipping methods** with their postage-source allowances, from the
+  existing seeders (`CommonBoxSizeSeeder`, `OperationalDefaultsSeeder`, the Shopify and
+  Amazon service-mapping seeders).
+- **A presenter user and a prospect user**, with generated passwords printed once, and
+  MFA required.
+
+Amazon may need no sandbox credentials of its own. `03` sends Buy Shipping to the sandbox
+on the prospect's own connection. Confirm how the connector authenticates sandbox calls
+before relying on that.
+
+### 2. A time limit, `DEMO_EXPIRES_AT`
+
+An optional timestamp in config, set by the provisioning tooling. It lives in the
+environment rather than a setting, so nobody signed in to the demo can extend it.
+
+- **A banner on every page**, through a panel render hook rather than the dashboard-only
+  `DemoModeWidget`: "This demo ends Oct 24 at 5:00 pm. Your orders and the store
+  connection are deleted then." Shown in the Location's timezone.
+- **After it passes:** `DataSource::importing()` returns nothing, so no path selects a
+  connection to import, and sign-in shows "This demo has ended" instead of the form.
+  These guards stop new data arriving if teardown runs late. They are not the deletion.
+- Unset means no limit and no banner, as on a demo that runs only on `demo:reset` data.
+
+### 3. `demo:disconnect`
+
+Runs before teardown. For every Shopify and Amazon connection:
+
+1. turn off `import_enabled` and `active`
+2. revoke the store's token where the provider supports it. Where it does not, say so in
+   the output, so the presenter can tell the merchant how to remove the app
+3. clear every stored secret on the connection, not just the OAuth ones
+
+It refuses outside Demo. It does not delete rows; teardown does that.
+
+### 4. Nothing else holding order data
+
+- Error reporting is off on demo tenants (the tooling leaves the DSN unset), since an
+  error event can carry order data into a store the teardown cannot reach. Confirm the
+  app sends nothing when the DSN is empty.
+- Check that no log line or captured payload writes order data outside the tenant's own
+  database and container logs, which teardown removes.
+
+## Not in scope
+
+- `demo:reset` stays as it is, internal tooling for the synthetic demo.
+- `pii-retention` does not need to cover a demo tenant, since the tenant does not outlive
+  the demo.
 
 ## Notes
 
-- `demo:reset` documents itself as internal tooling for our sales demo, and that stays so.
-  A purge command can be internal too.
-- Depends on `05`: the terms may set the retention limit.
+- Depends on `05` for the longest time limit the marketplace terms allow. Until then,
+  keep demos to the call.
+- The optional self-disconnect timer from the first draft of this issue is replaced by
+  `DEMO_EXPIRES_AT`.
+
+## Comments
+
+**2026-10-22** — Rewritten. The first draft specified an in-app purge: a per-connection
+import lock shared by `RunDataSourceImportJob` and `shipments:import`, a recheck of
+`importsOrders()` after acquiring it, then disconnect and truncate. That was rejected for
+a per-demo tenant destroyed at the end, because the teardown has no window an import can
+write into and no table list to keep in step with the schema. The import lock remains a
+real gap outside demos (the command and the job do not share a lock), but nothing here
+needs it.
