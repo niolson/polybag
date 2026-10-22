@@ -62,11 +62,31 @@ Chosen 2026-10-22: **per-call environment**, with two narrowings.
   USPS, UPS and FedEx sandbox accounts as direct postage. Shipment confirmation is never
   sent (`01`).
 
+### The street line
+
+Settled 2026-10-22 by testing against the carrier sandboxes. Demo imports an Amazon order
+with `Address withheld` as address line 1, which reads as a placeholder on a pack slip
+and a label and could never be mistaken for the buyer's street. Each direct-carrier
+sandbox accepts it, as follows:
+
+- **USPS** ships it when the label request sets `ignoreBadAddress`. The adapter does not
+  send that flag today, so this issue adds it. Send it only in sandbox, and only for a
+  withheld address: production must keep refusing a bad address.
+- **UPS** already sends `RequestOption: nonvalidate` on the ship request
+  (`UpsAdapter`), so it needs nothing.
+- **FedEx** rates on a canned origin and destination in sandbox, which answers
+  `FEDEX_GROUND`. A label to a residence must be bought as `GROUND_HOME_DELIVERY`, and
+  914af49f already offers the sandbox Ground rate to a residential US destination as Home
+  Delivery. The label prints the address PolyBag sends, placeholder included. Check that a
+  withheld address still reaches the label request as residential: address validation is
+  what usually classifies it, and it must not run against a placeholder.
+
+Address validation must skip a withheld address rather than record it as undeliverable.
+In Demo it already uses the fake validator, but the Shipment should not come out marked
+invalid and held from purchase.
+
 Still to settle before this is `ready-for-agent`:
 
-- Whether the direct-carrier sandboxes, and address validation, accept a destination
-  with no street line, or whether Demo fills a placeholder street that is never shown as
-  the buyer's. A placeholder must not look like real data on a pack slip or label.
 - Where the per-call split lives (for example `SourceEnvironment::forAmazonRead()` /
   `forAmazonPostage()`), and how an Offer's environment binding treats a
   production-read order quoted on sandbox.
