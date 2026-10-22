@@ -46,8 +46,9 @@ Other writes to a store that need the same guard:
   failed export.
 - In Demo, the Shopify fulfillment cancel mutation is not sent to a live store. The local
   void proceeds, and the replacement lookup (a read) runs as today.
-- A development store gets both, as in production. A plan that cannot be read counts as
-  live, so the write is skipped.
+- A development store gets both, as in production. A plan that cannot be read never
+  permits a write. An export is sent nothing and fails retryably, so it asks again; a
+  fulfillment cancel is not sent, and the operator is told the plan could not be read.
 - A Database connection's export runs in Demo as before.
 - A Shopify Shipping purchase is not this issue's to block. It is a write, but `02`
   decides it: allowed on a development store, refused on a live one.
@@ -67,7 +68,8 @@ Other writes to a store that need the same guard:
 - [x] In Demo, shipping a Package on a live store's Shopify order with a direct-carrier
       Label sends no mutation to Shopify, and the export row neither fails nor retries
 - [x] In Demo, the same on a development store sends `fulfillmentCreate` as in production
-- [x] In Demo, a store whose plan cannot be read is treated as live
+- [x] In Demo, a store whose plan cannot be read is written nothing, and its export is
+      retried rather than skipped
 - [x] In Demo, voiding a Label on a live store's order sends no `fulfillmentCancel`, and still
       re-points the Shipment onto its replacement fulfillment order when Shopify reports
       one
@@ -127,3 +129,17 @@ Tests: `tests/Feature/DemoStoreWriteBackTest.php` (live, development and unreada
 stores, Amazon, a Database connection alone and beside a skipped live store, Production
 and Dev unchanged, and the void with and without a cancel), and a `demo:reset` case in
 `tests/Feature/DemoResetTest.php`.
+
+**2026-10-22 — an unreadable plan retries the export.** Settling an export as `Skipped`
+when the plan could not be read turned one Shopify blip into a permanent skip: the row
+was settled, the package marked `exported`, and a development store's order was never
+fulfilled. `StoreWriteGuard::permissionFor()` now tells a store known to be live
+(`Refused`) from one whose plan could not be read (`Unknown`); `allowsWritesTo()` is
+unchanged and still false for both. On `Unknown` the export sends nothing and records a
+`RetryableFailed` row ("could not read the Shopify store's plan to tell whether it is a
+development store; not sent in demo"), so it backs off and asks again like any other
+retryable failure, and goes permanent after the same number of attempts. A live store and
+Amazon in Demo are still `Skipped`. The fulfillment cancel sends nothing on `Unknown`
+either, but tells the operator the plan could not be read rather than that the store is
+live. The plan read is now tried once, with a 3-second connect and 5-second total
+timeout, since it runs while a packer waits for rates.

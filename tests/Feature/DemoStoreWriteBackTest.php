@@ -9,6 +9,7 @@ use App\Events\PackageShipped;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Listeners\ExportShippedPackage;
+use App\Models\AuditLog;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageExport;
@@ -74,11 +75,13 @@ function demoWriteBackLineItems(): array
 /**
  * A store that answers the plan read with the plan given (or the response
  * given, for one that cannot be read), and every write and read the export and
- * void send. The goods come back on the fulfillment order given.
+ * void send. The goods come back on the fulfillment order given; with none,
+ * the original fulfillment order is still closed by its fulfillment, as it is
+ * when no cancel was sent.
  *
  * @param  array<string, mixed>|MockResponse  $plan
  */
-function fakeDemoWriteBackStore(array|MockResponse $plan, string $reopenedOn = 'gid://shopify/FulfillmentOrder/54321'): void
+function fakeDemoWriteBackStore(array|MockResponse $plan, ?string $reopenedOn = 'gid://shopify/FulfillmentOrder/54321'): void
 {
     Saloon::fake([GraphQL::class => function (PendingRequest $request) use ($plan, $reopenedOn): MockResponse {
         $query = (string) ($request->body()?->all()['query'] ?? '');
@@ -99,7 +102,13 @@ function fakeDemoWriteBackStore(array|MockResponse $plan, string $reopenedOn = '
                 'id' => 'gid://shopify/Order/800',
                 'fulfillmentOrders' => [
                     'pageInfo' => ['hasNextPage' => false],
-                    'nodes' => [[
+                    'nodes' => [$reopenedOn === null ? [
+                        'id' => 'gid://shopify/FulfillmentOrder/12345',
+                        'status' => 'CLOSED',
+                        'supportedActions' => [],
+                        'assignedLocation' => ['location' => ['id' => 'gid://shopify/Location/1']],
+                        'lineItems' => ['pageInfo' => ['hasNextPage' => false], 'nodes' => []],
+                    ] : [
                         'id' => $reopenedOn,
                         'status' => 'OPEN',
                         'supportedActions' => [['action' => 'CREATE_FULFILLMENT']],
@@ -233,20 +242,67 @@ it('sends a development store its fulfillment in demo, as in production', functi
         ->and($package->labels()->sole()->shopify_fulfillment_id)->toBe('gid://shopify/Fulfillment/1');
 });
 
-it('treats a store whose plan cannot be read as live in demo', function (MockResponse $planResponse): void {
+it('sends a store whose plan cannot be read nothing in demo, and retries the export', function (MockResponse $planResponse): void {
     $this->app['env'] = 'demo';
     fakeDemoWriteBackStore($planResponse);
     $package = demoWriteBackShopifyPackage();
+    $source = $package->shipment->dataSource;
 
-    app(PackageExportService::class)->exportPackage($package);
+    $result = app(PackageExportService::class)->exportPackage($package);
+    $export = demoWriteBackExportRow($package, $source);
 
     expect(demoWriteBackSent('plan {'))->toBeTrue()
         ->and(demoWriteBackSent('fulfillmentCreate('))->toBeFalse()
-        ->and(demoWriteBackExportRow($package, $package->shipment->dataSource)->status)->toBe(PackageExportStatus::Skipped);
+        ->and($export->status)->toBe(PackageExportStatus::RetryableFailed)
+        ->and($export->last_error)->toBe(PackageExportService::UnknownStoreError)
+        ->and($export->completed_at)->toBeNull()
+        ->and($package->fresh()->exported)->toBeFalse()
+        ->and($result->success)->toBeFalse()
+        ->and($result->shouldRetry())->toBeTrue()
+        ->and($result->destinationsAttempted)->toBe(0)
+        ->and($result->destinationsSkipped)->toBe(0);
+
+    // The plan reads again once the failure is no longer cached and the
+    // retry's backoff has passed: a development store then gets its fulfillment.
+    fakeDemoWriteBackStore(demoWriteBackDevelopmentPlan());
+    $this->travel(6)->minutes();
+    $service = app(PackageExportService::class);
+
+    expect($service->previewUnexported()->pluck('id')->all())->toBe([$package->id]);
+
+    $service->exportUnexported();
+
+    expect(demoWriteBackSent('fulfillmentCreate('))->toBeTrue()
+        ->and(demoWriteBackExportRow($package, $source)->status)->toBe(PackageExportStatus::Succeeded)
+        ->and(demoWriteBackExportRow($package, $source)->attempts)->toBe(2)
+        ->and($package->fresh()->exported)->toBeTrue();
 })->with([
     'a server error' => [MockResponse::make(['errors' => 'Internal Server Error'], 500)],
     'no plan in the reply' => [MockResponse::make(['errors' => [['message' => 'Access denied for plan field.']]])],
 ]);
+
+it('fails an export permanently once a plan has stayed unreadable through every retry', function (): void {
+    $this->app['env'] = 'demo';
+    fakeDemoWriteBackStore(MockResponse::make(['errors' => 'Internal Server Error'], 500));
+    $package = demoWriteBackShopifyPackage();
+    $source = $package->shipment->dataSource;
+    $export = PackageExport::query()->create([
+        'package_id' => $package->id,
+        'data_source_id' => $source->id,
+        'status' => PackageExportStatus::RetryableFailed,
+        'attempts' => 31,
+    ]);
+    $this->travel(6)->hours();
+
+    $result = app(PackageExportService::class)->exportPackage($package);
+
+    expect($result->shouldRetry())->toBeFalse()
+        ->and($result->hasPermanentErrors())->toBeTrue()
+        ->and($export->refresh()->status)->toBe(PackageExportStatus::PermanentlyFailed)
+        ->and($export->last_error)->toBe(PackageExportService::UnknownStoreError)
+        ->and($package->fresh()->exported)->toBeFalse()
+        ->and(demoWriteBackSent('fulfillmentCreate('))->toBeFalse();
+});
 
 it('sends an Amazon connection no confirmation in demo', function (): void {
     $this->app['env'] = 'demo';
@@ -339,6 +395,41 @@ describe('a Database connection', function (): void {
             ->and($this->package->fresh()->exported)->toBeTrue()
             ->and(demoWriteBackSent('fulfillmentCreate('))->toBeFalse();
     });
+
+    it('retries a failed Database export without re-sending a skipped live store', function (): void {
+        $this->app['env'] = 'demo';
+        config()->set('features.multi_client_enabled', true);
+        fakeDemoWriteBackStore(demoWriteBackLivePlan());
+        $live = createShopifyDataSource(['export_enabled' => true], ['oauth_access_token' => 'shpat_test_token']);
+        $live->update(['global_export' => true]);
+        DB::connection('demo_erp_fixture')->statement('ALTER TABLE orders RENAME TO orders_offline');
+        $service = app(PackageExportService::class);
+
+        $result = $service->exportPackage($this->package);
+        $skipped = demoWriteBackExportRow($this->package, $live);
+
+        expect($result->shouldRetry())->toBeTrue()
+            ->and($skipped->status)->toBe(PackageExportStatus::Skipped)
+            ->and(demoWriteBackExportRow($this->package, $this->database)->status)->toBe(PackageExportStatus::RetryableFailed)
+            ->and($this->package->fresh()->exported)->toBeFalse();
+
+        DB::connection('demo_erp_fixture')->statement('ALTER TABLE orders_offline RENAME TO orders');
+        $this->travel(6)->minutes();
+
+        expect($service->previewUnexported()->pluck('id')->all())->toBe([$this->package->id]);
+
+        $results = $service->exportUnexported();
+
+        expect($results[$this->package->id]->destinationsSucceeded)->toBe(1)
+            ->and($results[$this->package->id]->destinationsSkipped)->toBe(0)
+            ->and(demoWriteBackExportRow($this->package, $live)->attempts)->toBe(1)
+            ->and(demoWriteBackExportRow($this->package, $live)->status)->toBe(PackageExportStatus::Skipped)
+            ->and(demoWriteBackExportRow($this->package, $live)->completed_at)->toEqual($skipped->completed_at)
+            ->and(demoWriteBackExportRow($this->package, $this->database)->status)->toBe(PackageExportStatus::Succeeded)
+            ->and(DB::connection('demo_erp_fixture')->table('orders')->value('tracking_no'))->toBe('TRK-DEMO-1')
+            ->and($this->package->fresh()->exported)->toBeTrue()
+            ->and(demoWriteBackSent('fulfillmentCreate('))->toBeFalse();
+    });
 });
 
 it('exports to a store outside demo without asking its plan', function (string $environment): void {
@@ -361,9 +452,11 @@ it('exports to a store outside demo without asking its plan', function (string $
 |--------------------------------------------------------------------------
 */
 
-it('sends a live store no fulfillment cancel on a void in demo, and still re-points the shipment', function (): void {
+it('sends a live store no fulfillment cancel on a void in demo, and still reads for a replacement', function (): void {
     $this->app['env'] = 'demo';
-    fakeDemoWriteBackStore(demoWriteBackLivePlan(), reopenedOn: 'gid://shopify/FulfillmentOrder/54321');
+    // With no cancel, the fulfillment order stays closed by the fulfillment,
+    // and Shopify reports no open one to move the shipment onto.
+    fakeDemoWriteBackStore(demoWriteBackLivePlan(), reopenedOn: null);
     $package = demoWriteBackShopifyPackage(fulfillmentId: 'gid://shopify/Fulfillment/1');
 
     $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
@@ -376,8 +469,33 @@ it('sends a live store no fulfillment cancel on a void in demo, and still re-poi
 
     $shipment = $package->shipment->refresh();
 
-    expect($shipment->metadata['shopify_fulfillment_order_id'])->toBe('gid://shopify/FulfillmentOrder/54321')
-        ->and($shipment->source_record_id)->toBe('gid://shopify/FulfillmentOrder/54321');
+    expect($shipment->metadata)->not->toHaveKey('shopify_fulfillment_order_id')
+        ->and($shipment->source_record_id)->toBe('gid://shopify/FulfillmentOrder/12345');
+
+    $note = AuditLog::query()
+        ->where('auditable_type', $shipment->getMorphClass())
+        ->where('auditable_id', $shipment->id)
+        ->get()
+        ->firstWhere(fn (AuditLog $log): bool => array_key_exists('superseded_fulfillment_order_id', $log->metadata ?? []));
+
+    expect($note->metadata['superseded_fulfillment_order_id'])->toBe('gid://shopify/FulfillmentOrder/12345')
+        ->and($note->metadata['fulfillment_order_id'])->toBeNull()
+        ->and($note->metadata['reason'])->not->toContain('closed the fulfillment order on the void');
+});
+
+it('sends no fulfillment cancel on a void in demo when the plan cannot be read, and says so', function (): void {
+    $this->app['env'] = 'demo';
+    fakeDemoWriteBackStore(MockResponse::make(['errors' => 'Internal Server Error'], 500), reopenedOn: null);
+    $package = demoWriteBackShopifyPackage(fulfillmentId: 'gid://shopify/Fulfillment/1');
+
+    $result = app(PackageLabelWorkflow::class)->voidLabel($package, User::factory()->manager()->create());
+
+    expect(demoWriteBackSent('fulfillmentCancel('))->toBeFalse()
+        ->and(demoWriteBackSent('ShopifyOrderFulfillmentOrders'))->toBeTrue()
+        ->and($result->success)->toBeTrue()
+        ->and($result->warning)->toContain('could not read this Shopify store\'s plan')
+        ->and($result->warning)->toContain('left this order\'s fulfillment in place')
+        ->and($result->warning)->not->toContain('live store');
 });
 
 it('cancels a development store\'s fulfillment on a void in demo, as in production', function (): void {

@@ -6,6 +6,7 @@ use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Enums\PackageExportStatus;
 use App\Enums\PackageStatus;
+use App\Enums\StoreWritePermission;
 use App\Exceptions\PermanentExportException;
 use App\Models\DataSource;
 use App\Models\Package;
@@ -25,6 +26,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use RuntimeException;
 use Throwable;
 
 class PackageExportService
@@ -32,6 +34,12 @@ class PackageExportService
     private const int MaxAttempts = 32;
 
     private const int ScheduledFreshPackageLookbackHours = 24;
+
+    /**
+     * Why a Shopify store whose plan could not be read was sent nothing in
+     * Demo. Recorded as a retryable failure, so the export asks again.
+     */
+    public const string UnknownStoreError = 'could not read the Shopify store\'s plan to tell whether it is a development store; not sent in demo';
 
     /**
      * The values an export can send, and so the parameters a Database export
@@ -106,7 +114,10 @@ class PackageExportService
      *     hidden in the UI and exports are strictly source-scoped.
      *
      * A destination {@see StoreWriteGuard} refuses, a live store in Demo, is
-     * claimed and marked skipped without being sent anything.
+     * claimed and marked skipped without being sent anything. One whose plan
+     * could not be read is sent nothing either, but fails retryably, so a
+     * passing Shopify failure does not settle a development store's export
+     * for good.
      */
     public function exportPackage(Package $package): ExportResult
     {
@@ -160,11 +171,17 @@ class PackageExportService
                     continue;
                 }
 
-                if (! app(StoreWriteGuard::class)->allowsWritesTo($source)) {
+                $permission = app(StoreWriteGuard::class)->permissionFor($source);
+
+                if ($permission === StoreWritePermission::Refused) {
                     $this->skipDestination($package, $source, $export);
                     $skipped++;
 
                     continue;
+                }
+
+                if ($permission === StoreWritePermission::Unknown) {
+                    throw new RuntimeException(self::UnknownStoreError);
                 }
 
                 $attempted++;

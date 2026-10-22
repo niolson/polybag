@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\AppMode;
+use App\Enums\StoreWritePermission;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
 use App\Models\DataSource;
@@ -19,6 +20,10 @@ use Illuminate\Support\Facades\Cache;
  * written to an Amazon store in Demo. A Database connection is not a store,
  * and its write-back runs in every mode. In Production and Dev every write is
  * allowed and no store is asked anything.
+ *
+ * A Shopify store whose plan cannot be read is written nothing. Whether it is
+ * live is then unknown rather than known, and {@see permissionFor()} says so,
+ * so an export can ask again later instead of settling for good.
  *
  * Kept apart from the paths that write, so each of them asks this one
  * question rather than a copy of it.
@@ -52,18 +57,49 @@ class StoreWriteGuard
     private const DEVELOPMENT_PLAN_NAME = 'Development';
 
     /**
+     * How long the plan read may take. It runs while a packer waits for rates,
+     * so it is tried once and gives up quickly; a store that does not answer
+     * is {@see StoreWritePermission::Unknown}, which writes nothing.
+     */
+    private const PLAN_CONNECT_TIMEOUT_SECONDS = 3;
+
+    private const PLAN_REQUEST_TIMEOUT_SECONDS = 5;
+
+    /**
+     * Cached in place of an answer when the plan could not be read, since the
+     * cache cannot hold null.
+     */
+    private const UNREADABLE = 'unreadable';
+
+    /**
      * Whether PolyBag may write to this connection's store in the current mode.
+     * A store whose plan cannot be read is refused.
      */
     public function allowsWritesTo(DataSource $connection): bool
     {
+        return $this->permissionFor($connection) === StoreWritePermission::Allowed;
+    }
+
+    /**
+     * Whether PolyBag may write to this connection's store, telling a store
+     * known to be live from one whose plan could not be read. A caller that
+     * can ask again later treats {@see StoreWritePermission::Unknown} as a
+     * retryable failure rather than as a refusal.
+     */
+    public function permissionFor(DataSource $connection): StoreWritePermission
+    {
         if (AppMode::current() !== AppMode::Demo) {
-            return true;
+            return StoreWritePermission::Allowed;
         }
 
         return match (true) {
-            $connection->isShopify() => $this->isDevelopmentStore($connection),
-            $connection->isAmazon() => false,
-            default => true,
+            $connection->isShopify() => match ($this->developmentStoreStatus($connection)) {
+                true => StoreWritePermission::Allowed,
+                false => StoreWritePermission::Refused,
+                null => StoreWritePermission::Unknown,
+            },
+            $connection->isAmazon() => StoreWritePermission::Refused,
+            default => StoreWritePermission::Allowed,
         };
     }
 
@@ -77,10 +113,15 @@ class StoreWriteGuard
      */
     public function isDevelopmentStore(DataSource $connection): bool
     {
-        if (! $connection->isShopify()) {
-            return false;
-        }
+        return $connection->isShopify() && $this->developmentStoreStatus($connection) === true;
+    }
 
+    /**
+     * True or false from the plan, cached briefly, or null when it could not
+     * be read; an unreadable plan is cached for less time than an answer.
+     */
+    private function developmentStoreStatus(DataSource $connection): ?bool
+    {
         $key = $this->cacheKey($connection);
         $cached = Cache::get($key);
 
@@ -88,15 +129,19 @@ class StoreWriteGuard
             return $cached;
         }
 
+        if ($cached === self::UNREADABLE) {
+            return null;
+        }
+
         $isDevelopment = $this->readPlan($connection);
 
         Cache::put(
             $key,
-            $isDevelopment ?? false,
+            $isDevelopment ?? self::UNREADABLE,
             now()->addMinutes($isDevelopment === null ? self::FAILURE_CACHE_MINUTES : self::CACHE_MINUTES),
         );
 
-        return $isDevelopment ?? false;
+        return $isDevelopment;
     }
 
     /**
@@ -104,12 +149,19 @@ class StoreWriteGuard
      */
     private function readPlan(DataSource $connection): ?bool
     {
+        $request = new GraphQL(self::PLAN_QUERY);
+        $request->tries = 1;
+        $request->config()->merge([
+            'connect_timeout' => self::PLAN_CONNECT_TIMEOUT_SECONDS,
+            'timeout' => self::PLAN_REQUEST_TIMEOUT_SECONDS,
+        ]);
+
         try {
             $json = ShopifyConnector::fromSettings(
                 array_merge($connection->settings ?? [], $connection->secret_settings ?? [])
-            )->send(new GraphQL(self::PLAN_QUERY))->json();
+            )->send($request)->json();
         } catch (\Exception $e) {
-            logger()->warning('Could not read a Shopify store\'s plan; treating it as live', [
+            logger()->warning('Could not read a Shopify store\'s plan; writing nothing to it', [
                 'data_source_id' => $connection->id,
                 'error' => $e->getMessage(),
             ]);
@@ -120,7 +172,7 @@ class StoreWriteGuard
         $plan = $json['data']['shop']['plan'] ?? null;
 
         if (! is_array($plan)) {
-            logger()->warning('Shopify returned no plan for a store; treating it as live', [
+            logger()->warning('Shopify returned no plan for a store; writing nothing to it', [
                 'data_source_id' => $connection->id,
                 'errors' => $json['errors'] ?? null,
             ]);

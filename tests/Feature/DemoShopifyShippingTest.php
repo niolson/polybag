@@ -13,6 +13,7 @@ use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ShippingRuleAction;
 use App\Enums\ShippingRuleSource;
+use App\Enums\StoreWritePermission;
 use App\Filament\Pages\Ship;
 use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
@@ -32,6 +33,7 @@ use Livewire\Livewire;
 use Mockery\MockInterface;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
+use Saloon\Http\Response;
 use Saloon\Laravel\Facades\Saloon;
 
 /**
@@ -87,6 +89,39 @@ it('counts a plan that cannot be read as live', function (MockResponse $response
     'access denied' => fn (): MockResponse => MockResponse::make(['errors' => [['message' => 'Access denied for plan field.']]]),
     'no plan' => fn (): MockResponse => MockResponse::make(['data' => ['shop' => null]]),
 ]);
+
+it('tells a store whose plan cannot be read apart from a live one', function (): void {
+    $this->app['env'] = 'demo';
+    $guard = app(StoreWriteGuard::class);
+
+    Saloon::fake([GraphQL::class => MockResponse::make(['errors' => 'Internal error'], 500)]);
+    $unreadable = createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']);
+
+    expect($guard->permissionFor($unreadable))->toBe(StoreWritePermission::Unknown)
+        ->and($guard->permissionFor($unreadable))->toBe(StoreWritePermission::Unknown)
+        ->and($guard->isDevelopmentStore($unreadable))->toBeFalse();
+
+    Saloon::assertSentCount(1);
+
+    fakeLiveStoreDemoPlan(['partnerDevelopment' => false, 'publicDisplayName' => 'Basic']);
+
+    expect($guard->permissionFor(createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token'])))
+        ->toBe(StoreWritePermission::Refused)
+        ->and($guard->permissionFor(DataSource::factory()->create(['source_type' => AmazonSource::class])))
+        ->toBe(StoreWritePermission::Refused);
+});
+
+it('reads the plan in one short try', function (): void {
+    $this->app['env'] = 'demo';
+    Saloon::fake([GraphQL::class => MockResponse::make(['errors' => 'Internal error'], 500)]);
+
+    app(StoreWriteGuard::class)->allowsWritesTo(createShopifyDataSource([], ['oauth_access_token' => 'shpat_test_token']));
+
+    Saloon::assertSentCount(1);
+    Saloon::assertSent(fn (GraphQL $request, Response $response): bool => $request->tries === 1
+        && $response->getPendingRequest()->config()->get('timeout') === 5
+        && $response->getPendingRequest()->config()->get('connect_timeout') === 3);
+});
 
 it('reads the plan once and caches it per connection', function (): void {
     $this->app['env'] = 'demo';
