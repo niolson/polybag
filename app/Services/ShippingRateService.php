@@ -1161,6 +1161,19 @@ class ShippingRateService
             : Carrier::labelForName($sourceName);
         $task = ['key' => $candidate->key(), 'source' => $sourceName, 'label' => $label];
 
+        // Shopify has no sandbox, so in Demo a blind purchase on a live store
+        // would be a real label charged to the merchant (`live-store-demo/02`).
+        // Said beside the rates rather than left to go missing, and checked
+        // here so the purchase, which re-derives its offer from these tasks,
+        // refuses it too.
+        if ($candidate->isChannel()
+            && $candidate->dataSource?->isShopify()
+            && ! app(StoreWriteGuard::class)->allowsWritesTo($candidate->dataSource)) {
+            $this->exclude($task, ShopifyAdapter::DEMO_LIVE_STORE_MESSAGE);
+
+            return null;
+        }
+
         $adapter = $registry->has($sourceName) ? $registry->get($sourceName) : null;
 
         foreach ($requiredCodes as $code) {

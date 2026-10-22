@@ -1,6 +1,6 @@
 # Demo buys Shopify Shipping only on a development store
 
-Status: ready-for-agent
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -54,8 +54,34 @@ answer in Comments, in general terms: no store domain.
 
 ## Acceptance
 
-- [ ] In Demo, a live store's connection offers no Shopify Shipping, and a purchase
+- [x] In Demo, a live store's connection offers no Shopify Shipping, and a purchase
       attempt is refused server-side
-- [ ] In Demo, a development store's connection offers it
-- [ ] A plan read that fails counts as live
-- [ ] In Production and Dev, no plan lookup is made
+- [x] In Demo, a development store's connection offers it
+- [x] A plan read that fails counts as live
+- [x] In Production and Dev, no plan lookup is made
+
+## Comments
+
+**2026-10-22 — probe.** Read `{ shop { plan { partnerDevelopment publicDisplayName } } }`
+live, read-only, from both local Shopify connections: our development store and a second
+store we expected to be on a paid plan. Both answered `partnerDevelopment: true`. Both were
+created from the Dev Dashboard, and on such a store `publicDisplayName` names the plan it
+previews ("Plus", "Basic"), not "Development". So `partnerDevelopment` is the field to
+trust, and the second store turned out to be a development store too. No live store was
+available, so the `false` case rests on the documented schema. The connections' existing
+scopes, the import and purchase scopes, were enough: `shop.plan` needs no extra scope. Raw
+captures are in `.scratch/live-store-demo/`.
+
+**2026-10-22 — implemented.** `App\Services\StoreWriteGuard` is the check `01` reuses:
+`allowsWritesTo(DataSource)` is true in Production and Dev without asking anything; in Demo
+it is the plan's answer for a Shopify connection, false for Amazon and true for a Database
+connection. `isDevelopmentStore(DataSource)` reads `partnerDevelopment`, or a
+`publicDisplayName` of "Development", cached per connection and shop domain for five
+minutes. A failed or unreadable plan counts as live and is cached for one minute.
+`ShippingRateService::buildTask()` excludes the Shopify candidate with "Shopify Shipping is
+not available in demo mode on a live store.", which the Ship page shows as an exclusion.
+Because the purchase re-derives its offer from the same tasks, a stale page's purchase is
+refused with that message, and auto-ship, batch ship and rules have no offer to buy.
+`ShopifyShippingLabelService::purchase()` checks again just before the mutation. The Shopify
+connection's edit page shows, in Demo only, whether the store is a development store.
+Tests: `tests/Feature/DemoShopifyShippingTest.php`.
