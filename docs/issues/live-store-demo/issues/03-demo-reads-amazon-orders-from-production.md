@@ -184,6 +184,9 @@ the sandbox returns fixed offers whatever the order, and the Label is a sandbox 
   `Shipment::WITHHELD_ADDRESS_LINE` (`Address withheld`) as line 1; name, company, line 2,
   phone, email and the address type stay null. `Shipment::isAddressWithheld()` and
   `AddressData::isWithheld()` recognize it. Keyed on `AppMode::Demo`.
+  Withheld detection is Demo-only: `Shipment::isAddressWithheld()` also requires
+  `AppMode::Demo` and `AddressData` takes its flag from it, so the same text typed in
+  Production is an ordinary address.
 - **`RECIPIENT`.** The v2026-01-01 schema in `tests/Fixtures/Schemas/` puts the delivery
   address only in `recipient.deliveryAddress`, so city, state, postal code and country
   cannot be had without `RECIPIENT`. The same dataset carries the recipient's name,

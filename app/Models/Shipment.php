@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\AddressValidationOutcome;
 use App\Enums\AddressValidator;
+use App\Enums\AppMode;
 use App\Enums\Deliverability;
 use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
@@ -491,11 +492,15 @@ class Shipment extends Model
     /**
      * Whether this address was imported withheld: no street, name, phone or
      * email, so no validator checks it and a carrier is told only where it
-     * is going ({@see self::WITHHELD_ADDRESS_LINE}).
+     * is going ({@see self::WITHHELD_ADDRESS_LINE}). Only a Demo install
+     * withholds an address: elsewhere the same text is an ordinary street
+     * someone typed, and it is validated like any other. The single test
+     * every other withheld check reads.
      */
     public function isAddressWithheld(): bool
     {
-        return $this->address1 === self::WITHHELD_ADDRESS_LINE;
+        return AppMode::current() === AppMode::Demo
+            && $this->address1 === self::WITHHELD_ADDRESS_LINE;
     }
 
     /**

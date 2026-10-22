@@ -24,6 +24,10 @@ use Saloon\Laravel\Facades\Saloon;
  * USPS when told to ignore the bad address, UPS because it never validates,
  * and FedEx as Home Delivery to a residence.
  */
+beforeEach(function (): void {
+    $this->app['env'] = 'demo';
+});
+
 function withheldShipment(): Shipment
 {
     return Shipment::factory()->create([
@@ -120,15 +124,18 @@ it('never asks USPS to ignore a bad address in production, or a real one in sand
     app(SettingsService::class)->set('sandbox_mode', true);
     fakeWithheldUspsLabel();
 
+    $shipment = withheldShipment();
+    $shipment->forceFill(['first_name' => 'Jane', 'last_name' => 'Smith'])->save();
+
     $to = $withheld
-        ? AddressData::fromShipment(withheldShipment())
+        ? AddressData::fromShipment($shipment)
         : new AddressData(firstName: 'Jane', lastName: 'Smith', streetAddress: '456 Oak Ave', city: 'Lemont', stateOrProvince: 'IL', postalCode: '60439');
 
     (new UspsAdapter)->createShipment(withheldShipRequest($to, 'USPS', 'USPS_GROUND_ADVANTAGE', USPS_GROUND_ADVANTAGE_METADATA));
 
     expect(sentWithheldUspsToAddress())->not->toHaveKey('ignoreBadAddress');
 })->with([
-    'production, withheld' => ['production', true],
+    'production, the withheld text typed' => ['production', true],
     'sandbox, a real street' => ['testing', false],
 ]);
 

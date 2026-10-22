@@ -556,6 +556,32 @@ it('logs no buyer data while importing in demo, even from a row that fails', fun
     }
 });
 
+it('withholds the address of a historical import in demo', function (): void {
+    $this->app['env'] = 'demo';
+    Saloon::fake([
+        SearchOrders::class => MockResponse::make(['orders' => [demoAmazonOrder()]]),
+        SearchCatalogItems::class => MockResponse::make(['numberOfResults' => 0, 'items' => []]),
+    ]);
+
+    $source = new AmazonSource([
+        ...$this->amazon->settings,
+        ...$this->amazon->secret_settings,
+        '_data_source_id' => $this->amazon->id,
+        '_historical_import' => true,
+        '_historical_created_after' => '2026-09-01T00:00:00Z',
+        '_historical_created_before' => '2026-09-30T23:59:59Z',
+        '_historical_max_orders' => 10,
+    ]);
+
+    $rows = json_encode($source->fetchShipments()->all());
+
+    expect($rows)->toContain('Lemont')->toContain('60439');
+
+    foreach (demoAmazonBuyerData() as $buyerData) {
+        expect($rows)->not->toContain($buyerData);
+    }
+});
+
 it('keeps the whole address outside demo', function (): void {
     Saloon::fake([
         SearchOrders::class => MockResponse::make(['orders' => [demoAmazonOrder()]]),
@@ -573,6 +599,7 @@ it('keeps the whole address outside demo', function (): void {
 });
 
 it('tells a carrier a withheld address is a residence with a name that names no one', function (): void {
+    $this->app['env'] = 'demo';
     $package = demoWithheldPackage();
     $package->shipment->forceFill(['residential' => false])->save();
 
@@ -592,8 +619,8 @@ it('tells a carrier a withheld address is a residence with a name that names no 
 |--------------------------------------------------------------------------
 */
 
-it('runs no validator on a withheld address, and leaves the shipment unheld', function (string $environment): void {
-    $this->app['env'] = $environment;
+it('runs no validator on a withheld address in demo, and leaves the shipment unheld', function (): void {
+    $this->app['env'] = 'demo';
     $shipment = demoWithheldPackage()->shipment;
 
     expect(app(ShipmentValidationPlan::class)->validatorsFor($shipment))->toBe([]);
@@ -608,7 +635,22 @@ it('runs no validator on a withheld address, and leaves the shipment unheld', fu
     $this->artisan('shipments:validate')->assertSuccessful();
 
     expect($shipment->fresh()->deliverability)->not->toBe(Deliverability::No);
-})->with(['demo', 'testing']);
+});
+
+it('treats the withheld text as an ordinary address outside demo', function (string $environment): void {
+    $this->app['env'] = $environment;
+    $shipment = demoWithheldPackage()->shipment;
+    $shipment->forceFill(['residential' => false])->save();
+    $shipment = $shipment->fresh();
+
+    $address = AddressData::fromShipment($shipment);
+
+    expect($shipment->isAddressWithheld())->toBeFalse()
+        ->and(app(ShipmentValidationPlan::class)->validatorsFor($shipment))->not->toBe([])
+        ->and($address->isWithheld())->toBeFalse()
+        ->and($address->residential)->toBeFalse()
+        ->and($address->streetAddress)->toBe(Shipment::WITHHELD_ADDRESS_LINE);
+})->with(['production', 'testing']);
 
 /*
 |--------------------------------------------------------------------------

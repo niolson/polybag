@@ -45,7 +45,14 @@ class ValidateShipmentsCommand extends Command
         // limit, so it can't crowd out Shipments that can be validated, and
         // candidates are read in chunks so a limit stops reading once filled.
         $unvalidatable = 0;
-        $shipments = $due->lazyById(200)->filter(function (Shipment $shipment) use ($plan, &$unvalidatable): bool {
+        $withheld = 0;
+        $shipments = $due->lazyById(200)->filter(function (Shipment $shipment) use ($plan, &$unvalidatable, &$withheld): bool {
+            if ($shipment->isAddressWithheld()) {
+                $withheld++;
+
+                return false;
+            }
+
             if ($plan->validatorsFor($shipment) !== []) {
                 return true;
             }
@@ -63,6 +70,10 @@ class ValidateShipmentsCommand extends Command
 
         if ($unvalidatable > 0) {
             $this->line("Left out {$unvalidatable} shipment(s) with no address validator for their country and shipping method.");
+        }
+
+        if ($withheld > 0) {
+            $this->line("Left out {$withheld} shipment(s) with a withheld address (demo).");
         }
 
         if ($shipments->isEmpty()) {

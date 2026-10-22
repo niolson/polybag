@@ -25,6 +25,7 @@ readonly class AddressData
         public ?string $phoneExtension = null,
         public ?string $uspsCarrierRoute = null,
         public ?bool $residential = null,
+        public bool $withheld = false,
     ) {}
 
     /**
@@ -62,16 +63,18 @@ readonly class AddressData
             phoneExtension: $shipment->phone_extension,
             uspsCarrierRoute: $shipment->validated_carrier_route,
             residential: $withheld ? true : ($shipment->validated_residential ?? $shipment->residential),
+            withheld: $withheld,
         );
     }
 
     /**
      * Whether this is a withheld address: where the parcel is going, with no
-     * street, name, phone or email ({@see Shipment::WITHHELD_ADDRESS_LINE}).
+     * street, name, phone or email. Set from the Shipment
+     * ({@see Shipment::isAddressWithheld()}), never worked out from the text.
      */
     public function isWithheld(): bool
     {
-        return $this->streetAddress === Shipment::WITHHELD_ADDRESS_LINE;
+        return $this->withheld;
     }
 
     public static function fromLocation(Location $location): self
