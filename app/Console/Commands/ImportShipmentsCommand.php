@@ -54,6 +54,12 @@ class ImportShipmentsCommand extends Command
             return Command::SUCCESS;
         }
 
+        if (! $record->importsOrders()) {
+            $this->warn('This demo has ended, so nothing imports.');
+
+            return Command::SUCCESS;
+        }
+
         return $this->runRecord($record);
     }
 

@@ -9,8 +9,10 @@ use App\Filament\GlobalSearch\ScanCodeGlobalSearchProvider;
 use App\Filament\Pages\Auth\EditProfile;
 use App\Filament\Pages\Auth\Login;
 use App\Filament\Pages\DeviceSettings;
+use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsurePasswordNotExpired;
 use App\Http\Middleware\EnsureSetupComplete;
+use App\Services\DemoLifetime;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
 use Filament\Auth\MultiFactor\App\AppAuthentication;
@@ -118,6 +120,22 @@ class AppPanelProvider extends PanelProvider
                     default => '',
                 },
             )
+            // A demo with a time limit says on every page when it ends, in the
+            // timezone of the Location the user works at (`live-store-demo/04`).
+            ->renderHook(
+                PanelsRenderHook::CONTENT_START,
+                function (): string {
+                    $endsAt = app(DemoLifetime::class)->endsAt();
+
+                    if ($endsAt === null) {
+                        return '';
+                    }
+
+                    $timezone = auth()->user()?->resolveLocation()?->timezone ?: config('app.timezone');
+
+                    return view('filament.demo-ends-banner', ['endsAt' => $endsAt->setTimezone($timezone)])->render();
+                },
+            )
             // Lazy widgets and action modals arrive through Livewire updates, which do
             // not run inline <script> tags, so PrinterSettings must be on every page.
             ->renderHook(
@@ -141,6 +159,7 @@ class AppPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
+                EnsureDemoHasNotEnded::class,
                 EnsureSetupComplete::class,
                 EnsurePasswordNotExpired::class,
             ])
@@ -148,7 +167,9 @@ class AppPanelProvider extends PanelProvider
             // a user with an expired password could still fire actions from an existing
             // component snapshot. Livewire reconstructs the original page request, so the
             // change-password route stays exempt without opening every Livewire endpoint.
+            // An ended demo is replayed for the same reason.
             ->persistentMiddleware([
+                EnsureDemoHasNotEnded::class,
                 EnsurePasswordNotExpired::class,
             ]);
     }

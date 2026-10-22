@@ -4,6 +4,7 @@ namespace App\Filament\Pages\Auth;
 
 use App\Models\User;
 use App\Services\AccountLockoutService;
+use App\Services\DemoLifetime;
 use App\Services\PasswordPolicyService;
 use App\Services\SettingsService;
 use Filament\Auth\Http\Responses\Contracts\LoginResponse;
@@ -11,6 +12,7 @@ use Filament\Auth\MultiFactor\Contracts\HasBeforeChallengeHook;
 use Filament\Auth\Pages\Login as BaseLogin;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
+use Filament\Schemas\Components\Callout;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 use Illuminate\Validation\ValidationException;
@@ -47,6 +49,24 @@ class Login extends BaseLogin
         $this->prepareSsoChallenge($user);
 
         $this->multiFactorChallengeForm->fill();
+    }
+
+    /**
+     * Once a demo has ended, the page says so in place of the form
+     * (`live-store-demo/04`).
+     */
+    public function content(Schema $schema): Schema
+    {
+        if (! app(DemoLifetime::class)->hasEnded()) {
+            return parent::content($schema);
+        }
+
+        return $schema->components([
+            Callout::make('This demo has ended')
+                ->key('demo_ended')
+                ->warning()
+                ->description('Its orders and store connection are being deleted. Thank you for trying PolyBag.'),
+        ]);
     }
 
     public function form(Schema $schema): Schema
@@ -90,6 +110,12 @@ class Login extends BaseLogin
      */
     public function authenticate(): ?LoginResponse
     {
+        if (app(DemoLifetime::class)->hasEnded()) {
+            throw ValidationException::withMessages([
+                'data.login' => 'This demo has ended.',
+            ]);
+        }
+
         // A pending SSO login submits the MFA challenge here, not credentials.
         if (session()->has('sso_mfa.user_id')) {
             return $this->completeSsoMfaChallenge();

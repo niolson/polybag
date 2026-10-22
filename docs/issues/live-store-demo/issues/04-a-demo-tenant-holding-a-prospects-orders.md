@@ -1,6 +1,6 @@
 # A demo tenant holding a prospect's orders
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -67,12 +67,38 @@ It sets up everything a demo needs except the store connection:
 - **Box sizes and shipping methods** with their postage-source allowances, from the
   existing seeders (`CommonBoxSizeSeeder`, `OperationalDefaultsSeeder`, the Shopify and
   Amazon service-mapping seeders).
+- **An Amazon Shipping connection for prospects with no Amazon seller account**, so a
+  Shopify-only merchant can see Amazon Shipping sold to their own orders. From our
+  sandbox app's credentials in the environment (client ID and secret, refresh token), with
+  `auth_mode` `manual`: an Amazon `DataSource` that is `active` but not
+  `import_enabled`, with export off, a global `CarrierAccountScope` whose
+  `data_source_id` points at it (`DataSource::resolveOffAmazonShipping()`), and a
+  shipping method that lists Amazon Shipping Ground under its `direct` row. Skipped when
+  the values are missing. If the prospect also connects their own seller account, their
+  Amazon orders still buy on theirs, because Buy Shipping is bound to the order's
+  connection, and Amazon Shipping for their other orders stays on this scope unless the
+  presenter changes it. Seed `marketplace_id` too, since marketplace discovery cannot fill
+  it.
+
+  Our sandbox app's credentials work only on the sandbox host. Our production app's
+  client secret lives only in our OAuth broker, so no tenant can hold it. The connection's
+  postage calls (`getRates` and `purchaseShipment` with `channelType: EXTERNAL`) go to the
+  sandbox in Demo and work. Every production call it could make fails safe:
+  `SearchOrders` and `SearchCatalogItems` run only on import, which is off;
+  `ConfirmShipment` is an export, off and blocked in Demo by `01`; and
+  `GetMarketplaceParticipations` runs only on an OAuth connect or the edit page's
+  discovery button, which would show an error and change nothing.
 - **A presenter user and a prospect user**, with generated passwords printed once, and
   MFA required.
 
-Amazon may need no sandbox credentials of its own. `03` sends Buy Shipping to the sandbox
-on the prospect's own connection. Confirm how the connector authenticates sandbox calls
-before relying on that.
+Amazon needs no sandbox credentials of its own. The connector mints one LWA access token
+per connection and sends it to whichever host `AmazonSpApiEnvironment` picks, and the
+sandbox accepts a token from a production seller authorization. Checked 2026-10-22 on a
+seller connection authorized through our OAuth broker, as a prospect's would be: sandbox
+`getRates` returned Amazon Shipping Ground, and sandbox `purchaseShipment` returned a
+shipment ID and tracking number. Sandbox `getRates` with `channelType: EXTERNAL`, the
+call Amazon Shipping makes for an order from another channel, also returned Amazon
+Shipping Ground.
 
 ### 2. A time limit, `DEMO_EXPIRES_AT`
 
@@ -89,7 +115,10 @@ environment rather than a setting, so nobody signed in to the demo can extend it
 
 ### 3. `demo:disconnect`
 
-Runs before teardown. For every Shopify and Amazon connection:
+Runs before teardown. For every Shopify and Amazon connection the prospect connected,
+skipping the Amazon Shipping connection `demo:provision` created from our own
+credentials. That one is reused by every demo, so revoking it would break the next one.
+Mark it when provisioning so the two can be told apart:
 
 1. turn off `import_enabled` and `active`
 2. revoke the store's token where the provider supports it. Where it does not, say so in
@@ -128,3 +157,48 @@ a per-demo tenant destroyed at the end, because the teardown has no window an im
 write into and no table list to keep in step with the schema. The import lock remains a
 real gap outside demos (the command and the job do not share a lock), but nothing here
 needs it.
+
+**2026-10-22** — Implemented.
+
+- `config/demo.php` holds `expires_at` and the sandbox credentials, read from
+  `DEMO_EXPIRES_AT`, `DEMO_USPS_{CLIENT_ID,CLIENT_SECRET,CRID,MID,EPS_ACCOUNT}`,
+  `DEMO_UPS_{CLIENT_ID,CLIENT_SECRET,ACCOUNT_NUMBER}`,
+  `DEMO_FEDEX_{API_KEY,API_SECRET,ACCOUNT_NUMBER}` and
+  `DEMO_AMAZON_{CLIENT_ID,CLIENT_SECRET,REFRESH_TOKEN,MARKETPLACE_ID}`. They are left out
+  of `.env.example` on purpose: none of them is a self-host setting.
+- `demo:provision` syncs reference data, runs `SettingsSeeder` only on a tenant that was
+  never set up (it overwrites its keys), then the Client, Location and operational
+  defaults seeders, and sets `setup_complete` and `require_mfa`. `--client-name` names the
+  Client after the prospect. The FedEx values go into the sandbox keys
+  (`sandbox_account_number`, `sandbox_api_key`, `sandbox_api_secret`). A carrier whose
+  global default is already held by another account is left unassigned, with a warning.
+  The Amazon Shipping connection is marked with `settings.demo_provisioned`
+  (`DemoProvision::isDemoConnection()`), uses `ensureDefaultOffAmazonShippingScope()`, and
+  Amazon Shipping Ground is listed on Standard Ground. Users are `presenter` and
+  `prospect`, both Admin, because connecting a store needs an Admin.
+- `DemoLifetime` reads the end only in Demo, and counts an unreadable value as already
+  ended. Past it, `DataSource::importing()` and `importsOrders()` answer no, so the
+  scheduler, `shipments:import --all`, the import job and `--source-id` (which checks the
+  columns itself, and now `importsOrders()` too) all stop. `EnsureDemoHasNotEnded` signs
+  out every session on the panel (persistent middleware included) and on the whole
+  `web` group, because pack slips, pick lists and print acknowledgments are routes
+  outside Filament that show order data (found in review: an outlived session still got
+  `/shipments/{shipment}/pack-slip`). A JSON request gets a 401; a signed-out visitor
+  passes, so the sign-in page renders. An SSO sign-in after the end is signed out on its
+  first request. The sign-in page shows "This demo has ended" in place
+  of the form, and `authenticate()` refuses. The banner is a `CONTENT_START` render hook.
+- `demo:disconnect` uses `OAuthService::disconnectDataSource()` for an OAuth connection,
+  then switches every Shopify and Amazon connection off and sets `secret_settings` to
+  null, skipping the demo connection. Neither Shopify nor Amazon has a revocation call
+  here (`ShopifyOAuthProvider::revokeToken()` is a no-op), so the output names where the
+  merchant removes the app. Follow-up worth weighing: Shopify's
+  `DELETE /admin/api_permissions/current.json` uninstalls an app from the store with its
+  own token, which would make the Shopify half a real revocation. It is a write to a live
+  store, which PRD decision 1 otherwise forbids, so it is not done here.
+- Section 4: with an empty DSN, Sentry's Laravel provider does not register
+  (`BaseServiceProvider::hasDsnSet()`), and its transport sends nothing without one. The
+  log stack writes to stderr, so Docker's container logs; `shipment-import.log`, pack
+  slips and labels live in the container's own filesystem; the only bind mount holding
+  tenant data is the SSH key directory, inside the tenant directory teardown deletes. So
+  removing the containers and the tenant directory leaves no order data behind.
+- Tests: `DemoProvisionTest`, `DemoDisconnectTest`, `DemoLifetimeTest`. Full suite green.
