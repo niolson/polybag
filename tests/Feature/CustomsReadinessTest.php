@@ -219,7 +219,7 @@ describe('country of origin and HS code', function (): void {
         expect(readinessFor($package))->toBe([]);
     });
 
-    it('blocks a missing or short HS code for the EU and the UK, and accepts six digits', function (string $country, string $postalCode): void {
+    it('blocks a missing or short HS code for the EU, the UK and Norway, and accepts six digits', function (string $country, string $postalCode): void {
         $short = readinessPackage($country, [['hs' => '61091']], ['postal_code' => $postalCode, 'duties_terms' => DutiesTerms::Ddu]);
         $missing = readinessPackage($country, [['hs' => null]], ['postal_code' => $postalCode, 'duties_terms' => DutiesTerms::Ddu]);
         $six = readinessPackage($country, [['hs' => '6109.10']], ['postal_code' => $postalCode, 'duties_terms' => DutiesTerms::Ddu]);
@@ -230,7 +230,14 @@ describe('country of origin and HS code', function (): void {
     })->with([
         'Germany' => ['DE', '10115'],
         'United Kingdom' => ['GB', 'SW1A 1AA'],
+        'Norway' => ['NO', '0150'],
     ]);
+
+    it('names Norway in the HS code block', function (): void {
+        $package = readinessPackage('NO', [['hs' => '6109']], ['postal_code' => '0150', 'duties_terms' => DutiesTerms::Ddu]);
+
+        expect(findingNamed(readinessFor($package), 'hs_code_missing')?->message)->toContain('Customs in Norway needs an HS code of at least 6 digits');
+    });
 
     it('only warns about a missing HS code elsewhere', function (): void {
         $missing = readinessPackage('JP', [['hs' => null]]);

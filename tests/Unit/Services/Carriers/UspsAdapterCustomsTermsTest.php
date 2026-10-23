@@ -58,10 +58,10 @@ function uspsIoss(string $number = 'IM2760000742'): SellerTaxRegistration
     return new SellerTaxRegistration(TaxRegistrationRegime::Ioss, $number, CustomsTermsOrigin::Client);
 }
 
-function uspsTermsRequest(?ResolvedCustomsTerms $terms, ?AddressData $to = null, ?RecipientTaxId $taxId = null, ?string $itn = null, ?ShippingOffer $offer = null): ShipRequest
+function uspsTermsRequest(?ResolvedCustomsTerms $terms, ?AddressData $to = null, ?RecipientTaxId $taxId = null, ?string $itn = null, ?ShippingOffer $offer = null, ?AddressData $from = null): ShipRequest
 {
     return new ShipRequest(
-        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        fromAddress: $from ?? new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
         toAddress: $to ?? uspsTermsAddress(),
         packageData: new PackageData(weight: 2.5, length: 10, width: 8, height: 6),
         selectedRate: new RateResponse(
@@ -470,4 +470,45 @@ it('refuses DDP and drops the rate once the CRID changes after acceptance', func
         ->and($response->errorMessage)->toContain('USPS DDP: account terms not accepted');
 
     Saloon::assertNothingSent();
+});
+
+describe('contact details for destination customs', function (): void {
+    it('sends the sender phone and email and the recipient phone', function (): void {
+        fakeUspsTermsLabel();
+
+        $request = uspsTermsRequest(uspsTermsFor('NO', DutiesTerms::Ddu), to: new AddressData(
+            firstName: 'Ola', lastName: 'Nordmann', streetAddress: 'Karl Johans gate 1', city: 'Oslo',
+            stateOrProvince: null, postalCode: '0150', country: 'NO', phone: '41234567', email: 'ola@example.no',
+        ), from: new AddressData(
+            firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle',
+            stateOrProvince: 'WA', postalCode: '98072', phone: '2065550100', email: 'ship@example.com',
+        ));
+
+        expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+        $body = sentUspsTermsBody();
+
+        expect($body['fromAddress'])->toMatchArray(['phone' => '2065550100', 'email' => 'ship@example.com'])
+            ->and($body['toAddress']['phone'])->toBe('41234567')
+            ->and($body['toAddress'])->not->toHaveKey('email');
+    });
+
+    it('leaves out a phone or email that USPS would refuse', function (): void {
+        fakeUspsTermsLabel();
+
+        $request = uspsTermsRequest(uspsTermsFor('NO', DutiesTerms::Ddu), to: new AddressData(
+            firstName: 'Ola', lastName: 'Nordmann', streetAddress: 'Karl Johans gate 1', city: 'Oslo',
+            stateOrProvince: null, postalCode: '0150', country: 'NO', phone: '+47 412 34 567',
+        ), from: new AddressData(
+            firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle',
+            stateOrProvince: 'WA', postalCode: '98072', phone: '12345', email: 'shipping.desk@'.str_repeat('a', 40).'.com',
+        ));
+
+        expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+        $body = sentUspsTermsBody();
+
+        expect($body['fromAddress'])->not->toHaveKeys(['phone', 'email'])
+            ->and($body['toAddress'])->not->toHaveKey('phone');
+    });
 });

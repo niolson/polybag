@@ -300,6 +300,27 @@ it('rejects a customs reference with an unknown type, a long number or a stray k
     'no number' => [['referenceType' => 'VAT_NUMBER']],
 ]);
 
+it('accepts a sender phone and email and a recipient phone on an international label', function (): void {
+    $body = validUspsInternationalLabelBody([
+        'fromAddress' => ['phone' => '2065550100', 'email' => 'ship@example.com'],
+        'toAddress' => ['phone' => '41234567'],
+    ]);
+
+    assertMatchesUspsSchema($body, 'InternationalLabelRequest');
+});
+
+it('rejects contact details USPS would refuse', function (array $overrides): void {
+    $body = validUspsInternationalLabelBody($overrides);
+
+    expect(fn () => assertMatchesUspsSchema($body, 'InternationalLabelRequest'))
+        ->toThrow(AssertionFailedError::class);
+})->with([
+    'punctuated phone' => [['toAddress' => ['phone' => '+47 412 34 567']]],
+    'short phone' => [['fromAddress' => ['phone' => '12345']]],
+    'email on the recipient' => [['toAddress' => ['email' => 'ola@example.no']]],
+    'email over 50 characters' => [['fromAddress' => ['email' => str_repeat('a', 40).'@example.com']]],
+]);
+
 it('rejects a prepayment flag that is not a boolean true', function (mixed $flag): void {
     $body = validUspsInternationalLabelBody(['packageDescription' => ['prepayDutiesTaxesFees' => $flag]]);
 

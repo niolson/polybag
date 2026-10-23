@@ -335,3 +335,50 @@ enrolment instead, this shrinks to a confirmation checkbox with no terms text.
   DDP-mandatory country missing from the table gets USPS DDU rates: before USPS's refusal is
   live such a label is bought DDU and risks refusal at the destination; after, the purchase
   fails at USPS instead of the rate being filtered.
+- 2026-10-23 — **USPS sent more on Norway; the VOEC question stays open.** The reply quotes
+  the IMM Norway page ([mo_028](https://pe.usps.com/text/imm/mo_028.htm)) and does not
+  describe the API:
+  - **Field, confirmed again (weak evidence):** Posten Bring asks for the 7-digit VOEC number in the
+    "sender's customs reference No.", which USPS said on 10-15 is `exportersReference`. That
+    is what the adapter sends.
+  - **Electronic transmission is required, but USPS has not said it does it:** Norwegian Customs has
+    required the VOEC number electronically since 2024-01-01, and without it the parcel risks
+    delay, double taxation and fees. The reply does not say whether `exportersReference`
+    reaches Posten Bring in the ITMATT, nor which `referenceType` to use. Both are still
+    for the sales representative.
+  - **Printed prefix, not changed:** the IMM suggests printing "VOEC No." before the number.
+    The adapter sends the bare 7 digits as `VAT_NUMBER`, so the CP72 shows the number
+    unlabeled. A prefix would fit in 28 characters but might break electronic matching, so
+    nothing changes until USPS says which form it reads.
+  - **Threshold:** the IMM says "not exceeding 3,000 NOK"; the PRD follows Skatteetaten
+    (under NOK 3,000, per item), which is the authority. No change.
+  - **No build change.** USPS offers no DDP to Norway, so the exporter-reference limit does
+    not arise there, and automation still holds NO until the declarations are verified.
+- 2026-10-23 — **The full IMM Norway page has more than the email quoted.** Read in full the same day; it shows no
+  issue date.
+  - **USPS DDP: "NOT Available"** for Norway. This confirms the assumption above.
+  - **HS code required:** "All items containing goods must include the corresponding 6-digit
+    harmonized system code for each article." `CustomsReadiness::lineFindings()` blocks a
+    short or missing HS code only for the EU and GB; to NO a missing code is only a warning,
+    and a 4-digit code passes. **Fixed the same day:** NO now blocks like the EU and GB, with
+    the message naming Norway.
+  - **Phone and email for sender and addressee** are requested, "if available", along with
+    origin and EORI. `UspsAdapter` sends no phone or email on either address, although the
+    spec takes `phone` and `email` on `fromAddress` and `phone` on `toAddress`, and
+    `AddressData` carries both. This affects every USPS international label, not only NO.
+    **Fixed the same day:** `UspsAdapter::customsContact()` adds `phone` and `email` to the
+    international `fromAddress` and `phone` to `toAddress`, each only when it matches USPS's
+    pattern (a bad value is left out, never reshaped). The phone is the national digits from
+    `PhoneParserService::carrierDigits()`, which the spec allows with the address's country.
+    The recipient's email has no field. Domestic labels are unchanged. `uspsLabel.json` gains
+    `InternationalFromAddress`, `Phone` and `Email`. Not yet seen on a TEM or production
+    label: whether the CP72 prints them.
+  - **Commercial invoice in duplicate** for commercial items. The page also says an
+    electronic combined label and customs form needs "no additional customs form", which may
+    or may not cover the invoice. Unresolved.
+  - **Prohibited:** pharmaceuticals and naturopathic preparations; cosmetics, perfumes and
+    sanitary products containing alcohol unless approved. PolyBag does not screen contents.
+  - **Spec hint on transmission:** the 3.4.1 spec says of a `CustomsReference`'s `contact`
+    that "all contact methods will be manifested electronically". This suggests customs
+    references go in the electronic manifest, but it does not say so of `reference` itself,
+    so the VOEC question above stays open.
