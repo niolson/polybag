@@ -345,7 +345,8 @@ class CustomsReadiness
     private function lineFindings(array $lines, array $products, AddressData $destination, AddressData $origin): array
     {
         $findings = [];
-        $needsFullHsCode = $destination->isInEuropeanUnion() || strtoupper(trim($destination->country)) === 'GB';
+        $country = strtoupper(trim($destination->country));
+        $needsFullHsCode = $destination->isInEuropeanUnion() || in_array($country, ['GB', 'NO'], true);
 
         $noOrigin = array_filter($lines, fn (CustomsItem $line): bool => blank($line->countryOfOrigin));
 
@@ -375,7 +376,11 @@ class CustomsReadiness
                     sprintf(
                         'Customs in %s needs an HS code of at least 6 digits on every line, and %s: %s. '
                         .'Add it on the product form (Customs), then refresh rates.',
-                        strtoupper(trim($destination->country)) === 'GB' ? 'the UK' : 'the EU',
+                        match ($country) {
+                            'GB' => 'the UK',
+                            'NO' => 'Norway',
+                            default => 'the EU',
+                        },
                         count($shortHs) === 1 ? 'one item has none' : count($shortHs).' items have none',
                         $this->describeLines($shortHs),
                     ),

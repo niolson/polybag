@@ -1079,8 +1079,10 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
                 'X-Idempotency-Key' => $idempotencyKey,
             ]);
 
-            $toAddress = $this->buildInternationalAddress($request->toAddress, $request);
-            $fromAddress = $this->buildDomesticAddress($request->fromAddress, $request);
+            $toAddress = $this->buildInternationalAddress($request->toAddress, $request)
+                + $this->customsContact($request->toAddress, withEmail: false);
+            $fromAddress = $this->buildDomesticAddress($request->fromAddress, $request)
+                + $this->customsContact($request->fromAddress, withEmail: true);
 
             $metadata = $request->selectedRate->metadata;
 
@@ -2289,6 +2291,31 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         return $result;
+    }
+
+    /**
+     * The phone, and for the sender the email, that an international label
+     * passes to destination customs. Norway's IMM page asks for both parties'
+     * phone and email; the International Labels spec takes `phone` on either
+     * address but `email` only on `fromAddress`. A value USPS's pattern would
+     * refuse is left out, never reshaped, so a bad number cannot fail a label.
+     *
+     * @return array{phone?: string, email?: string}
+     */
+    private function customsContact(AddressData $address, bool $withEmail): array
+    {
+        $contact = [];
+
+        if (filled($address->phone) && preg_match('/^\+?[1-9][0-9]{7,14}$|^[0-9]{6,15}$/', $address->phone)) {
+            $contact['phone'] = $address->phone;
+        }
+
+        if ($withEmail && filled($address->email) && mb_strlen($address->email) <= 50
+            && preg_match('/^[a-zA-Z0-9_+&*-]+(?:\.[a-zA-Z0-9_+&*-]+)*@(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}$/', $address->email)) {
+            $contact['email'] = $address->email;
+        }
+
+        return $contact;
     }
 
     /**

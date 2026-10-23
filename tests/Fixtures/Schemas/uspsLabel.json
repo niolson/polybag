@@ -23,11 +23,44 @@
       "additionalProperties": false,
       "properties": {
         "toAddress": { "$ref": "#/definitions/InternationalAddress" },
-        "fromAddress": { "$ref": "#/definitions/DomesticAddress" },
+        "fromAddress": { "$ref": "#/definitions/InternationalFromAddress" },
         "packageDescription": { "$ref": "#/definitions/PackageDescription" },
         "customsForm": { "$ref": "#/definitions/CustomsForm" },
         "imageInfo": { "$ref": "#/definitions/ImageInfo" }
       }
+    },
+    "InternationalFromAddress": {
+      "description": "The origin of an international label: UspsAdapter::buildDomesticAddress() plus customsContact(), which adds phone and email when they match USPS's patterns. ignoreBadAddress is never sent here.",
+      "type": "object",
+      "required": ["streetAddress", "city", "state", "ZIPCode"],
+      "additionalProperties": false,
+      "properties": {
+        "streetAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "secondaryAddress": { "type": "string", "minLength": 1, "maxLength": 50 },
+        "city": { "type": "string", "minLength": 1, "maxLength": 28 },
+        "state": { "type": "string", "minLength": 2, "maxLength": 2 },
+        "ZIPCode": { "type": "string", "pattern": "^[0-9]{5}$" },
+        "firstName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "lastName": { "type": "string", "minLength": 1, "maxLength": 30 },
+        "firm": { "type": "string", "minLength": 1, "maxLength": 38 },
+        "phone": { "$ref": "#/definitions/Phone" },
+        "email": { "$ref": "#/definitions/Email" }
+      },
+      "anyOf": [
+        { "required": ["firstName", "lastName"] },
+        { "required": ["firm"] }
+      ]
+    },
+    "Phone": {
+      "description": "USPS's Phone pattern (International Labels 3.4.1). UspsAdapter::customsContact() sends the digits PhoneParserService::carrierDigits() produced only when they match it.",
+      "type": "string",
+      "pattern": "^\\+?[1-9][0-9]{7,14}$|^[0-9]{6,15}$"
+    },
+    "Email": {
+      "description": "USPS's Email pattern and length (International Labels 3.4.1), sent only on fromAddress.",
+      "type": "string",
+      "maxLength": 50,
+      "pattern": "^[a-zA-Z0-9_+&*-]+(?:\\.[a-zA-Z0-9_+&*-]+)*@(?:[a-zA-Z0-9-]+\\.)+[a-zA-Z]{2,}$"
     },
     "DomesticAddress": {
       "description": "UspsAdapter::buildDomesticAddress(). ZIPCode is the first five characters of the postal code and is a string, never a number. The party is named either by firstName and lastName together or by firm; addNameFields() folds a lone first or last name into firm. ignoreBadAddress is set only by createDomesticShipment(), on a sandbox label to a withheld address (live-store-demo/03), and only ever true.",
@@ -51,7 +84,7 @@
       ]
     },
     "InternationalAddress": {
-      "description": "UspsAdapter::buildInternationalAddress(). country and countryISOAlpha2Code both carry the same two-letter code. province and postalCode are sent only when the address has them. Names follow the same rule as DomesticAddress.",
+      "description": "UspsAdapter::buildInternationalAddress(). country and countryISOAlpha2Code both carry the same two-letter code. province and postalCode are sent only when the address has them. Names follow the same rule as DomesticAddress. phone comes from customsContact(); USPS takes no email on toAddress.",
       "type": "object",
       "required": ["streetAddress", "city", "country", "countryISOAlpha2Code"],
       "additionalProperties": false,
@@ -65,7 +98,8 @@
         "countryISOAlpha2Code": { "type": "string", "pattern": "^[A-Z]{2}$" },
         "firstName": { "type": "string", "minLength": 1, "maxLength": 30 },
         "lastName": { "type": "string", "minLength": 1, "maxLength": 30 },
-        "firm": { "type": "string", "minLength": 1, "maxLength": 38 }
+        "firm": { "type": "string", "minLength": 1, "maxLength": 38 },
+        "phone": { "$ref": "#/definitions/Phone" }
       },
       "anyOf": [
         { "required": ["firstName", "lastName"] },
