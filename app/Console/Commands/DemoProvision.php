@@ -9,6 +9,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
 use App\Models\CarrierService;
+use App\Models\Channel;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Setting;
@@ -20,6 +21,7 @@ use Database\Seeders\ClientSeeder;
 use Database\Seeders\LocationSeeder;
 use Database\Seeders\OperationalDefaultsSeeder;
 use Database\Seeders\SettingsSeeder;
+use Database\Seeders\StoreChannelSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Str;
 
@@ -87,14 +89,14 @@ class DemoProvision extends Command
             $this->callSilent('db:seed', ['--class' => SettingsSeeder::class, '--force' => true]);
         }
 
-        foreach ([ClientSeeder::class, LocationSeeder::class, OperationalDefaultsSeeder::class] as $seeder) {
+        foreach ([ClientSeeder::class, LocationSeeder::class, StoreChannelSeeder::class, OperationalDefaultsSeeder::class] as $seeder) {
             $this->callSilent('db:seed', ['--class' => $seeder, '--force' => true]);
         }
 
         $settings->set('setup_complete', true, 'boolean', group: 'system');
         $settings->set('require_mfa', true, 'boolean', group: 'general');
 
-        $this->components->twoColumnDetail('Starter data', 'reference data, client, location, box sizes, shipping methods');
+        $this->components->twoColumnDetail('Starter data', 'reference data, client, location, channels, box sizes, shipping methods');
         $this->components->twoColumnDetail('MFA', 'required');
     }
 
@@ -217,10 +219,16 @@ class DemoProvision extends Command
             // and nothing it ships is told back to a store.
             'import_enabled' => false,
             'global_export' => false,
+            // What lets automation buy Amazon Shipping for another channel's
+            // order is this flag, the scope, and the method's `direct` row:
+            // those rates are direct, and the postage setting governs only Buy
+            // Shipping for the connection's own Amazon orders. Set so that, if
+            // the presenter turns imports on, automation can buy those too.
             'offers_off_amazon_shipping' => true,
-            'postage_setting' => PostageSetting::DoesNotSell,
+            'postage_setting' => PostageSetting::PackerAndAutomation,
             'settings' => array_merge($connection->settings ?? [], [
-                'channel_name' => 'Amazon',
+                // A channel ID, as the connection form stores it.
+                'channel_name' => Channel::query()->where('name', StoreChannelSeeder::AMAZON)->value('id'),
                 'marketplace_id' => $values['marketplace_id'],
                 'auth_mode' => 'manual',
                 'export_enabled' => false,

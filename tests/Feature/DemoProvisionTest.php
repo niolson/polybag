@@ -1,16 +1,21 @@
 <?php
 
 use App\Console\Commands\DemoProvision;
+use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Models\Channel;
 use App\Models\Client;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Models\User;
+use App\Services\PhoneParserService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use Database\Seeders\StoreChannelSeeder;
 
 /**
  * `live-store-demo/04`: `demo:provision` sets up a demo tenant from the
@@ -132,6 +137,48 @@ it('sets up Amazon Shipping on our sandbox app, selling postage and importing no
     expect($standardGround->carrierServices()->where('service_code', 'std-us-swa-mfn')->exists())->toBeTrue();
 });
 
+it('seeds an origin every carrier accepts', function (): void {
+    // The global setup makes a default Location; a fresh tenant has none.
+    Location::query()->delete();
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    $location = Location::where('is_default', true)->sole();
+
+    expect($location->address1)->toBe('17301 133rd Ave NE')
+        ->and([$location->city, $location->state_or_province, $location->postal_code])->toBe(['Woodinville', 'WA', '98072'])
+        ->and($location->timezone)->toBe('America/Los_Angeles')
+        ->and($location->phone_e164)->toBe('+14255550100')
+        ->and(PhoneParserService::parse($location->phone, $location->country)->isValid())->toBeTrue();
+});
+
+it('seeds a channel for each store type, without the test channel', function (): void {
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    expect(Channel::query()->orderBy('name')->pluck('name')->all())
+        ->toBe([StoreChannelSeeder::AMAZON, 'Manual', StoreChannelSeeder::SHOPIFY]);
+});
+
+it('lists a ground service from every carrier on Standard Ground', function (): void {
+    demoSandboxCredentials();
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    expect(ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->pluck('service_code')->sort()->values()->all())
+        ->toBe(['03', 'FEDEX_GROUND', 'GROUND_HOME_DELIVERY', 'USPS_GROUND_ADVANTAGE', 'std-us-swa-mfn']);
+});
+
+it('lets automation buy on the demo Amazon connection, filed under the Amazon channel', function (): void {
+    demoSandboxCredentials();
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    $connection = DataSource::query()->where('source_type', AmazonSource::class)->sole();
+
+    expect($connection->postage_setting)->toBe(PostageSetting::PackerAndAutomation)
+        ->and($connection->settings['channel_name'])->toBe(Channel::where('name', StoreChannelSeeder::AMAZON)->value('id'));
+});
+
 it('skips Amazon Shipping when our sandbox app is not configured', function (): void {
     demoSandboxCredentials();
     config()->set('demo.amazon_shipping.refresh_token', null);
@@ -159,6 +206,8 @@ it('can run again without duplicating anything or changing a password', function
     demoSandboxCredentials();
     $this->artisan('demo:provision')->assertSuccessful();
     $passwordHash = User::where('username', 'prospect')->value('password');
+    $standardGroundServices = ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->count();
+    Location::where('is_default', true)->update(['address1' => '1 Presenter Way']);
 
     $this->artisan('demo:provision')
         ->expectsOutputToContain('password unchanged')
@@ -169,5 +218,10 @@ it('can run again without duplicating anything or changing a password', function
         ->and(CarrierAccountScope::count())->toBe(4)
         ->and(DataSource::count())->toBe(1)
         ->and(User::count())->toBe(2)
+        ->and(Channel::count())->toBe(3)
+        ->and(Location::count())->toBe(1)
+        ->and(Location::value('address1'))->toBe('1 Presenter Way')
+        ->and(ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->count())->toBe($standardGroundServices)
+        ->and(DataSource::sole()->settings['channel_name'])->toBe(Channel::where('name', StoreChannelSeeder::AMAZON)->value('id'))
         ->and(User::where('username', 'prospect')->value('password'))->toBe($passwordHash);
 });

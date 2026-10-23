@@ -89,3 +89,15 @@ alone, as `firstOrCreate` does now.
   `ManifestCreatedTest`) still pass.
 - By hand on a fresh demo tenant: rate a package on Standard Ground and see all four
   carriers; buy a FedEx and a UPS sandbox label without editing the Location.
+
+## Comments
+
+- **Which setting lets automation buy Amazon Shipping for a Shopify order:** none beyond
+  what was already set. Off-Amazon Amazon Shipping is not channel postage
+  (`PostageSourceCandidate::isChannel()` is false for it) and its rates carry no observed
+  service, so `RateResponse::sourceKind()` is `Direct`. Automation buys it under the
+  method's `direct` row, once `offers_off_amazon_shipping` and the off-Amazon scope pick
+  the connection. `postage_setting` is set to `PackerAndAutomation` anyway, so Buy
+  Shipping on the connection's own orders is automatable if imports are turned on.
+- Location: Woodinville City Hall, `17301 133rd Ave NE, Woodinville, WA 98072`, phone
+  `(425) 555-0100`, `America/Los_Angeles`.
