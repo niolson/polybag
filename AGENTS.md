@@ -478,7 +478,7 @@ when dependencies change.
 - laravel/prompts (PROMPTS) - v0.3.21
 - laravel/scout (SCOUT) - v11.4.0
 - laravel/socialite (SOCIALITE) - v5.29.0
-- livewire/livewire (LIVEWIRE) - v4.4.3
+- livewire/livewire (LIVEWIRE) - v4.4.8
 - larastan/larastan (LARASTAN) - v3.10.0
 - laravel/boost (BOOST) - v2.4.13
 - laravel/mcp (MCP) - v0.9.1
