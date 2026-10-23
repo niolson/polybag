@@ -18,7 +18,8 @@ class ShippingMethodSeeder extends Seeder
     {
         $defaultClientId = Client::where('is_default', true)->value('id');
 
-        // Standard Ground - USPS Ground Advantage, FedEx Home Delivery
+        // Standard Ground - USPS Ground Advantage, UPS Ground, FedEx Ground and
+        // Home Delivery (commercial and residential, so rating picks by destination)
         $standardGround = ShippingMethod::firstOrCreate(
             ['name' => 'Standard Ground'],
             ['commitment_days' => 5, 'active' => true],
@@ -30,6 +31,8 @@ class ShippingMethodSeeder extends Seeder
         $standardGround->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'USPS_GROUND_ADVANTAGE',
+                '03',
+                'FEDEX_GROUND',
                 'GROUND_HOME_DELIVERY',
             ])->pluck('id')
         );
