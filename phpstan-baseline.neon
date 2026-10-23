@@ -1322,12 +1322,6 @@ parameters:
 			path: tests/Feature/Filament/Pages/SettingsTest.php
 
 		-
-			message: '#^Call to an undefined method Illuminate\\Testing\\TestResponse\:\:assertSet\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: tests/Feature/Filament/Pages/SetupWizardTest.php
-
-		-
 			message: '#^Access to an undefined property Pest\\Mixins\\Expectation\<array\<int, string\>\|string\>\|Pest\\Mixins\\Expectation\<Pest\\Expectation\<array\<int, string\>\|string\>\>\:\:\$commitment_days\.$#'
 			identifier: property.notFound
 			count: 1
