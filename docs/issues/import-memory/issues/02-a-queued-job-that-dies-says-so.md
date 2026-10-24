@@ -2,7 +2,7 @@
 
 # A queued job that dies of a fatal error says so in the app
 
-Status: needs-triage
+Status: done
 Category: bug
 Created: 2026-10-24
 
@@ -176,6 +176,31 @@ outlasts its stop timeout): no shutdown function runs then. If that turns out to
 matter, a backstop is to record on the DataSource when a run starts and finishes. A
 run that starts and finds an earlier one never finished then reports "The last import
 stopped before finishing". Not proposed now. Fatals are the case actually seen.
+
+## Done (2026-10-24)
+
+Built in two PRs: the listener and `failed()` methods (#490), then the lock, scheduled
+imports and `retryUntil()`. Where the build differs from the decision above:
+
+- **`App\Support\FatalErrorHeadroom`**, registered from `bootstrap/app.php`, raises
+  the limit after a fatal before Laravel's shutdown handler runs. Without it Laravel's
+  report ran out of memory again and cancelled the failure handler (see Sentry).
+- **`GenerateLabelJob::$tries` is 1.** Its `handle()` catches every exception, so a
+  second attempt only ever followed a dead process. That also covers a worker killed
+  outright, which no shutdown function sees: the next reserve fails the job and
+  `failed()` records it.
+- **`PreventOverlappingImports`** hands its lock to `FailQueuedJobOnFatalError`, which
+  releases it after failing the job.
+- **A scheduled run that finds the lock held is skipped**, as the scheduler's own
+  overlap guard did, rather than waiting and then reporting that it gave up.
+  `ScheduledDataSourceImportJob` is unique until processing, so at most one scheduled
+  run of a connection waits in the queue.
+- **Scheduled Amazon imports now pass the job's guards** (MFA required, a marketplace
+  chosen). `shipments:import` never checked them. A scheduled run that fails one logs
+  a warning rather than notifying, since it would repeat every tick.
+- **Connections take turns on the one `import-queue` worker.** The scheduler used to
+  run each connection's import in a background process of its own. How many
+  connections one worker carries is a capacity question for `capacity-audit`.
 
 ## Acceptance
 

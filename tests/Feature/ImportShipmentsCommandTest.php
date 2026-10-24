@@ -113,7 +113,7 @@ it('schedules imports only for active connections with import turned on', functi
     require base_path('routes/console.php');
 
     $scheduledIds = collect($schedule->events())
-        ->map(fn (Event $event): ?string => preg_match('/shipments:import --source-id=(\\d+)/', (string) $event->command, $m) ? $m[1] : null)
+        ->map(fn (Event $event): ?string => preg_match('/^data-source-import:(\\d+)$/', (string) $event->description, $m) ? $m[1] : null)
         ->filter()
         ->map(fn (string $id): int => (int) $id)
         ->values()

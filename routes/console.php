@@ -1,5 +1,6 @@
 <?php
 
+use App\Jobs\ScheduledDataSourceImportJob;
 use App\Models\DataSource;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
@@ -10,16 +11,17 @@ Artisan::command('inspire', function (): void {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+// Through the import queue rather than `shipments:import` in the scheduler,
+// so a scheduled run shares the overlap lock and failure handling of one
+// someone asked for (`import-memory/02`).
 try {
     DataSource::importing()
         ->whereNotNull('schedule_interval')
         ->get()
         ->each(function (DataSource $source): void {
-            Schedule::command('shipments:import', ['--source-id' => $source->id])
+            Schedule::job(new ScheduledDataSourceImportJob($source->id))
                 ->cron($source->schedule_interval->toCron())
-                ->withoutOverlapping()
-                ->runInBackground()
-                ->appendOutputTo(storage_path('logs/import-'.now()->format('Y-m-d').'.log'));
+                ->name("data-source-import:{$source->id}");
         });
 } catch (Throwable) {
     // DB may not be available during bootstrapping (e.g. first deploy)

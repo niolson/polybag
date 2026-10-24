@@ -696,8 +696,11 @@ hourly, every 6 hours, or daily. Blank means manual only.
 Scheduling is driven by the `scheduler` container running `schedule:work`, which rebuilds
 the schedule from the Data Source table once a minute — so a new or re-scheduled source
 is picked up within a minute, with no restart. A source is scheduled only when its
-`active` flag is on *and* it has an interval. Runs are `withoutOverlapping`, so a run
-that takes longer than the interval does not stack.
+`active` flag is on *and* it has an interval. Each scheduled run is queued on the
+**`imports`** queue, the same job as **Run Import**, so it runs in the `import-queue`
+container. One import of a source runs at a time: a scheduled run that finds another
+still running is skipped, and at most one scheduled run of a source waits in the queue.
+Connections share that one worker, so their runs take turns.
 
 Pick an interval against how long a run takes, remembering the items query runs once per
 shipment imported, and the [status query](#status_query) once per open shipment. Every 5 minutes against a slow ERP over an SSH tunnel is how you end up with
@@ -755,9 +758,8 @@ every case, a skipped shipment is still passed to `mark_exported_query`.
 | | |
 | --- | --- |
 | `storage/logs/shipment-import-YYYY-MM-DD.log` | The import log — run stats, per-row errors, connection failures. Daily, 14 days retained. |
-| `storage/logs/import-YYYY-MM-DD.log` | Scheduler command output for scheduled runs |
 | **Admin → Audit Log** | One `Data Source Query Executed` entry per query execution |
-| Notifications | Admins are notified when a run completes *with errors* |
+| Notifications | Admins are notified when a run completes *with errors*, and when a run stops before finishing: out of memory, over 30 minutes, or tired of waiting behind another run |
 
 The audit entries record the operation, success/failure, a SHA-256 of the query, the
 first 300 characters of it, the **names** of the bound parameters, and the affected-row
