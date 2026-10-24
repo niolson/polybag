@@ -155,6 +155,46 @@ class BatchLabelService
     /**
      * @param  Collection<int, Shipment>  $shipments  Already validated as eligible
      */
+    /**
+     * Finish the batch once every item has settled, and tell the user who
+     * started it — once, whichever caller gets here first.
+     *
+     * Called from the bus batch's `finally`, and from a label job's `failed()`.
+     * Laravel runs `finally` for a job that died *before* that job's
+     * `failed()` records its item, so `finally` alone would finish the batch
+     * on stale counts (`import-memory/02`).
+     */
+    public function finishIfSettled(LabelBatch $batch): void
+    {
+        $unsettled = $batch->items()
+            ->whereIn('status', [LabelBatchItemStatus::Pending, LabelBatchItemStatus::Processing])
+            ->exists();
+
+        if ($unsettled) {
+            return;
+        }
+
+        $batch->refresh();
+
+        $status = match (true) {
+            $batch->failed_shipments === 0 => LabelBatchStatus::Completed,
+            $batch->successful_shipments === 0 => LabelBatchStatus::Failed,
+            default => LabelBatchStatus::CompletedWithErrors,
+        };
+
+        $finished = LabelBatch::query()
+            ->whereKey($batch->id)
+            ->whereNotIn('status', [LabelBatchStatus::Completed, LabelBatchStatus::CompletedWithErrors, LabelBatchStatus::Failed])
+            ->update(['status' => $status, 'completed_at' => now()]);
+
+        if ($finished !== 1) {
+            return;
+        }
+
+        $batch->refresh();
+        User::find($batch->user_id)?->notify(new BatchLabelCompleted($batch));
+    }
+
     public function createBatch(
         Collection $shipments,
         BoxSize $boxSize,
@@ -206,21 +246,7 @@ class BatchLabelService
                 ]);
             })
             ->finally(function () use ($batch): void {
-                $batch->refresh();
-
-                $status = match (true) {
-                    $batch->failed_shipments === 0 => LabelBatchStatus::Completed,
-                    $batch->successful_shipments === 0 => LabelBatchStatus::Failed,
-                    default => LabelBatchStatus::CompletedWithErrors,
-                };
-
-                $batch->update([
-                    'status' => $status,
-                    'completed_at' => now(),
-                ]);
-
-                $user = User::find($batch->user_id);
-                $user?->notify(new BatchLabelCompleted($batch));
+                app(self::class)->finishIfSettled($batch);
             })
             ->dispatch();
 
