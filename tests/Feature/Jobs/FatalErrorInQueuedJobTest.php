@@ -96,7 +96,10 @@ it('tells the user and the active admins when an import runs out of memory insid
         ->and($worker->table('failed_jobs')->count())->toBe(1)
         // The rollback undid the write the fatal interrupted, and what the
         // failure wrote afterwards survived the process exiting.
-        ->and($worker->table('cache')->where('key', ExhaustsMemory::WRITTEN_INSIDE_TRANSACTION)->exists())->toBeFalse();
+        ->and($worker->table('cache')->where('key', ExhaustsMemory::WRITTEN_INSIDE_TRANSACTION)->exists())->toBeFalse()
+        // The overlap lock is free, so "Run import now" runs straight away
+        // rather than waiting half an hour for it to expire.
+        ->and($worker->table('cache_locks')->count())->toBe(0);
 
     foreach ([$packer, $admin] as $recipient) {
         $notification = $recipient->notifications()->sole();

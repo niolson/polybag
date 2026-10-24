@@ -3,6 +3,7 @@
 namespace App\Jobs;
 
 use App\Enums\Role;
+use App\Jobs\Middleware\PreventOverlappingImports;
 use App\Listeners\FailQueuedJobOnFatalError;
 use App\Models\DataSource;
 use App\Models\User;
@@ -12,11 +13,12 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\ImportRunRecorder;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\MaxAttemptsExceededException;
-use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\TimeoutExceededException;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\ErrorHandler\Error\FatalError;
 use Throwable;
 
@@ -26,15 +28,16 @@ class RunDataSourceImportJob implements ShouldQueue
 
     public int $timeout = 1800;
 
-    public int $tries = 60;
-
     public int $maxExceptions = 1;
 
     public bool $failOnTimeout = true;
 
+    /**
+     * @param  ?int  $userId  Who asked for the import; null when the scheduler started it.
+     */
     public function __construct(
         public int $dataSourceId,
-        public int $userId,
+        public ?int $userId,
         /** @var array<string, mixed> */
         public array $sourceOverrides = [],
     ) {
@@ -42,17 +45,30 @@ class RunDataSourceImportJob implements ShouldQueue
     }
 
     /**
-     * Prevent concurrent imports of the same source (double-clicks, scheduler overlap).
+     * Prevent concurrent imports of the same source: double-clicks, and a
+     * scheduled run beside one someone asked for.
      *
      * @return array<int, object>
      */
     public function middleware(): array
     {
-        return [
-            (new WithoutOverlapping("data-source-import:{$this->dataSourceId}"))
-                ->releaseAfter(60)
-                ->expireAfter($this->timeout + 60),
-        ];
+        return [PreventOverlappingImports::forDataSource($this->dataSourceId, $this->timeout + 60)];
+    }
+
+    /**
+     * How long an import someone asked for may wait behind another import of
+     * the same connection: the overlap lock's expiry plus a margin. Bounded
+     * by time rather than attempts, because every minute it waits is spent as
+     * an attempt.
+     */
+    public function retryUntil(): DateTimeInterface
+    {
+        return now()->addSeconds($this->timeout + 60 + 240);
+    }
+
+    public function wasScheduled(): bool
+    {
+        return $this->userId === null;
     }
 
     public function handle(SettingsService $settings): void
@@ -64,17 +80,13 @@ class RunDataSourceImportJob implements ShouldQueue
         }
 
         if ($source->source_type === AmazonSource::class && ! $settings->get('require_mfa', false)) {
-            User::find($this->userId)?->notify(
-                new ImportCompleted([], $source->name, ['Amazon SP-API imports require Multi-Factor Authentication to be enabled. Enable it in App Settings → Security.'])
-            );
+            $this->refuse($source, 'Amazon SP-API imports require Multi-Factor Authentication to be enabled. Enable it in App Settings → Security.');
 
             return;
         }
 
         if ($source->source_type === AmazonSource::class && blank($source->settings['marketplace_id'] ?? null)) {
-            User::find($this->userId)?->notify(
-                new ImportCompleted([], $source->name, ['Choose an Amazon marketplace before running imports.'])
-            );
+            $this->refuse($source, 'Choose an Amazon marketplace before running imports.');
 
             return;
         }
@@ -108,10 +120,25 @@ class RunDataSourceImportJob implements ShouldQueue
 
         User::query()
             ->where(fn ($query) => $query
-                ->whereKey($this->userId)
-                ->orWhere(fn ($admins) => $admins->where('role', Role::Admin)->where('active', true)))
+                ->where(fn ($admins) => $admins->where('role', Role::Admin)->where('active', true))
+                ->when($this->userId !== null, fn ($starter) => $starter->orWhereKey($this->userId)))
             ->get()
             ->each->notify($notification);
+    }
+
+    /**
+     * Tell whoever asked for the import why it did not run. A scheduled run
+     * is logged instead: it would say the same thing every tick.
+     */
+    private function refuse(DataSource $source, string $reason): void
+    {
+        if ($this->wasScheduled()) {
+            Log::warning("Skipped a scheduled import from {$source->name}: {$reason}", ['data_source_id' => $source->id]);
+
+            return;
+        }
+
+        User::find($this->userId)?->notify(new ImportCompleted([], $source->name, [$reason]));
     }
 
     private static function reasonStopped(?Throwable $exception): string
