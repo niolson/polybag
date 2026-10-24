@@ -163,6 +163,10 @@ class BatchLabelService
      * Laravel runs `finally` for a job that died *before* that job's
      * `failed()` records its item, so `finally` alone would finish the batch
      * on stale counts (`import-memory/02`).
+     *
+     * The counts are read after every item is seen settled, which is right
+     * only because a label job commits an item's status and its count in one
+     * transaction: an item seen settled has its count committed too.
      */
     public function finishIfSettled(LabelBatch $batch): void
     {
