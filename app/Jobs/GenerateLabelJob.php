@@ -8,6 +8,7 @@ use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Listeners\FailQueuedJobOnFatalError;
 use App\Models\LabelBatchItem;
+use App\Services\BatchLabelService;
 use App\Services\PostageSources\OfferStore;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -99,6 +100,10 @@ class GenerateLabelJob implements ShouldQueue
         }
 
         $this->handleFailure($item, 'This label stopped before it finished. Try it from the Ship page.');
+
+        // The bus batch's `finally` already ran, before this item was
+        // recorded; if it was the last one, finishing the batch is on us.
+        app(BatchLabelService::class)->finishIfSettled($item->labelBatch);
     }
 
     private function handleFailure(LabelBatchItem $item, string $errorMessage): void
