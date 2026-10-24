@@ -61,7 +61,7 @@ class RunDataSourceImportJob implements ShouldQueue
      * by time rather than attempts, because every minute it waits is spent as
      * an attempt.
      */
-    public function retryUntil(): DateTimeInterface
+    public function retryUntil(): ?DateTimeInterface
     {
         return now()->addSeconds($this->timeout + 60 + 240);
     }
@@ -115,7 +115,7 @@ class RunDataSourceImportJob implements ShouldQueue
         $source = DataSource::find($this->dataSourceId);
         $notification = new ImportStopped(
             $source->name ?? "Connection #{$this->dataSourceId}",
-            self::reasonStopped($exception),
+            $this->reasonStopped($exception),
         );
 
         User::query()
@@ -141,12 +141,13 @@ class RunDataSourceImportJob implements ShouldQueue
         User::find($this->userId)?->notify(new ImportCompleted([], $source->name, [$reason]));
     }
 
-    private static function reasonStopped(?Throwable $exception): string
+    private function reasonStopped(?Throwable $exception): string
     {
         return match (true) {
             $exception instanceof FatalError && str_contains($exception->getMessage(), 'Allowed memory size') => 'The import ran out of memory and stopped. Shipments it had already written are kept.',
             $exception instanceof FatalError => 'The import stopped on a server error. Shipments it had already written are kept.',
             $exception instanceof TimeoutExceededException => 'The import took longer than 30 minutes and was stopped. Shipments it had already written are kept.',
+            $exception instanceof MaxAttemptsExceededException && $this->wasScheduled() => 'The import stopped before it finished, every time it was tried.',
             $exception instanceof MaxAttemptsExceededException => 'Another import of this connection was still running, and this one stopped waiting for it.',
             $exception !== null => 'The import stopped: '.ImportRunRecorder::reasonFor($exception),
             default => 'The import stopped before it finished.',

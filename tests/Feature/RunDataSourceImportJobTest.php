@@ -14,12 +14,14 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\CallQueuedHandler;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Symfony\Component\ErrorHandler\Error\FatalError;
 
 uses(RefreshDatabase::class);
@@ -337,4 +339,35 @@ it('notifies an admin who started an import once', function (): void {
     (new RunDataSourceImportJob($source->id, $admin->id))->failed(new RuntimeException('Source unavailable'));
 
     expect($admin->notifications()->count())->toBe(1);
+});
+
+it('lets the scheduler queue a connection again after a scheduled import fails before it starts', function (): void {
+    $queue = Queue::fake();
+    $admin = User::factory()->admin()->create();
+    $source = DataSource::factory()->create();
+
+    ScheduledDataSourceImportJob::dispatch($source->id);
+    ScheduledDataSourceImportJob::dispatch($source->id);
+
+    expect($queue->pushed(ScheduledDataSourceImportJob::class))->toHaveCount(1);
+
+    // Laravel's own failure path for a job that never reached processing,
+    // which leaves a `ShouldBeUniqueUntilProcessing` lock alone.
+    app(CallQueuedHandler::class)->failed(
+        ['command' => serialize($queue->pushed(ScheduledDataSourceImportJob::class)->sole())],
+        new MaxAttemptsExceededException('has been attempted too many times.'),
+        'failed-before-processing',
+    );
+
+    ScheduledDataSourceImportJob::dispatch($source->id);
+
+    expect($queue->pushed(ScheduledDataSourceImportJob::class))->toHaveCount(2)
+        ->and($admin->notifications()->sole()->data['body'])->toBe('The import stopped before it finished, every time it was tried.');
+});
+
+it('gives a scheduled import no deadline, and its uniqueness an expiry', function (): void {
+    $job = new ScheduledDataSourceImportJob(42);
+
+    expect($job->retryUntil())->toBeNull()
+        ->and($job->uniqueFor)->toBe(3600);
 });
