@@ -195,6 +195,13 @@ imports and `retryUntil()`. Where the build differs from the decision above:
   overlap guard did, rather than waiting and then reporting that it gave up.
   `ScheduledDataSourceImportJob` is unique until processing, so at most one scheduled
   run of a connection waits in the queue.
+  It has no `retryUntil()`: Laravel releases that uniqueness lock only when processing
+  starts, so a run failed in a backlog before it started kept the connection from being
+  scheduled again. Its `failed()` releases the lock, and `uniqueFor` bounds it at an
+  hour.
+- **A label batch finishes once its last item settles** (`finishIfSettled()`), from
+  the bus batch's `finally` or a dead job's `failed()`. Laravel runs `finally` before
+  the failed job's `failed()`, so `finally` alone finished on stale counts.
 - **Scheduled Amazon imports now pass the job's guards** (MFA required, a marketplace
   chosen). `shipments:import` never checked them. A scheduled run that fails one logs
   a warning rather than notifying, since it would repeat every tick.
