@@ -54,9 +54,100 @@ the lock expires. The UI shows the import as queued and nothing happens, with no
 message saying why. When the lock expires the next attempt runs into the same memory
 limit, and the cycle repeats.
 
-## Options
+## Decision (2026-10-24)
 
-Not decided; for triage.
+**Two passes (option 3), behind a fixed limit (option 1).** The import's peak memory
+should depend on the page size, not on how many orders the store has open. A
+fixed `SHIPMENT_IMPORT_MEMORY_LIMIT` is a ceiling and is never sized per store.
+
+The whole set is needed only for **identities**, not for full rows.
+
+- **Re-pointing** (`reconcileSupersededRecords()`) has to run before any write. A
+  re-keyed fulfillment order whose replacement is on page 1 would otherwise be
+  imported as a second Shipment before the run could see that the old ID is gone.
+  It also has to see every candidate at once. `ShopifyFulfillmentOrderRepointer`
+  refuses to re-point when two new fulfillment orders match the same old Shipment,
+  and those two can be on different pages. Re-pointing page by page would accept
+  the first before the second arrived. So it runs once, over every fulfillment
+  order's `ShopifyFulfillmentOrderIdentity` (fulfillment order ID, order ID,
+  location ID, goods fingerprint), exactly as it does today.
+- **Closure** (`closeRecordsClosedAtSource()`) needs the IDs on offer and each one's
+  location. `ShopifyClosedFulfillmentOrderCloser::candidates()` leaves fulfillment
+  orders at an ignored location out of the offered set, so that a Shipment whose
+  fulfillment order moved to an ignored location is looked up and closed. The
+  identity's `locationId` is the same Shopify location GID as the row's
+  `source_location.external_id`, so the identities carry what it needs.
+
+An identity is four short strings. A fingerprint is a hash of SKUs and quantities,
+so 5,000 identities stay at a few MB at most. The full mapped rows and the raw nodes
+in `orderCache` are what fill memory, and neither has to outlive its page.
+
+So a full read becomes:
+
+1. **Identities pass.** Page through `fulfillmentOrders(includeClosed: false)` for
+   what an identity needs: the IDs, the location, and each line item's SKU, variant
+   ID, quantity and `requiresShipping`. A fulfillment order with more line items than
+   one page pages through them, as the full read already does. Leave out the address,
+   barcodes, part-number metafield and customs fields. Build each identity with the
+   same `ShopifyGoodsFingerprint` the row mapping uses, keep it, and drop the page.
+2. **Re-point once**, over every identity, before any write. The repointer and its
+   ambiguity rules are unchanged.
+3. **Rows pass, one page at a time.** For each page of 250: map the rows, write them
+   in the existing batches, and drop the page before fetching the next. A Shipment
+   re-pointed in step 2 already carries its new ID, so the write finds it. Items come
+   from the page in hand, so `orderCache` goes away.
+4. **Closure**, once every page is written, against the identities: the offered set
+   is every identity's fulfillment order ID except those whose `locationId` is an
+   ignored location, the same rule `candidates()` applies to rows today. The
+   `ClosesRecordsClosedAtSource` contract stays as it is: closure runs after the
+   writes, and only when the read completed. The closer takes identities in place of
+   rows.
+
+The incremental read already has part of this shape. `changedFulfillmentOrderStatuses()`
+collects IDs and statuses, then `fetchChangedFulfillmentOrderShipments()` fetches full
+nodes 250 at a time. It gathers those into one collection, and that becomes
+page-at-a-time too, with its identities collected before its first write.
+
+Changes between the passes never re-point or close something wrongly, but one can
+leave a duplicate:
+
+- A fulfillment order created after the identities pass appears only in the rows
+  pass. It has no identity, so it is never re-pointed onto, and it is imported as
+  new. If it was a replacement, the result is a duplicate Shipment, and **no later
+  run repairs it**: once the replacement has a Shipment of its own,
+  `ShopifyFulfillmentOrderRepointer::unrecognized()` treats its ID as known and
+  skips it. Someone voids the stale Shipment by hand, the same as any duplicate the
+  repointer declines to merge. That is the cost the repointer already prefers to a
+  wrong merge, and the window is seconds wide. It is not worth a separate
+  reconciliation mechanism unless duplicates show up in practice.
+- One closed after the identities pass stays in the ID set, so this run does not
+  close it, and the rows pass writes nothing for it. The next run closes it.
+
+**Contract.** `DataSourceInterface::fetchShipments()` returns one collection, and
+Amazon and Database sources implement it too. Add an opt-in interface for a source
+that reads in pages (identities, then a page iterator) and have
+`ShipmentImportService::import()` use it when present. Shopify implements it first;
+the others keep `fetchShipments()` until they are moved. Amazon holds every order
+and an `orderCache` the same way, and Database `select()`s the whole result set, so
+both have the same slope.
+
+**Cost.** An extra read of every open fulfillment order, lighter than the full one
+because it skips addresses, barcodes, metafields and customs fields. That is about 20
+requests for 5,000, against a full read that takes about 26 seconds there. Measure
+its query cost against Shopify's 1,000-point limit before fixing the page size.
+
+**Test.** Fake Shopify responses for 1 page and for 20 pages, and assert that peak
+memory barely moves between them. Comparing the two avoids the noise of an absolute
+threshold. Also cover:
+
+- a re-keyed fulfillment order whose replacement is on an earlier page than any write
+  of the Shipment it replaces;
+- two new fulfillment orders on different pages that both match one old Shipment.
+  Neither may be re-pointed onto, the same as when both are on one page.
+- a Shipment whose fulfillment order moved to an ignored location is still closed,
+  with the closure fed from identities.
+
+## Options considered
 
 1. **Raise the worker's limit.** `php -d memory_limit=…` in the `import-queue`
    entrypoint, or an ini file in the image. Quick, and buys headroom, but the peak
@@ -71,8 +162,8 @@ Not decided; for triage.
    dependence on store size, at the cost of more requests against Shopify's query
    budget.
 
-Whichever is chosen, the stale lock should stop being silent: either catch the case
-where the lock is held past a normal run and say so in the UI, or shorten the expiry.
+The stale lock, and a fatal error that leaves no trace in the app, are tracked in
+[02](02-a-queued-job-that-dies-says-so.md).
 
 ## Acceptance
 
@@ -81,9 +172,39 @@ where the lock is held past a normal run and say so in the UI, or shorten the ex
 - A worker that dies mid-import does not leave "Run import now" silently queued for
   half an hour.
 
+## Measured
+
+2026-10-24, local, a full read of the development store (5,149 open fulfillment orders, small
+test orders), fetch only, no limit. Raw per-page log in
+`.scratch/import-memory/full-read-2026-10-24.jsonl`.
+
+| Fulfillment orders held | Peak memory |
+|---|---|
+| 0 (booted, before the read) | 83 MB |
+| 250 (first page) | 83 MB |
+| 2,500 | 125 MB |
+| 5,149 (all) | 175 MB |
+
+So the fetch alone costs about 18 MB per 1,000 fulfillment orders, linearly. 128M is
+crossed at about 2,500 orders. Orders with more line items will cost more per order.
+The writes that follow the fetch are not measured here.
+
+The import now runs under `SHIPMENT_IMPORT_MEMORY_LIMIT` (default 256M), set with
+`ini_set` when a run starts. This means the limit is the same under `queue:listen` in
+development (whose child workers get no `-d` flags) as under the Docker worker. It is
+not put back when the run ends: lowering the limit below what the process still holds
+throws, and the source's caches outlive the run. At this slope, 256M allows about
+9,000 small orders before the fetch alone runs out.
+
+Each run resets PHP's peak (`memory_reset_peak_usage()`) when it starts, so an earlier
+job in the same worker does not count. It logs `peak_memory_mb` at start (after the
+fetch) and at completion, and the Shopify full read logs one line per page. Peaks in
+the per-page lines are the run's too.
+
 ## Notes
 
 - Seen on the first full read of a newly connected store. How many open fulfillment
-  orders it had is not known; the import never finished.
+  orders it had is not known; the import never finished. The development store has about
+  5,000.
 - The hosted instance worked around it for that one tenant by running the import
   worker with `-d memory_limit=512M`. That is a stopgap for a demo, not a fix.
