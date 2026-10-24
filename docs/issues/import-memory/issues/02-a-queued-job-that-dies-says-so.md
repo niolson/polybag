@@ -25,13 +25,29 @@ Nothing in the job sees it: not `maxExceptions`, not a `catch`, and not the job'
   for hours before `MaxAttemptsExceededException` finally sends it to `failed_jobs`.
 - **Nobody is told even then.** `RunDataSourceImportJob` has no `failed()` method.
 - **The lock is left held.** `WithoutOverlapping` expires after `$timeout + 60`
-  seconds (31 minutes). Until then every import of that Connection, scheduled or from
-  "Run import now", is released back to the queue once a minute, with nothing in the
-  UI to say why.
+  seconds (31 minutes). Until then every "Run import now" of that Connection is
+  released back to the queue once a minute, with nothing in the UI to say why.
 
 The same applies to `GenerateLabelJob` in a label batch, `RefreshPackageTrackingJob`,
 and any other queued job. A fatal in the middle of a label batch leaves that batch
 waiting with no error shown.
+
+### Scheduled imports take a different path
+
+Scheduled imports do not go through `RunDataSourceImportJob` at all.
+`routes/console.php` schedules `shipments:import --source-id=…` in the `scheduler`
+container, with `withoutOverlapping()->runInBackground()`. So:
+
+- **A scheduled import that dies of a fatal tells no one.** The error goes to
+  `logs/import-*.log` (and Sentry), and no job or `failed()` runs. A daily full read
+  is the run most likely to hit the limit.
+- **A scheduled run and "Run import now" can import the same Connection at once.**
+  The scheduler's mutex and the job's `WithoutOverlapping` lock are different keys,
+  and `ImportShipmentsCommand` takes no lock of its own.
+
+Sellers with pre-orders, merch drops or seasonal sales can see a huge influx of open
+orders at once, so every import path, scheduled or manual, has to fail visibly when
+it cannot carry the load.
 
 ## Sentry
 
@@ -42,42 +58,61 @@ calls `Integration::handles($exceptions)`.
 
 Laravel does report an out-of-memory fatal. `HandleExceptions` keeps 32 KB in reserve,
 frees it at shutdown, and passes the error to the handler as a `FatalError`.
-Reproduced locally at a 96M limit: `laravel.log` got
-`local.ERROR: Allowed memory size of 100663296 bytes exhausted` as a `FatalError`. So
-the event should have reached Sentry.
 
-Not yet known why it was not seen there. To check: search Sentry for `FatalError` or
-"Allowed memory size" in the demo tenant's environment around 2026-10-23. If it is
-missing, reproduce in that tenant's `import-queue` container (a `tinker` loop at
-`-d memory_limit=64M`) and watch whether the event arrives. A likely cause is the
-SDK's send running out of memory itself, with only the 32 KB reserve to work in. The
-container has been recreated since, so its earlier logs are gone.
+Reproduced locally on 2026-10-24, with the DSN pointed at a local listener: a closure
+job that allocates 1 MB at a time, run by `queue:work imports --once` at
+`-d memory_limit=64M`. The worker exited 255, `laravel.log` recorded
+`Allowed memory size of 67108864 bytes exhausted`, and **the SDK delivered the event**
+to the listener. So the SDK's send does not run out of memory in the 32 KB reserve, at
+least for a fatal like this one.
+
+Not yet known why the demo tenant's event was not seen. The remaining check is in
+Sentry itself, which needs the Sentry UI or an API token: search for `FatalError` or
+"Allowed memory size" in the demo tenant's environment around 2026-10-23.
+
+Laravel's shutdown function is registered when the app boots, so it runs **before**
+any handler this issue adds. Raising `memory_limit` in our handler gives our `fail()`
+and notification room to run, but does nothing for Laravel's report to Sentry.
+
+**Laravel's report can run out of memory itself.** Both local reproductions showed a
+second fatal at shutdown, `Allowed memory size … exhausted` in
+`vendor/composer/ClassLoader.php`: loading a class the report needs, with only the
+32 KB reserve. A fatal inside a shutdown function cancels every shutdown function
+after it. In the simple reproduction the Sentry event had already gone out; under
+`RunDataSourceImportJob` the second fatal cancelled the failure handler, and the job
+stayed queued. That is a likely reason the demo tenant's event never arrived.
+`App\Support\FatalErrorHeadroom` is therefore registered from `bootstrap/app.php`,
+ahead of Laravel's handler, and raises the limit by 32 MB after a fatal, so the
+report and the failure handler both have room.
 
 Sentry is for us in any case. A packer or admin never sees it, so an error that only
 reaches Sentry is still silent in the app.
 
-## Proposed
+## Decision (2026-10-24)
 
-A job middleware, applied to every queued job (`RunDataSourceImportJob`,
-`GenerateLabelJob`, `RefreshPackageTrackingJob`, ...), that turns a fatal error into
-an ordinary failure:
+### A global listener turns a fatal into a failure
 
-1. Around `$next($job)`, register a shutdown function and a flag that is cleared when
-   the job returns.
-2. If the process shuts down with the flag still set and `error_get_last()` is
-   fatal:
-   1. Raise `memory_limit` by a few MB. `ini_set` works at shutdown, so the handler
-      has room to run.
-   2. **Roll back every open transaction** on every connection the job used
-      (`DB::connection($name)->rollBack(0)` for each connection with a non-zero
-      `transactionLevel()`). An import that runs out of memory inside a batch's
-      `DB::transaction()` leaves it open. Laravel's `fail()` rolls back for a
-      `TimeoutExceededException`, but not for a `FatalError`. Without this, the
-      failure record and the notification are written inside the dead transaction
-      and disappear when the process exits.
-   3. Call `$job->fail(new FatalError(...))`. That marks the job failed, removes it
-      from the queue so it is not retried 31 minutes later, and calls the job's
-      `failed()`. It still gets reported to Sentry.
+Not a job middleware: Laravel has no global job middleware, and adding one to each
+job by hand misses queued listeners (`ExportShippedPackage`,
+`InvalidateDashboardCache`), queued notifications, and the next job someone writes.
+
+A listener on `JobProcessing` registers a shutdown handler for the job in hand, and
+`JobProcessed` / `JobExceptionOccurred` / `JobFailed` clear it. If the process shuts
+down with a job still marked as running and `error_get_last()` is fatal:
+
+1. Raise `memory_limit` by a few MB. `ini_set` works at shutdown, so the handler has
+   room to run.
+2. **Roll back every open transaction** on every connection
+   (`DB::connection($name)->rollBack(0)` for each connection with a non-zero
+   `transactionLevel()`). An import that runs out of memory inside a batch's
+   `DB::transaction()` leaves it open. Laravel's `fail()` rolls back for a
+   `TimeoutExceededException`, but not for a `FatalError`. Without this, the failure
+   record and the notification are written inside the dead transaction and disappear
+   when the process exits.
+3. Call `$event->job->fail(new FatalError(...))`. That marks the job failed, removes
+   it from the queue so it is not retried 31 minutes later, and calls the job's
+   `failed()`. Laravel's own shutdown handler has already reported the fatal, so this
+   does not report it again.
 
 Then each job's `failed()` says something the user can see:
 
@@ -85,46 +120,78 @@ Then each job's `failed()` says something the user can see:
   plus active admins, the way `ImportRunRecorder` already notifies for an import with
   errors. For example: "Import from <Connection name> stopped: the import ran out of
   memory." A timeout or `MaxAttemptsExceededException` takes the same path.
-- **`GenerateLabelJob`** records the Package's failure in its batch, so the Label
-  Batches page shows it with the batch's other failed Packages.
+- **`GenerateLabelJob::failed()`** records the Package's failure in its batch
+  through the existing `handleFailure()`, so the Label Batches page shows it with the
+  batch's other failed Packages.
 
-**The import's overlap lock is released only by the execution that holds it.**
+### A label job that dies of a fatal is not retried
+
+Failing it outright is the point: a fatal may strike after the carrier sold the label
+and before PolyBag recorded it, and a retry could buy a second one. Today the job's
+`$tries = 2` would run it again after `retry_after`.
+
+`handleFailure()` keeps the Package when `OfferStore::hasUnresolvedPurchase()` is
+true, and the rollback in step 2 does not erase what that reads. Checked 2026-10-24:
+`OfferStore::redeem()` stamps `consumed_at` in its own autocommitted update before
+`createShipment()` is called, and nothing on the batch path wraps it in a
+transaction. Only `recordBoughtLabel()` opens one. A fatal inside it rolls back the
+recording, which leaves the offer consumed with no `purchase_reference`, which
+`awaitingPurchaseConfirmation()` reads as unresolved. The Package is kept.
+
+### Scheduled imports go through the job
+
+The scheduler dispatches `RunDataSourceImportJob` instead of running
+`shipments:import` inline. Then there is one path, one overlap lock and one place a
+failure is handled, and a scheduled run and "Run import now" can no longer overlap.
+A scheduled run has no user who started it, so its failure notifies active admins
+only: `userId` becomes nullable. `shipments:import` stays as a command for running an
+import by hand.
+
+### The import's overlap lock is released only by the execution that holds it
+
 `failed()` must not `forceRelease()` it. A job that never ran also reaches
-`failed()`: with two `import-queue` workers, a second "Run import now" waits on the
-lock and can run out of attempts while the first import is still running. A force
-release would then unlock the running import.
+`failed()`: a second "Run import now" waits on the lock and can run out of time while
+the first import is still running. A force release would then unlock the running
+import.
 
 `WithoutOverlapping` does not expose its lock's owner. So the import takes its
-overlap lock itself (or through a small middleware of ours) and keeps the `Lock`
-instance. The fatal shutdown path calls `$lock->release()` on that instance, which
-releases only if the lock's owner token is still this execution's.
+overlap lock through a small middleware of ours that keeps the `Lock` instance. The
+fatal shutdown path calls `$lock->release()` on that instance, which releases only if
+the lock's owner token is still this execution's.
 
 - A waiting job that fails never held the lock and releases nothing.
 - A job killed by a timeout leaves the lock to expire, as it does now.
 
-This does not cover a process killed outright (`SIGKILL` from a container memory
-limit, or a deploy that outlasts its stop timeout): no shutdown function runs then.
-If that turns out to matter, a backstop is to record on the DataSource when a run
-starts and finishes. A run that starts and finds an earlier one never finished
-then reports "The last import stopped before finishing". Not proposed now. Fatals are
-the case actually seen.
+### `retryUntil()` in place of `$tries = 60`
 
-Also lower `RunDataSourceImportJob::$tries`. Sixty attempts exists to ride out the
-one-minute lock releases, and once a fatal fails the job outright there is no reason
-to keep it that high. That needs care: `WithoutOverlapping`'s releases count as
-attempts.
+The attempts were spent mostly on the one-minute lock releases, so any smaller count
+would fail a legitimate "Run import now" that waits behind a long import. Bound the
+waiting by time, which is what the lock measures: `retryUntil()` at the lock's expiry
+plus a margin, about 35 minutes. `$tries` goes away.
+
+### Not covered
+
+A process killed outright (`SIGKILL` from a container memory limit, or a deploy that
+outlasts its stop timeout): no shutdown function runs then. If that turns out to
+matter, a backstop is to record on the DataSource when a run starts and finishes. A
+run that starts and finds an earlier one never finished then reports "The last import
+stopped before finishing". Not proposed now. Fatals are the case actually seen.
 
 ## Acceptance
 
 - An import that runs out of memory notifies the user who started it and the active
   admins within a minute, names the Connection, and says the import ran out of memory.
+- A scheduled import that runs out of memory notifies the active admins the same way.
+- A scheduled import and "Run import now" of the same Connection never run at once.
 - "Run import now" on that Connection runs straight away afterwards. It is not held
   by a stale lock.
 - A job that fails while waiting on the lock leaves another execution's lock held.
 - The failure notification survives a fatal raised inside an import batch's
   transaction.
 - The failed import is not retried on its own 31 minutes later.
-- A label batch job that dies of a fatal shows that Package as failed in its batch.
+- A label batch job that dies of a fatal is not retried, and shows that Package as
+  failed in its batch. A Package whose purchase may have gone through is kept.
+- A queued job without a `failed()` of its own is still marked failed, not retried.
 - The fatal still reaches Sentry and `laravel.log`.
 - A test triggers a real fatal in a queued job (a subprocess `queue:work --once` at a
   low limit) and asserts the job is failed, its `failed()` ran, and the lock is free.

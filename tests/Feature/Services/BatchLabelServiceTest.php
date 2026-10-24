@@ -27,6 +27,7 @@ use Illuminate\Bus\Events\BatchDispatched;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 
 beforeEach(function (): void {
     $this->service = new BatchLabelService;
@@ -457,4 +458,60 @@ it('queues the batch only after its rows commit', function (): void {
 
     expect($levels)->not->toBeEmpty()
         ->and(collect($levels)->every(fn (int $level): bool => $level === $baseline))->toBeTrue();
+});
+
+// --- a label job that dies (import-memory/02) ---
+
+it('finishes a batch on its real counts when its last label job dies', function (): void {
+    $queue = Queue::fake();
+
+    $user = User::factory()->admin()->create();
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+    $shipment->load('shipmentItems.product');
+
+    $batch = $this->service->createBatch(collect([$shipment]), BoxSize::factory()->create(), $user, 'pdf', null);
+    $batch->items()->sole()->update(['status' => LabelBatchItemStatus::Processing]);
+
+    /** @var GenerateLabelJob $job */
+    $job = $queue->pushed(GenerateLabelJob::class)->sole();
+    $died = new RuntimeException('Allowed memory size exhausted');
+
+    // In Laravel's order (`CallQueuedHandler::failed()`): the batch records
+    // the failure, running its `finally`, before the job's own `failed()`.
+    $job->batch()->recordFailedJob('dead-job-uuid', $died);
+    $job->failed($died);
+
+    $batch->refresh();
+    $notification = $user->notifications()->sole();
+
+    expect($batch->status)->toBe(LabelBatchStatus::Failed)
+        ->and($batch->failed_shipments)->toBe(1)
+        ->and($batch->completed_at)->not->toBeNull()
+        ->and($notification->data['title'])->toBe("Batch #{$batch->id} Failed")
+        ->and($notification->data['body'])->toStartWith('0 labels bought, 1 failed');
+});
+
+it('finishes a batch once, however many callers find it settled', function (): void {
+    $user = User::factory()->admin()->create();
+    $batch = LabelBatch::factory()->processing()->create(['user_id' => $user->id, 'successful_shipments' => 1]);
+    LabelBatchItem::factory()->create(['label_batch_id' => $batch->id, 'status' => LabelBatchItemStatus::Success]);
+
+    $this->service->finishIfSettled($batch);
+    $this->service->finishIfSettled($batch);
+
+    expect($batch->refresh()->status)->toBe(LabelBatchStatus::Completed)
+        ->and($user->notifications()->count())->toBe(1);
+});
+
+it('leaves a batch running while an item has not settled', function (): void {
+    $user = User::factory()->admin()->create();
+    $batch = LabelBatch::factory()->processing()->create(['user_id' => $user->id]);
+    LabelBatchItem::factory()->create(['label_batch_id' => $batch->id, 'status' => LabelBatchItemStatus::Success]);
+    LabelBatchItem::factory()->create(['label_batch_id' => $batch->id, 'status' => LabelBatchItemStatus::Processing]);
+
+    $this->service->finishIfSettled($batch);
+
+    expect($batch->refresh()->status)->toBe(LabelBatchStatus::Processing)
+        ->and($user->notifications()->count())->toBe(0);
 });

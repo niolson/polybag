@@ -324,3 +324,52 @@ it('does nothing when batch item not found', function (): void {
     // Should not throw
     expect(true)->toBeTrue();
 });
+
+it('makes one attempt, since a second only follows a process that died mid-purchase', function (): void {
+    expect((new GenerateLabelJob(1, 'pdf', null))->tries)->toBe(1);
+});
+
+it('records a label job that died as failed in its batch', function (): void {
+    $ctx = createBatchContext();
+    $ctx['item']->update(['status' => LabelBatchItemStatus::Processing]);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->failed(new RuntimeException('Allowed memory size exhausted'));
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->error_message)->toBe('This label stopped before it finished. Try it from the Ship page.')
+        ->and($ctx['batch']->refresh()->failed_shipments)->toBe(1)
+        ->and(Package::find($ctx['package']->id))->toBeNull();
+});
+
+it('keeps the package of a label job that died after claiming its offer', function (): void {
+    // A fatal between the claim and the carrier's reply: the carrier may have
+    // sold the label, and the claim was committed before the call.
+    $ctx = createBatchContext();
+    $ctx['item']->update(['status' => LabelBatchItemStatus::Processing]);
+    ShippingOffer::factory()->direct()->create([
+        'package_id' => $ctx['package']->id,
+        'consumed_at' => now(),
+    ]);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->failed(new RuntimeException('Allowed memory size exhausted'));
+
+    $ctx['item']->refresh();
+
+    expect($ctx['item']->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->error_message)->toContain('A label may already exist')
+        ->and($ctx['item']->package_id)->toBe($ctx['package']->id)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull();
+});
+
+it('leaves a batch item alone when the job had already settled it', function (): void {
+    $ctx = createBatchContext();
+    $ctx['item']->update(['status' => LabelBatchItemStatus::Success]);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->failed(new RuntimeException('Allowed memory size exhausted'));
+
+    expect($ctx['item']->refresh()->status)->toBe(LabelBatchItemStatus::Success)
+        ->and($ctx['batch']->refresh()->failed_shipments)->toBe(0)
+        ->and(Package::find($ctx['package']->id))->not->toBeNull();
+});
