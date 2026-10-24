@@ -7,12 +7,16 @@ use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Notifications\ImportCompleted;
+use App\Notifications\ImportStopped;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Notification;
+use Symfony\Component\ErrorHandler\Error\FatalError;
 
 uses(RefreshDatabase::class);
 
@@ -179,4 +183,53 @@ it('scopes the overlap lock to the data source id', function (): void {
         ->and(config('queue.connections.redis.retry_after'))->toBe(90)
         ->and(config('queue.connections.database.retry_after'))->toBe(90)
         ->and(config('queue.connections.imports.retry_after'))->toBe(1860);
+});
+
+it('tells the user who started an import and the active admins that it stopped', function (Throwable $exception, string $reason): void {
+    $packer = User::factory()->create();
+    $admin = User::factory()->admin()->create();
+    $inactiveAdmin = User::factory()->admin()->create(['active' => false]);
+    $source = DataSource::factory()->create(['name' => 'Drop Day Store']);
+
+    (new RunDataSourceImportJob($source->id, $packer->id))->failed($exception);
+
+    foreach ([$packer, $admin] as $recipient) {
+        $notification = $recipient->notifications()->sole();
+
+        expect($notification->type)->toBe(ImportStopped::class)
+            ->and($notification->data['title'])->toBe('Import Stopped (Drop Day Store)')
+            ->and($notification->data['body'])->toBe($reason);
+    }
+
+    expect($inactiveAdmin->notifications()->count())->toBe(0);
+})->with([
+    'out of memory' => [
+        fn (): FatalError => new FatalError('Allowed memory size of 134217728 bytes exhausted (tried to allocate 2097152 bytes)', 0, ['type' => E_ERROR, 'message' => '', 'file' => '', 'line' => 0], 0),
+        'The import ran out of memory and stopped. Shipments it had already written are kept.',
+    ],
+    'another fatal error' => [
+        fn (): FatalError => new FatalError('Call to undefined function', 0, ['type' => E_ERROR, 'message' => '', 'file' => '', 'line' => 0], 0),
+        'The import stopped on a server error. Shipments it had already written are kept.',
+    ],
+    'timeout' => [
+        fn (): TimeoutExceededException => new TimeoutExceededException('App\\Jobs\\RunDataSourceImportJob has timed out.'),
+        'The import took longer than 30 minutes and was stopped. Shipments it had already written are kept.',
+    ],
+    'out of attempts behind another import' => [
+        fn (): MaxAttemptsExceededException => new MaxAttemptsExceededException('has been attempted too many times.'),
+        'Another import of this connection was still running, and this one stopped waiting for it.',
+    ],
+    'an exception' => [
+        fn (): RuntimeException => new RuntimeException('Source unavailable'),
+        'The import stopped: Source unavailable',
+    ],
+]);
+
+it('notifies an admin who started an import once', function (): void {
+    $admin = User::factory()->admin()->create();
+    $source = DataSource::factory()->create();
+
+    (new RunDataSourceImportJob($source->id, $admin->id))->failed(new RuntimeException('Source unavailable'));
+
+    expect($admin->notifications()->count())->toBe(1);
 });
