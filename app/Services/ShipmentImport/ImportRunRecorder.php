@@ -52,7 +52,23 @@ class ImportRunRecorder
     {
         $this->log('info', "Starting import from {$this->sourceName}", [
             'shipment_count' => $shipmentCount,
+            ...self::memoryContext(),
         ]);
+    }
+
+    /**
+     * Peak memory of this run so far, against the limit in force: at
+     * `started()`, what fetching the whole set cost. The import resets PHP's
+     * peak when it starts, so an earlier job in the same worker does not count.
+     *
+     * @return array{peak_memory_mb: float, memory_limit: string}
+     */
+    public static function memoryContext(): array
+    {
+        return [
+            'peak_memory_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
+            'memory_limit' => (string) ini_get('memory_limit'),
+        ];
     }
 
     /**
@@ -128,7 +144,7 @@ class ImportRunRecorder
 
     public function completed(float $duration): ImportResult
     {
-        $this->log('info', 'Import completed', array_merge($this->stats, ['duration' => $duration]));
+        $this->log('info', 'Import completed', array_merge($this->stats, ['duration' => $duration], self::memoryContext()));
 
         ImportCompleted::dispatch($this->stats, $this->sourceName);
 

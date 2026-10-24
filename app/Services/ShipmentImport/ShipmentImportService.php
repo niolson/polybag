@@ -73,6 +73,9 @@ class ShipmentImportService
      */
     public function import(): ImportResult
     {
+        $this->applyMemoryLimit();
+        memory_reset_peak_usage();
+
         $startTime = microtime(true);
 
         try {
@@ -110,6 +113,24 @@ class ShipmentImportService
         }
 
         return $this->runRecorder->completed(microtime(true) - $startTime);
+    }
+
+    /**
+     * Set the run's memory limit, whatever the worker was started with, so an
+     * import is held to the same ceiling under `queue:listen` in development
+     * (whose child workers get no `-d` flags) as under the Docker worker.
+     *
+     * Not restored afterwards: lowering the limit below what the process still
+     * holds throws, and the source's caches outlive this method. A worker that
+     * runs imports keeps the import limit.
+     */
+    private function applyMemoryLimit(): void
+    {
+        $limit = config('shipment-import.behavior.memory_limit');
+
+        if (filled($limit)) {
+            ini_set('memory_limit', (string) $limit);
+        }
     }
 
     /**

@@ -20,7 +20,9 @@ use App\Models\User;
 use App\Notifications\ImportCompleted;
 use App\Services\ShipmentImport\ShipmentImportService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Log\Events\MessageLogged;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 
@@ -1450,4 +1452,95 @@ it('does not re-import items for skipped shipments', function (): void {
         ->and($result->itemsUpdated)->toBe(0);
 
     expect($shipment->shipmentItems()->first()->quantity)->toBe(5);
+});
+
+/**
+ * A source that holds `$retainedBytes` after its fetch, as Shopify's
+ * `orderCache` does, and notes the memory limit in force while fetching.
+ */
+final class MemoryHoldingSource implements DataSourceInterface
+{
+    public ?string $limitDuringFetch = null;
+
+    public string $retained = '';
+
+    public function __construct(private readonly int $retainedBytes = 0) {}
+
+    public function fetchShipments(): Collection
+    {
+        $this->limitDuringFetch = (string) ini_get('memory_limit');
+        $this->retained = str_repeat('x', $this->retainedBytes);
+
+        return collect();
+    }
+
+    public function fetchShipmentItems(string $sourceRecordId): Collection
+    {
+        return collect();
+    }
+
+    public function validateConfiguration(): void {}
+
+    public function getFieldMapping(): array
+    {
+        return [];
+    }
+
+    public function markExported(string $sourceRecordId): bool
+    {
+        return false;
+    }
+}
+
+it('runs the import under the configured memory limit, and completes holding more than the worker limit allows', function (): void {
+    $testLimit = ini_get('memory_limit');
+    // The worker's own limit sits just above what the process holds now; the
+    // fetch then keeps 64 MB more than that, as a large Shopify read keeps its
+    // fulfillment orders. Putting the worker limit back would throw.
+    $workerLimit = (int) ceil((memory_get_usage(true) + 16 * 1048576) / 1048576).'M';
+    ini_set('memory_limit', $workerLimit);
+    config(['shipment-import.behavior.memory_limit' => '2G']);
+
+    $source = new MemoryHoldingSource(64 * 1048576);
+
+    $logged = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$logged): void {
+        $logged[$event->message] = $event->context;
+    });
+
+    try {
+        $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
+
+        expect($result->hasErrors())->toBeFalse()
+            ->and($source->limitDuringFetch)->toBe('2G')
+            ->and(ini_get('memory_limit'))->toBe('2G')
+            ->and($logged['Import completed'])->toHaveKeys(['peak_memory_mb', 'memory_limit'])
+            ->and($logged['Import completed']['memory_limit'])->toBe('2G');
+    } finally {
+        $source->retained = '';
+        ini_set('memory_limit', $testLimit);
+    }
+});
+
+it('logs the peak memory of the run, not of earlier work in the same worker', function (): void {
+    $testLimit = ini_get('memory_limit');
+    config(['shipment-import.behavior.memory_limit' => '2G']);
+
+    // An earlier job in this worker peaked 128 MB above where it is now.
+    $earlier = str_repeat('x', 128 * 1048576);
+    unset($earlier);
+    $workerPeakMb = memory_get_peak_usage(true) / 1048576;
+
+    $logged = [];
+    Event::listen(MessageLogged::class, function (MessageLogged $event) use (&$logged): void {
+        $logged[$event->message] = $event->context;
+    });
+
+    try {
+        ShipmentImportService::forSource(new MemoryHoldingSource, $this->dataSource)->import();
+
+        expect($logged['Import completed']['peak_memory_mb'])->toBeLessThan($workerPeakMb - 64);
+    } finally {
+        ini_set('memory_limit', $testLimit);
+    }
 });

@@ -19,6 +19,7 @@ use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
+use App\Services\ShipmentImport\ImportRunRecorder;
 use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
 use App\Services\ShopifyGoodsFingerprint;
@@ -745,6 +746,13 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                     $shipments[] = $row;
                 }
             }
+
+            // The last of these before a worker dies of its memory limit
+            // says how far the read got.
+            Log::info('Read a page of Shopify fulfillment orders', [
+                'rows_held' => count($shipments),
+                ...ImportRunRecorder::memoryContext(),
+            ]);
 
             $pageInfo = $data['pageInfo'] ?? [];
             $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
