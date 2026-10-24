@@ -4,11 +4,15 @@ use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\EnsureUserIsManager;
+use App\Support\FatalErrorHeadroom;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Sentry\Laravel\Integration;
+
+// Before Laravel registers its own shutdown handler, which needs the room.
+FatalErrorHeadroom::registerBeforeLaravelReportsFatalErrors();
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(

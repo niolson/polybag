@@ -6,6 +6,7 @@ use App\Contracts\PackageShippingWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
+use App\Listeners\FailQueuedJobOnFatalError;
 use App\Models\LabelBatchItem;
 use App\Services\PostageSources\OfferStore;
 use Illuminate\Bus\Batchable;
@@ -17,10 +18,13 @@ class GenerateLabelJob implements ShouldQueue
 {
     use Batchable, Queueable;
 
-    public int $tries = 2;
-
-    /** @var int[] */
-    public array $backoff = [10, 30];
+    /**
+     * One attempt. `handle()` catches every exception, so a second attempt is
+     * only ever reached after the process died mid-purchase — a fatal error,
+     * a timeout, a kill — when the carrier may already have sold the label.
+     * Buying again then risks a second one (`import-memory/02`).
+     */
+    public int $tries = 1;
 
     public function __construct(
         public int $labelBatchItemId,
@@ -76,6 +80,25 @@ class GenerateLabelJob implements ShouldQueue
 
             $this->handleFailure($item, 'An unexpected error stopped this label. Try it from the Ship page.');
         }
+    }
+
+    /**
+     * Record the Package as failed in its batch when the job died rather than
+     * returned: a fatal error (through {@see FailQueuedJobOnFatalError}), a
+     * timeout, or a worker killed mid-purchase and found on the next reserve.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $item = LabelBatchItem::query()
+            ->whereKey($this->labelBatchItemId)
+            ->whereNotIn('status', [LabelBatchItemStatus::Success, LabelBatchItemStatus::Failed])
+            ->first();
+
+        if (! $item) {
+            return;
+        }
+
+        $this->handleFailure($item, 'This label stopped before it finished. Try it from the Ship page.');
     }
 
     private function handleFailure(LabelBatchItem $item, string $errorMessage): void

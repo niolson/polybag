@@ -2,15 +2,23 @@
 
 namespace App\Jobs;
 
+use App\Enums\Role;
+use App\Listeners\FailQueuedJobOnFatalError;
 use App\Models\DataSource;
 use App\Models\User;
 use App\Notifications\ImportCompleted;
+use App\Notifications\ImportStopped;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\ImportRunRecorder;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\Middleware\WithoutOverlapping;
+use Illuminate\Queue\TimeoutExceededException;
+use Symfony\Component\ErrorHandler\Error\FatalError;
+use Throwable;
 
 class RunDataSourceImportJob implements ShouldQueue
 {
@@ -82,5 +90,39 @@ class RunDataSourceImportJob implements ShouldQueue
         User::find($this->userId)?->notify(
             new ImportCompleted($result->toArray(), $source->name)
         );
+    }
+
+    /**
+     * Tell the user who started the import, and the active admins, that it
+     * stopped. Reached for an exception, a timeout, running out of attempts,
+     * and — through {@see FailQueuedJobOnFatalError} — a fatal error, none of
+     * which leave an {@see ImportCompleted} behind.
+     */
+    public function failed(?Throwable $exception): void
+    {
+        $source = DataSource::find($this->dataSourceId);
+        $notification = new ImportStopped(
+            $source->name ?? "Connection #{$this->dataSourceId}",
+            self::reasonStopped($exception),
+        );
+
+        User::query()
+            ->where(fn ($query) => $query
+                ->whereKey($this->userId)
+                ->orWhere(fn ($admins) => $admins->where('role', Role::Admin)->where('active', true)))
+            ->get()
+            ->each->notify($notification);
+    }
+
+    private static function reasonStopped(?Throwable $exception): string
+    {
+        return match (true) {
+            $exception instanceof FatalError && str_contains($exception->getMessage(), 'Allowed memory size') => 'The import ran out of memory and stopped. Shipments it had already written are kept.',
+            $exception instanceof FatalError => 'The import stopped on a server error. Shipments it had already written are kept.',
+            $exception instanceof TimeoutExceededException => 'The import took longer than 30 minutes and was stopped. Shipments it had already written are kept.',
+            $exception instanceof MaxAttemptsExceededException => 'Another import of this connection was still running, and this one stopped waiting for it.',
+            $exception !== null => 'The import stopped: '.ImportRunRecorder::reasonFor($exception),
+            default => 'The import stopped before it finished.',
+        };
     }
 }
