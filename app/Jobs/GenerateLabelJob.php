@@ -10,9 +10,11 @@ use App\Listeners\FailQueuedJobOnFatalError;
 use App\Models\LabelBatchItem;
 use App\Services\BatchLabelService;
 use App\Services\PostageSources\OfferStore;
+use Closure;
 use Illuminate\Bus\Batchable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 class GenerateLabelJob implements ShouldQueue
@@ -63,16 +65,21 @@ class GenerateLabelJob implements ShouldQueue
             );
 
             if ($result->success && $result->response) {
-                $item->update([
-                    'status' => LabelBatchItemStatus::Success,
-                    'tracking_number' => $result->response->trackingNumber,
-                    'carrier' => $result->response->carrier,
-                    'service' => $result->response->service,
-                    'cost' => $result->response->cost,
-                ]);
+                $response = $result->response;
 
-                $item->labelBatch->increment('successful_shipments');
-                $item->labelBatch->increment('total_cost', $result->response->cost ?? 0);
+                // Settled together with the batch's counts; see settle().
+                $this->settle(function () use ($item, $response): void {
+                    $item->update([
+                        'status' => LabelBatchItemStatus::Success,
+                        'tracking_number' => $response->trackingNumber,
+                        'carrier' => $response->carrier,
+                        'service' => $response->service,
+                        'cost' => $response->cost,
+                    ]);
+
+                    $item->labelBatch->increment('successful_shipments');
+                    $item->labelBatch->increment('total_cost', $response->cost ?? 0);
+                });
             } else {
                 $this->handleFailure($item, $result->summaryMessage());
             }
@@ -121,11 +128,27 @@ class GenerateLabelJob implements ShouldQueue
             $item->update(['package_id' => null]);
         }
 
-        $item->update([
-            'status' => LabelBatchItemStatus::Failed,
-            'error_message' => $errorMessage,
-        ]);
+        $this->settle(function () use ($item, $errorMessage): void {
+            $item->update([
+                'status' => LabelBatchItemStatus::Failed,
+                'error_message' => $errorMessage,
+            ]);
 
-        $item->labelBatch->increment('failed_shipments');
+            $item->labelBatch->increment('failed_shipments');
+        });
+    }
+
+    /**
+     * Write an item's final status and its batch's counts in one transaction.
+     * {@see BatchLabelService::finishIfSettled()} finishes the batch once no
+     * item is left unsettled, possibly from another worker; written apart, it
+     * could see this item settled before its count arrived and finish the
+     * batch on the wrong totals.
+     *
+     * @param  Closure(): void  $writes
+     */
+    private function settle(Closure $writes): void
+    {
+        DB::transaction($writes);
     }
 }

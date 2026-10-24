@@ -373,3 +373,19 @@ it('leaves a batch item alone when the job had already settled it', function ():
         ->and($ctx['batch']->refresh()->failed_shipments)->toBe(0)
         ->and(Package::find($ctx['package']->id))->not->toBeNull();
 });
+
+it('never settles an item without its batch count', function (): void {
+    // Another worker finishes the batch once no item is left unsettled. An
+    // item settled ahead of its count would finish it on the wrong totals.
+    $ctx = createBatchContext();
+    $ctx['item']->update(['status' => LabelBatchItemStatus::Processing]);
+
+    LabelBatch::updating(function (): never {
+        throw new RuntimeException('The batch count could not be written');
+    });
+
+    expect(fn () => (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->failed(new RuntimeException('Allowed memory size exhausted')))
+        ->toThrow(RuntimeException::class, 'The batch count could not be written');
+
+    expect($ctx['item']->refresh()->status)->toBe(LabelBatchItemStatus::Processing);
+});
