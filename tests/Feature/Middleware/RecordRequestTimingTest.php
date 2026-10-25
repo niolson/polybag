@@ -31,7 +31,7 @@ it('logs nothing while request timing is off', function (): void {
 it('logs wall time, peak memory and the Livewire work by name only', function (): void {
     config(['app.request_timing' => true]);
 
-    $logged = null;
+    $logged = [];
     Log::shouldReceive('channel')->once()->with('request-timing')->andReturnSelf();
     Log::shouldReceive('info')->once()->withArgs(function (string $message, array $context) use (&$logged): bool {
         $logged = $context;
@@ -41,20 +41,20 @@ it('logs wall time, peak memory and the Livewire work by name only', function ()
 
     (new RecordRequestTiming)->terminate(livewireTimingRequest(), new Response);
 
-    expect($logged)
-        ->method->toBe('POST')
-        ->status->toBe(200)
-        ->ms->toBeGreaterThanOrEqual(250)
-        ->peak_mb->toBeGreaterThan(0)
-        ->livewire->toBe([[
+    expect($logged)->toMatchArray([
+        'method' => 'POST',
+        'status' => 200,
+        'livewire' => [[
             'component' => 'app.filament.pages.pack',
             'calls' => ['saveDraft', 'mountAction:Ship'],
             'updates' => ['weight'],
-        ]])
-        ->and(json_encode($logged))
-        ->not->toContain('Pennsylvania')
-        ->not->toContain('Jane Doe')
-        ->not->toContain('1.25');
+        ]],
+    ])
+        ->and($logged['ms'])->toBeGreaterThanOrEqual(250)
+        ->and($logged['peak_mb'])->toBeGreaterThan(0)
+        ->and(json_encode($logged))->not()->toContain('Pennsylvania')
+        ->and(json_encode($logged))->not()->toContain('Jane Doe')
+        ->and(json_encode($logged))->not()->toContain('1.25');
 });
 
 it('runs on every request, as one JSON line', function (): void {
