@@ -3,6 +3,7 @@
 use App\Logging\CustomizeFormatter;
 use App\Logging\DeepNormalizerTap;
 use App\Logging\PiiRedactionTap;
+use Monolog\Formatter\JsonFormatter;
 use Monolog\Handler\NullHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\SyslogUdpHandler;
@@ -151,6 +152,16 @@ return [
             'level' => env('SHIPMENT_IMPORT_LOG_LEVEL', 'info'),
             'days' => 14,
             'replace_placeholders' => true,
+        ],
+
+        // One JSON line per request when LOG_REQUEST_TIMING is on: wall time and
+        // peak memory, for sizing the php-fpm pool (`capacity-audit/01`).
+        'request-timing' => [
+            'driver' => $isTesting ? 'single' : 'daily',
+            'path' => $isTesting ? storage_path('logs/testing.log') : storage_path('logs/request-timing.log'),
+            'level' => 'info',
+            'days' => 7,
+            'formatter' => JsonFormatter::class,
         ],
 
         // Browser CSP violation reports (report-uri), for local policy tuning.

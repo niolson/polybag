@@ -170,6 +170,8 @@ class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter
         // exercises the same path fake mode is standing in for.
         $account = $this->ratingAccount($request);
 
+        app(FakeCarrierLatency::class)->waitForRates();
+
         return $this->withCatalogIdentity(collect($rates)
             ->when(! empty($serviceCodes), fn (Collection $c) => $c->whereIn('code', $serviceCodes))
             ->map(fn (array $rate): RateResponse => new RateResponse(
@@ -201,6 +203,8 @@ class FakeCarrierAdapter implements CreatesCarrierManifest, DirectCarrierAdapter
      */
     public function createShipment(ShipRequest $request): ShipResponse
     {
+        app(FakeCarrierLatency::class)->waitForLabel();
+
         $prefix = self::TRACKING_PREFIXES[$this->carrierName] ?? 'FAKE';
         $tracking = $prefix.str_pad((string) random_int(0, 9999999999), 10, '0', STR_PAD_LEFT).random_int(100, 999);
         $service = $request->selectedRate->serviceName;
