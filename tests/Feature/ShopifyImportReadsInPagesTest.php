@@ -13,8 +13,10 @@ use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Cache;
+use Saloon\Http\Faking\MockClient;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Http\PendingRequest;
+use Saloon\Http\Response;
 use Saloon\Laravel\Facades\Saloon;
 
 /**
@@ -189,6 +191,58 @@ function pagedChangedOrder(string $orderId, array $fulfillmentOrders): array
     ];
 }
 
+/**
+ * Peak memory of an import whose full read returns `$pageCount` pages of
+ * `$perPage` fulfillment orders, each built as it is asked for. Their goods
+ * come from a catalog of 25 SKUs, as a store's do, so the products the import
+ * creates do not grow with the orders.
+ *
+ * Saloon's own fake keeps every response it serves, decoded, which would
+ * measure the fake. This one keeps none.
+ */
+function pagedImportPeakMemory(DataSource $dataSource, int $pageCount, int $perPage, int $firstId): int
+{
+    MockClient::destroyGlobal();
+
+    $nonRecording = new class extends MockClient
+    {
+        public function recordResponse(Response $response): void {}
+    };
+
+    $nonRecording::global([GraphQL::class => function (PendingRequest $pendingRequest) use ($pageCount, $perPage, $firstId): MockResponse {
+        $body = $pendingRequest->body()?->all() ?? [];
+        $query = (string) ($body['query'] ?? '');
+
+        if (str_contains($query, 'currentAppInstallation')) {
+            return shopifyAccessScopesResponse();
+        }
+
+        if (str_contains($query, 'ClosedFulfillmentOrders')) {
+            return MockResponse::make(['data' => ['nodes' => []]]);
+        }
+
+        $page = (int) str_replace('page-', '', (string) ($body['variables']['cursor'] ?? 'page-0'));
+        $hasNextPage = $page < $pageCount - 1;
+
+        return MockResponse::make(['data' => ['fulfillmentOrders' => [
+            'pageInfo' => ['hasNextPage' => $hasNextPage, 'endCursor' => $hasNextPage ? 'page-'.($page + 1) : null],
+            'nodes' => array_map(function (int $n) use ($firstId, $page, $perPage): array {
+                $node = pagedNode((string) ($firstId + $page * $perPage + $n));
+                $node['lineItems']['nodes'][0]['sku'] = 'SKU-'.($n % 25);
+
+                return $node;
+            }, range(1, $perPage)),
+        ]]]);
+    }]);
+
+    gc_collect_cycles();
+
+    // The import resets the peak when it starts, so this is the run's own.
+    ShipmentImportService::forRecord($dataSource->fresh())->import();
+
+    return memory_get_peak_usage();
+}
+
 describe('re-pointing', function (): void {
     it('re-points a shipment at a replacement read on an earlier page than anything else the run writes', function (): void {
         runPagedImport($this->dataSource, [[pagedNode('100')]]);
@@ -322,4 +376,19 @@ describe('closing', function (): void {
             ->and($result->shipmentsClosed)->toBe(0)
             ->and($shipment->fresh()->status)->toBe(ShipmentStatus::Open);
     });
+});
+
+it('holds about as much memory for twenty pages of fulfillment orders as for one', function (): void {
+    config(['shipment-import.behavior.batch_size' => 100]);
+
+    // Warm what a first run loads once, so neither run below is charged for it.
+    pagedImportPeakMemory($this->dataSource, 1, 10, 900000);
+
+    $onePage = pagedImportPeakMemory($this->dataSource, 1, 100, 100000);
+    $twentyPages = pagedImportPeakMemory($this->dataSource, 20, 100, 200000);
+
+    // Holding every row costs about 20 KB a fulfillment order (`01`'s
+    // Measured). The run does hold every identity, at well under 1 KB each.
+    expect(Shipment::count())->toBe(10 + 100 + 2000)
+        ->and($twentyPages - $onePage)->toBeLessThan(1900 * 1024);
 });

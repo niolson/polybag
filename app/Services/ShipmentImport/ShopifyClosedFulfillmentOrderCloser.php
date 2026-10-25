@@ -100,12 +100,23 @@ class ShopifyClosedFulfillmentOrderCloser
             ->pluck('external_id')
             ->flip();
 
-        $candidates = $this->candidates($dataSource, $identities, $ignoredLocationIds, $answeredIds);
+        $candidateIds = $this->candidateIds($dataSource, $identities, $ignoredLocationIds, $answeredIds);
 
         $closed = 0;
         $errors = [];
 
-        foreach ($candidates->chunk(self::BATCH_SIZE) as $batch) {
+        foreach (array_chunk($candidateIds, self::BATCH_SIZE) as $ids) {
+            // Loaded a batch at a time, never all at once: a connection's
+            // open Shipments number as many as the store's open orders.
+            $batch = $this->closable($dataSource, $answeredIds)
+                ->whereIn('source_record_id', $ids)
+                ->get()
+                ->keyBy('source_record_id');
+
+            if ($batch->isEmpty()) {
+                continue;
+            }
+
             try {
                 $nodes = $this->lookUp($connector, $batch->keys()->all());
             } catch (\Exception $e) {
@@ -144,10 +155,10 @@ class ShopifyClosedFulfillmentOrderCloser
     }
 
     /**
-     * This connection's open Shipments the run did not fetch, or fetched at
-     * a location it ignores. One a manager reopened is never a candidate
-     * (decision 7). A fulfillment order the repointer moved a Shipment onto
-     * was fetched, so that Shipment is not one either.
+     * The fulfillment orders of this connection's open Shipments the run did
+     * not fetch, or fetched at a location it ignores. A fulfillment order the
+     * repointer moved a Shipment onto was fetched, so that Shipment is not a
+     * candidate.
      *
      * An identity's location is the Shopify location its row's
      * `source_location` names, so the identities answer this as the rows
@@ -156,18 +167,34 @@ class ShopifyClosedFulfillmentOrderCloser
      * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities
      * @param  Collection<string, int>  $ignoredLocationIds
      * @param  list<string>|null  $answeredIds
-     * @return Collection<string, Shipment> keyed by fulfillment order ID
+     * @return list<string>
      */
-    private function candidates(DataSource $dataSource, Collection $identities, Collection $ignoredLocationIds, ?array $answeredIds): Collection
+    private function candidateIds(DataSource $dataSource, Collection $identities, Collection $ignoredLocationIds, ?array $answeredIds): array
     {
         if ($answeredIds === []) {
-            return collect();
+            return [];
         }
 
         $offered = $identities
             ->reject(fn (ShopifyFulfillmentOrderIdentity $identity): bool => $ignoredLocationIds->has((string) $identity->locationId))
             ->mapWithKeys(fn (ShopifyFulfillmentOrderIdentity $identity): array => [$identity->fulfillmentOrderId => true]);
 
+        return $this->closable($dataSource, $answeredIds)
+            ->pluck('source_record_id')
+            ->reject(fn (string $id): bool => $offered->has($id))
+            ->values()
+            ->all();
+    }
+
+    /**
+     * This connection's open Shipments that a lookup may close. One a manager
+     * reopened never is (decision 7).
+     *
+     * @param  list<string>|null  $answeredIds
+     * @return Builder<Shipment>
+     */
+    private function closable(DataSource $dataSource, ?array $answeredIds): Builder
+    {
         return Shipment::query()
             ->where('data_source_id', $dataSource->id)
             ->where('status', ShipmentStatus::Open)
@@ -175,10 +202,7 @@ class ShopifyClosedFulfillmentOrderCloser
                 ->whereNull('status_origin')
                 ->orWhere('status_origin', '!=', ShipmentStatusOrigin::Manager))
             ->where('source_record_id', 'like', self::FULFILLMENT_ORDER_PREFIX.'%')
-            ->when($answeredIds !== null, fn (Builder $query) => $query->whereIn('source_record_id', $answeredIds))
-            ->get()
-            ->reject(fn (Shipment $shipment): bool => $offered->has($shipment->source_record_id))
-            ->keyBy('source_record_id');
+            ->when($answeredIds !== null, fn (Builder $query) => $query->whereIn('source_record_id', $answeredIds));
     }
 
     /**
