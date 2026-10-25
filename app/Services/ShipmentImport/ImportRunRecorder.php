@@ -58,8 +58,9 @@ class ImportRunRecorder
 
     /**
      * Peak memory of this run so far, against the limit in force: at
-     * `started()`, what fetching the whole set cost. The import resets PHP's
-     * peak when it starts, so an earlier job in the same worker does not count.
+     * `started()`, what the read before any write cost (the whole set, or a
+     * paged source's identities). The import resets PHP's peak when it
+     * starts, so an earlier job in the same worker does not count.
      *
      * @return array{peak_memory_mb: float, memory_limit: string}
      */

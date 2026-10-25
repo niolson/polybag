@@ -757,16 +757,16 @@ it('imports multiple pages of fulfillment orders', function (): void {
     }
 
     Saloon::fake([
-        GraphQL::class => answeringShopifyScopes(
-            shopifyFulfillmentOrdersResponse(
+        GraphQL::class => answeringShopifyPages([
+            '' => shopifyFulfillmentOrdersResponse(
                 [sampleFulfillmentOrder('1001', '1')],
                 hasNextPage: true,
                 endCursor: 'cursor_page1'
             ),
-            shopifyFulfillmentOrdersResponse(
+            'cursor_page1' => shopifyFulfillmentOrdersResponse(
                 [sampleFulfillmentOrder('1002', '2')],
             ),
-        ),
+        ]),
     ]);
 
     $source = new ShopifySource([

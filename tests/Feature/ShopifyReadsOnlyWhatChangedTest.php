@@ -150,9 +150,9 @@ function readThrough(DataSource $dataSource, CarbonImmutable $updatedThrough, ?C
 /**
  * Run a scheduled import against a fake Shopify.
  *
- * `$feed` answers the full read, `$changedOrders` the search for changes, and
- * `$nodes` (keyed by ID) the import's fetch of changed fulfillment orders,
- * and `$lookups` (keyed by ID) the closing lookup. The token holds
+ * `$feed` answers both passes of the full read, `$changedOrders` the search
+ * for changes, `$nodes` (keyed by ID) both passes of the import's fetch of
+ * changed fulfillment orders, and `$lookups` (keyed by ID) the closing lookup. The token holds
  * `read_all_orders` unless `$readAllOrders` says otherwise. `$responses` overrides an operation with a
  * queue of responses, used in order.
  *
@@ -185,7 +185,7 @@ function runChangesImport(DataSource $dataSource, array $feed = [], array $chang
 
         return match ($operation) {
             'AccessScopes' => shopifyAccessScopesResponse($scopes),
-            'FulfillmentOrders' => MockResponse::make(['data' => ['fulfillmentOrders' => [
+            'FulfillmentOrderIdentities', 'FulfillmentOrders' => MockResponse::make(['data' => ['fulfillmentOrders' => [
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => $feed,
             ]]]),
@@ -193,7 +193,7 @@ function runChangesImport(DataSource $dataSource, array $feed = [], array $chang
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => $changedOrders,
             ]]]),
-            'ChangedFulfillmentOrders' => MockResponse::make(['data' => ['nodes' => array_map(
+            'ChangedFulfillmentOrderIdentities', 'ChangedFulfillmentOrders' => MockResponse::make(['data' => ['nodes' => array_map(
                 fn (string $id): ?array => $nodes[$id] ?? null,
                 $variables['ids'],
             )]]),
@@ -260,7 +260,7 @@ describe('a connection that has read through', function (): void {
             nodes: [changesFoId('200') => changesNode('200')],
         );
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'ChangedOrders', 'ChangedFulfillmentOrders'])
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'ChangedOrders', 'ChangedFulfillmentOrderIdentities', 'ChangedFulfillmentOrders'])
             ->and(Shipment::sole()->source_record_id)->toBe(changesFoId('200'));
     });
 
@@ -394,7 +394,7 @@ describe('reading every open fulfillment order', function (): void {
         $run = runChangesImport($this->dataSource, feed: [changesNode('400')]);
         $fresh = $this->dataSource->fresh();
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders'])
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders'])
             ->and($fresh->import_updated_through->equalTo(now()))->toBeTrue()
             ->and($fresh->import_swept_at->equalTo(now()))->toBeTrue()
             ->and($fresh->import_account_key)->toBe('shopify:test-shop.myshopify.com');
@@ -422,7 +422,7 @@ describe('reading every open fulfillment order', function (): void {
 
         $run = runChangesImport($this->dataSource);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders'])
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders'])
             ->and($this->dataSource->fresh()->import_swept_at->equalTo(now()))->toBeTrue();
     });
 
@@ -431,7 +431,7 @@ describe('reading every open fulfillment order', function (): void {
 
         $run = runChangesImport($this->dataSource);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders']);
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders']);
     });
 
     it('reads in full after a location is ignored or un-ignored', function (Closure $change): void {
@@ -440,7 +440,7 @@ describe('reading every open fulfillment order', function (): void {
 
         $run = runChangesImport($this->dataSource);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders']);
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders']);
     })->with([
         'ignored' => fn ($test) => $test->usedLocation->update(['location_id' => null, 'ignored_at' => now()]),
         'un-ignored' => fn ($test) => $test->ignoredLocation->update(['location_id' => Location::factory()->create()->id, 'ignored_at' => null]),
@@ -460,13 +460,13 @@ describe('reading every open fulfillment order', function (): void {
 
         $run = runChangesImport($this->dataSource, readAllOrders: false);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders'])
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders'])
             ->and($this->dataSource->fresh()->import_swept_at->equalTo(now()))->toBeTrue();
 
         $this->travel(5)->minutes();
         $run = runChangesImport($this->dataSource, readAllOrders: false);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders']);
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders']);
     });
 
     it('reads in full when the connection is pointed at another shop', function (): void {
@@ -475,7 +475,7 @@ describe('reading every open fulfillment order', function (): void {
 
         $run = runChangesImport($this->dataSource);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders'])
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders'])
             ->and($this->dataSource->fresh()->import_account_key)->toBe('shopify:test-shop.myshopify.com');
     });
 });
@@ -515,7 +515,7 @@ describe('where it read through', function (): void {
         }
 
         // The location is ignored while Shopify answers the run's read.
-        $operation = $firstRun ? 'FulfillmentOrders' : 'ChangedOrders';
+        $operation = $firstRun ? 'FulfillmentOrderIdentities' : 'ChangedOrders';
         $connection = $firstRun ? 'fulfillmentOrders' : 'orders';
 
         runChangesImport($this->dataSource, responses: [$operation => [function () use ($connection): MockResponse {
@@ -530,7 +530,7 @@ describe('where it read through', function (): void {
         $this->travel(5)->minutes();
         $run = runChangesImport($this->dataSource);
 
-        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders']);
+        expect(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders']);
     })->with(['on a first run' => true, 'on a search for changes' => false]);
 });
 
@@ -554,7 +554,7 @@ describe('a read Shopify throttles', function (): void {
 
         expect($run['result']->hasErrors())->toBeFalse()
             ->and(Shipment::sole()->source_record_id)->toBe(changesFoId('600'))
-            ->and(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrders', 'FulfillmentOrders']);
+            ->and(operations($run['requests']))->toBe(['AccessScopes', 'FulfillmentOrderIdentities', 'FulfillmentOrders', 'FulfillmentOrders']);
 
         Sleep::assertSequence([Sleep::for(5)->seconds()]);
 

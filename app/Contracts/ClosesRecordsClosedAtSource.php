@@ -24,7 +24,7 @@ interface ClosesRecordsClosedAtSource
      * A lookup that fails leaves its Shipments for the next run and is
      * reported in the result, not thrown.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments  every row this run fetched
+     * @param  Collection<int, mixed>  $shipments  every row this run fetched; from a source that reads in pages, what {@see ReadsInPages::fetchIdentities()} returned
      */
     public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $shipments): SourceClosureResult;
 }

@@ -4,11 +4,13 @@ namespace App\Services\ShipmentImport;
 
 use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
+use App\Contracts\ReadsInPages;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Services\AddressReferenceService;
+use Generator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -87,32 +89,81 @@ class ShipmentImportService
         $this->references->warm($this->importSource->client);
 
         try {
-            $shipments = $this->source->fetchShipments();
+            if ($this->source instanceof ReadsInPages) {
+                $fetched = $this->source->fetchIdentities();
+                $pages = $this->source->fetchShipmentPages();
+            } else {
+                $fetched = $this->source->fetchShipments();
+                $pages = [$fetched];
+            }
         } catch (\Exception $e) {
             return $this->runRecorder->configurationFailed($e->getMessage(), microtime(true) - $startTime);
         }
 
-        $this->runRecorder->started($shipments->count());
+        $this->runRecorder->started($fetched->count());
 
         if ($this->source instanceof ReconcilesSupersededRecords) {
-            $this->reconcileSupersededRecords($this->source, $shipments);
+            $this->reconcileSupersededRecords($this->source, $fetched);
         }
 
-        $batchSize = config('shipment-import.behavior.batch_size', 100);
+        $readCompleted = Shipment::withoutSyncingToSearch(fn (): bool => $this->writePages($pages));
 
-        Shipment::withoutSyncingToSearch(function () use ($shipments, $batchSize): void {
-            $shipments->chunk($batchSize)->each(function (Collection $batch): void {
+        if ($readCompleted && $this->source instanceof ClosesRecordsClosedAtSource) {
+            $this->closeRecordsClosedAtSource($this->source, $fetched);
+        }
+
+        return $this->runRecorder->completed(microtime(true) - $startTime);
+    }
+
+    /**
+     * Write each page in batches, reading the next only once the last is
+     * written, so the run holds one page of rows at a time.
+     *
+     * A page that cannot be read stops the run's reading. What was written
+     * stays, the error is recorded, and the rest waits for the next run.
+     *
+     * @param  iterable<int, Collection<int, array<string, mixed>>>  $pages
+     * @return bool whether every page was read
+     */
+    private function writePages(iterable $pages): bool
+    {
+        $batchSize = config('shipment-import.behavior.batch_size', 100);
+        $pages = (fn (): Generator => yield from $pages)();
+
+        $advance = false;
+
+        while (true) {
+            // Only the read is caught here: a failed write is not a failed read.
+            try {
+                if ($advance) {
+                    $pages->next();
+                }
+
+                if (! $pages->valid()) {
+                    return true;
+                }
+
+                $page = $pages->current();
+            } catch (\Exception $e) {
+                $this->runRecorder->addError(
+                    'The source stopped answering partway through the read; what was read is imported and the rest waits for the next run: '.ImportRunRecorder::reasonFor($e),
+                    ['error' => $e->getMessage()],
+                    'error',
+                );
+
+                return false;
+            }
+
+            $page->chunk($batchSize)->each(function (Collection $batch): void {
                 DB::transaction(function () use ($batch): void {
                     $this->importBatch($batch);
                 });
             });
-        });
 
-        if ($this->source instanceof ClosesRecordsClosedAtSource) {
-            $this->closeRecordsClosedAtSource($this->source, $shipments);
+            // Let go before the next is read, so the source's next yield frees it.
+            unset($page);
+            $advance = true;
         }
-
-        return $this->runRecorder->completed(microtime(true) - $startTime);
     }
 
     /**
@@ -142,7 +193,7 @@ class ShipmentImportService
      * Like {@see reconcileSupersededRecords()}, a failure is recorded and the
      * run completes: the Shipments wait for the next run.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments
+     * @param  Collection<int, mixed>  $shipments  every row fetched, or a paged source's identities
      */
     private function closeRecordsClosedAtSource(ClosesRecordsClosedAtSource $source, Collection $shipments): void
     {
@@ -166,14 +217,15 @@ class ShipmentImportService
      * shipments it already owns, before the batch write keys off the new
      * identifier and imports them a second time.
      *
-     * Run against the whole fetched set, never a chunk: whether the record a
-     * shipment names is still on offer cannot be answered from part of it.
+     * Run against the whole fetched set, never a chunk or a page: whether the
+     * record a shipment names is still on offer cannot be answered from part
+     * of it. A source that reads in pages is given its identities.
      *
      * A failure here is recorded and the import carries on. The cost of not
      * reconciling is a duplicate shipment, which a packer can see and a person
      * can void; the cost of abandoning the run is every other shipment in it.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments
+     * @param  Collection<int, mixed>  $shipments  every row fetched, or a paged source's identities
      */
     private function reconcileSupersededRecords(ReconcilesSupersededRecords $source, Collection $shipments): void
     {

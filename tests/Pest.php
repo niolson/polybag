@@ -507,6 +507,33 @@ function answeringShopifyScopes(MockResponse ...$responses): Closure
     };
 }
 
+/**
+ * A Shopify GraphQL fake for an import that reads more than one page. It
+ * answers the access-scopes query; a read of the open fulfillment orders, in
+ * either of the import's passes, from `$pages` by the cursor it reads after
+ * (`''` for the first page); and a read of one fulfillment order's later line
+ * items from `$lineItems`, by cursor the same way.
+ *
+ * @param  array<string, MockResponse>  $pages
+ * @param  array<string, MockResponse>  $lineItems
+ */
+function answeringShopifyPages(array $pages, array $lineItems = []): Closure
+{
+    return function (PendingRequest $pendingRequest) use ($pages, $lineItems): MockResponse {
+        $body = $pendingRequest->body()?->all() ?? [];
+        $query = (string) ($body['query'] ?? '');
+        $cursor = (string) ($body['variables']['cursor'] ?? '');
+
+        if (str_contains($query, 'currentAppInstallation')) {
+            return shopifyAccessScopesResponse();
+        }
+
+        $responses = str_contains($query, 'fulfillmentOrder(id:') ? $lineItems : $pages;
+
+        return $responses[$cursor] ?? throw new RuntimeException("The fake Shopify has no page after cursor [{$cursor}].");
+    };
+}
+
 /*
 |--------------------------------------------------------------------------
 | Carrier / marketplace request schema validation

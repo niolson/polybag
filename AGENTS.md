@@ -264,7 +264,10 @@ missing. Keep service inference separate from a source-confirmed service and cat
 Shipment import sources are configured as `DataSource` records in the database (Integrations → Connections), not in `.env`. Each source can be assigned to a `Client` and has its own encrypted credentials and schedule. The scheduler, `shipments:import` and `RunDataSourceImportJob` select `DataSource::importing()` — active *and* `import_enabled`; export and origin-bound postage need only `active`.
 
 Imports pass through `ShipmentRowPreparer`, `ShipmentBatchWriter`, and
-`ShipmentItemImporter`; `DataSourceLocationResolver` maps source locations. Shopify
+`ShipmentItemImporter`; `DataSourceLocationResolver` maps source locations. A source
+implementing `ReadsInPages` (Shopify) is read identities first, re-pointed once, then
+written a page at a time, so its memory does not grow with the store; Amazon and
+Database sources still return their whole read from `fetchShipments()`. Shopify
 imports fulfillment orders incrementally; Amazon imports merchant-fulfilled orders.
 Both populate `ship_by` from their source's dispatch deadline; database imports can map it.
 

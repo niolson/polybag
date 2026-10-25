@@ -2,7 +2,7 @@
 
 # A Shopify import of a real store exhausts the import worker's memory
 
-Status: needs-triage
+Status: ready-for-human
 Category: bug
 Created: 2026-10-23
 
@@ -147,6 +147,35 @@ threshold. Also cover:
 - a Shipment whose fulfillment order moved to an ignored location is still closed,
   with the closure fed from identities.
 
+## Built (2026-10-25)
+
+Built as decided. Left to do: a full read of the development store, measured
+under the import limit and recorded in **Measured**, which is what `ready-for-human`
+is waiting on. The change could not reach the store from where it was built.
+
+Where the build differs from the decision, or adds to it:
+
+- **`App\Contracts\ReadsInPages`** has two methods: `fetchIdentities()`, called once
+  and deciding what the run reads, then `fetchShipmentPages()`, a generator of mapped
+  rows. `ReconcilesSupersededRecords` and `ClosesRecordsClosedAtSource` are unchanged
+  in meaning; a paged source is handed its identities where the others get rows.
+  `ShopifySource::fetchShipments()` stays, for the dry run, and makes both passes.
+- **The closer loaded every open Shipment of the connection.** With the rows paged,
+  that became the import's peak (157 MB against 95 MB for the pages, below). It now
+  plucks their fulfillment order IDs and loads the models 250 at a time, as it looks
+  them up.
+- **A page that fails partway** keeps what was written, records an error, closes
+  nothing, and does not move where the connection read through.
+- **The search for changes** reads its rows by the IDs its identities pass found,
+  250 to a request, so it makes one request more per 250 changed fulfillment orders.
+- **The identities query was not measured against the store.** It selects only fields
+  the row query selects, at the same page sizes (250 fulfillment orders, 40 line items),
+  so it requests no more than the row query's 926 points. Both pages' log lines now
+  carry `requested_cost` and `actual_cost`, so the full read above records them.
+- **PHP keeps a yielded value until the generator yields again**, so while the next
+  page is read the last page's rows are still held. That is one page more, whatever
+  the store's size.
+
 ## Options considered
 
 1. **Raise the worker's limit.** `php -d memory_limit=…` in the `import-queue`
@@ -200,6 +229,27 @@ Each run resets PHP's peak (`memory_reset_peak_usage()`) when it starts, so an e
 job in the same worker does not count. It logs `peak_memory_mb` at start (after the
 fetch) and at completion, and the Shopify full read logs one line per page. Peaks in
 the per-page lines are the run's too.
+
+2026-10-25, the same import before and after this change, through a fake Shopify:
+5,149 open fulfillment orders of two line items each, 250 to a page, a test database,
+under the 256M limit. The whole import, writes and closure included, not only the
+fetch. Peaks are the run's own, in a process that holds about 83 MB booted. Raw
+per-page logs in `.scratch/import-memory/synthetic-full-read-*.jsonl`.
+
+| Point in the run | Before | After |
+|---|---|---|
+| First page read | 87 MB | 87 MB (identities) |
+| Every page read | 173 MB | 93 MB (identities) |
+| Every page written | — | 99 MB |
+| Completed, after closure | 237 MB | 99 MB |
+
+Before, the fetch rose as the development store's did (87 to 173 MB, against 83 to
+175), and the writes and closure took the run to within 19 MB of the limit. After, the identities
+cost about 1 KB a fulfillment order, and the rows nothing that grows with the store.
+`ShopifyImportReadsInPagesTest` checks the same thing on every run, one page against
+twenty.
+
+A full read of the development store, after this change: not yet measured.
 
 ## Notes
 
