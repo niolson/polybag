@@ -120,6 +120,17 @@ return [
 
     'fake_carriers' => (bool) env('FAKE_CARRIERS', false),
 
+    // How long the fake carriers take to answer, for a load test to hold a
+    // worker as a real carrier would. Zero for demos and tests.
+    'fake_carrier_latency' => [
+        'rates_ms' => (int) env('FAKE_CARRIER_RATE_LATENCY_MS', 0),
+        'label_ms' => (int) env('FAKE_CARRIER_LABEL_LATENCY_MS', 0),
+    ],
+
+    // Log each request's wall time and peak memory to the request-timing
+    // channel, for sizing the php-fpm pool (`capacity-audit/01`).
+    'request_timing' => (bool) env('LOG_REQUEST_TIMING', false),
+
     /*
     |--------------------------------------------------------------------------
     | Instance Directory Cookie Domain

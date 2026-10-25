@@ -4,6 +4,7 @@ use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\EnsureUserIsManager;
+use App\Http\Middleware\RecordRequestTiming;
 use App\Support\FatalErrorHeadroom;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
@@ -76,6 +77,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->redirectGuestsTo(fn (): string => route('filament.app.auth.login'));
         $middleware->append(ContentSecurityPolicy::class);
+        // A no-op unless LOG_REQUEST_TIMING is on.
+        $middleware->append(RecordRequestTiming::class);
         // The panel registers it too, since its routes carry their own stack.
         $middleware->appendToGroup('web', EnsureDemoHasNotEnded::class);
         // polybag_last_instance is read by polybag-connect, a separate app with

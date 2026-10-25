@@ -29,6 +29,77 @@ looks slow.
   carriers with realistic latency (`FAKE_CARRIERS=true`, plus a configurable delay
   if the fakes have none). Record p50/p95 latency of a scan as N goes from 1 to 20.
 
+## How to measure
+
+Run against the Docker image, not a development server: the limit under test is the
+image's php-fpm pool. In the instance's `.env`:
+
+```
+FAKE_CARRIERS=true
+FAKE_CARRIER_RATE_LATENCY_MS=1500   # a rate shop waits this long once, as concurrent quotes do
+FAKE_CARRIER_LABEL_LATENCY_MS=1000  # each label purchase waits this long
+LOG_REQUEST_TIMING=true             # storage/logs/request-timing.log, one JSON line per request
+```
+
+Finish setup (packers get a 503 until `setup_complete`), then seed and run:
+
+```
+docker compose ... exec -T app php artisan app:seed-load-test --packers=20 --shipments=50 > plan.json
+node scripts/load-test/packers.mjs --base-url=http://localhost --plan=plan.json --packers=5 --duration=300 --out=n5.json
+```
+
+Seed a fresh plan for each N: shipments a run bought are spent. The driver reports, per
+round trip, what the packer waited; `request-timing.log` reports how long the worker
+worked and its peak memory. The difference between the two is time queued for a worker.
+
+Item and box scans never reach the server: Pack handles them in the browser. A scan
+stalls on the round trips around it: `saveDraft` (debounced after each scan), opening
+the order (`navigateToShipment`, then the page load), and the Ship page load, which
+quotes rates before it renders.
+
+### Smoke run, 2026-10-25
+
+Development server with five workers, three packers, think time 1.5 s, fake
+latencies as above, so not the numbers the acceptance asks for:
+
+| Round trip | Worker time, max | Packer waited, p50 / p95 | Peak memory |
+|---|---|---|---|
+| `saveDraft` | 232 ms | 196 / 1,846 ms | 8 MB |
+| Ship page load (rates) | 2,058 ms | 2,086 / 2,287 ms | 8 MB |
+| Buy (`mountAction:Ship`) | 1,600 ms | 1,652 / 2,999 ms | 10 MB |
+
+Worker time stays flat while the packer's p95 climbs; the gap is queueing. Peak memory
+for packing work is around a tenth of the 128M `memory_limit`.
+
+### Docker image, 2026-10-25
+
+The image built from `main` plus the load-test tooling, standalone profile, `app` capped at 2 CPUs like the hosted
+server, 128M `memory_limit`. Think time 1.5 s between scans, fake latency 1.5 s per rate
+shop and 1 s per label, 3 minutes per run. Every purchase succeeded. Only purchases and
+round trips that finished inside the 3 minutes count. Times are what the packer waited,
+p50 / p95, in ms.
+
+| Packers | Pool | Labels / min | Save after a scan | Ship → rates shown | Buy → label bought |
+|---|---|---|---|---|---|
+| 1 | 5 | 3.3 | 185 / 300 | 2,785 / 3,233 | 1,927 / 2,431 |
+| 5 | 5 | 17.7 | 205 / 396 | 2,864 / 3,486 | 1,909 / 2,456 |
+| 10 | 5 | 30.0 | 264 / 1,036 | 3,892 / 5,582 | 2,902 / 4,483 |
+| 20 | 5 | 35.0 | 768 / 2,790 | 8,202 / 12,835 | 8,483 / 11,570 |
+| 20 | 20 | 60.0 | 373 / 1,117 | 3,916 / 5,319 | 2,884 / 3,939 |
+
+- Server-side time per request stays flat as N grows (`saveDraft` p50 201 → 288 ms in
+  the first run's `request-timing.log`):
+  the extra wait at 10 and 20 packers is queueing for one of the five workers. At 20
+  packers the five were busy for the whole run.
+- One packer keeps about 0.4 of a worker busy, most of it waiting on carriers. So five
+  workers start to queue around 8–10 packers.
+- With 20 workers, 20 packers wait about what 10 packers did with five, and throughput
+  rises 71%. The `app` container used a median 1.2 of its 2 CPUs (peak 1.9), so CPU is the
+  next limit, at roughly 30 packers on two cores.
+- Memory is not the limit. Peak per request was 8 MB against the 128M limit; a worker
+  adds about 15 MB beyond shared memory, and the container peaked at 170 MB with the
+  20-worker pool.
+
 ## Options
 
 1. Set the pool explicitly in the image, for example `pm.max_children` from an env

@@ -26,6 +26,7 @@ use App\Services\AddressValidationService;
 use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
+use App\Services\Carriers\FakeCarrierLatency;
 use App\Services\FedexRegistrationService;
 use App\Services\ManifestService;
 use App\Services\OAuthProviderRegistry;
@@ -57,6 +58,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(RateQuoteLogger::class);
         $this->app->singleton(RuleEvaluator::class);
         $this->app->singleton(CarrierRegistry::class);
+        $this->app->scoped(FakeCarrierLatency::class, fn (): FakeCarrierLatency => FakeCarrierLatency::fromConfig());
         $this->app->singleton(ShippingRateService::class);
         $this->app->singleton(ManifestService::class);
         $this->app->singleton(PickBatchService::class);
