@@ -17,7 +17,7 @@ twice over.
 How big that set gets depends on the customer's query. A query that returns only
 open orders stays small. One that forgets a status filter returns the whole order
 history, and the run dies of a fatal error with no message (see
-[`import-memory/02`](../../import-memory/issues/02-a-queued-job-that-dies-says-so.md)).
+[`import-memory/02`](../../archive/import-memory/issues/02-a-queued-job-that-dies-says-so.md)).
 
 The preview already reads lazily and stops at a limit (`takeRows()` over `cursor()`),
 and its docblock notes that `pdo_mysql` buffers by default.

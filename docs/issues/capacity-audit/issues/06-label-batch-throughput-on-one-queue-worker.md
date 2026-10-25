@@ -27,7 +27,7 @@ before it takes the next `low` job. So:
   ahead of the next label.
 
 A fatal error in one `GenerateLabelJob` leaves its Package neither bought nor failed
-in the batch. That is [`import-memory/02`](../../import-memory/issues/02-a-queued-job-that-dies-says-so.md).
+in the batch. That is [`import-memory/02`](../../archive/import-memory/issues/02-a-queued-job-that-dies-says-so.md).
 
 ## To measure
 

@@ -2,7 +2,7 @@
 
 # A Shopify import of a real store exhausts the import worker's memory
 
-Status: ready-for-human
+Status: done
 Category: bug
 Created: 2026-10-23
 
@@ -149,9 +149,8 @@ threshold. Also cover:
 
 ## Built (2026-10-25)
 
-Built as decided. Left to do: a full read of the development store, measured
-under the import limit and recorded in **Measured**, which is what `ready-for-human`
-is waiting on. The change could not reach the store from where it was built.
+Built as decided (#492). A full read of the development store, measured under the
+import limit on 2026-10-25, is in **Measured**.
 
 Where the build differs from the decision, or adds to it:
 
@@ -168,10 +167,11 @@ Where the build differs from the decision, or adds to it:
   nothing, and does not move where the connection read through.
 - **The search for changes** reads its rows by the IDs its identities pass found,
   250 to a request, so it makes one request more per 250 changed fulfillment orders.
-- **The identities query was not measured against the store.** It selects only fields
-  the row query selects, at the same page sizes (250 fulfillment orders, 40 line items),
-  so it requests no more than the row query's 926 points. Both pages' log lines now
-  carry `requested_cost` and `actual_cost`, so the full read above records them.
+- **The identities query requests 222 points a page** on the development store (79
+  actual), against 860 for the row query (200 actual), so 250 to a page stays well
+  under Shopify's 1,000. It selects only fields the row query selects, at the same
+  page sizes (250 fulfillment orders, 40 line items). Both pages' log lines carry
+  `requested_cost` and `actual_cost`.
 - **PHP keeps a yielded value until the generator yields again**, so while the next
   page is read the last page's rows are still held. That is one page more, whatever
   the store's size.
@@ -249,7 +249,23 @@ cost about 1 KB a fulfillment order, and the rows nothing that grows with the st
 `ShopifyImportReadsInPagesTest` checks the same thing on every run, one page against
 twenty.
 
-A full read of the development store, after this change: not yet measured.
+2026-10-25, local, a full read of the development store after this change (the same
+5,149 open fulfillment orders as the baseline), under the 256M limit, run twice: first
+creating every Shipment, then again over them.
+
+| Point in the run | First run | Second run |
+|---|---|---|
+| First page of identities | 66.5 MB | 66.5 MB |
+| Every identity (5,149) | 70.5 MB | 70.5 MB |
+| First page of rows written | 74.5 MB | 74.5 MB |
+| Second page of rows | 85.0 MB | 85.0 MB |
+| Every page of rows (21) | 87.0 MB | 85.0 MB |
+
+Peak memory stops growing at the second page of rows and holds there to the last,
+against 175 MB for the fetch alone before. The identities cost about 0.8 KB a
+fulfillment order. The first run took about 2 minutes 30 seconds, most of it creating
+Shipments; the second, 41 seconds. These are the per-page lines; the closing step,
+which `Import completed` measures, is not in them.
 
 ## Notes
 
