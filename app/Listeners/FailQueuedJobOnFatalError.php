@@ -4,6 +4,7 @@ namespace App\Listeners;
 
 use App\Support\FatalErrorHeadroom;
 use Illuminate\Container\Attributes\Singleton;
+use Illuminate\Contracts\Cache\Lock;
 use Illuminate\Contracts\Queue\Job;
 use Illuminate\Queue\Events\JobExceptionOccurred;
 use Illuminate\Queue\Events\JobFailed;
@@ -36,11 +37,25 @@ class FailQueuedJobOnFatalError
 {
     private ?Job $runningJob = null;
 
+    /** @var array<int, Lock> */
+    private array $locksHeldByRunningJob = [];
+
     private bool $registeredShutdownFunction = false;
+
+    /**
+     * Release this lock if the running job dies of a fatal error, rather than
+     * leave it held until it expires. Only this execution's hold is released:
+     * {@see Lock::release()} checks the owner.
+     */
+    public function releaseIfTheJobDies(Lock $lock): void
+    {
+        $this->locksHeldByRunningJob[] = $lock;
+    }
 
     public function handleJobProcessing(JobProcessing $event): void
     {
         $this->runningJob = $event->job;
+        $this->locksHeldByRunningJob = [];
 
         if (! $this->registeredShutdownFunction) {
             register_shutdown_function(fn () => $this->failRunningJobOnFatalError());
@@ -50,17 +65,17 @@ class FailQueuedJobOnFatalError
 
     public function handleJobProcessed(JobProcessed $event): void
     {
-        $this->runningJob = null;
+        $this->forgetRunningJob();
     }
 
     public function handleJobExceptionOccurred(JobExceptionOccurred $event): void
     {
-        $this->runningJob = null;
+        $this->forgetRunningJob();
     }
 
     public function handleJobFailed(JobFailed $event): void
     {
-        $this->runningJob = null;
+        $this->forgetRunningJob();
     }
 
     public function failRunningJobOnFatalError(): void
@@ -72,7 +87,8 @@ class FailQueuedJobOnFatalError
         }
 
         $error = error_get_last();
-        $this->runningJob = null;
+        $locks = $this->locksHeldByRunningJob;
+        $this->forgetRunningJob();
 
         // Raised once already, ahead of Laravel's report; that report may
         // have spent some of it.
@@ -90,6 +106,28 @@ class FailQueuedJobOnFatalError
             }
         } catch (Throwable $e) {
             report($e);
+        } finally {
+            $this->release($locks);
+        }
+    }
+
+    private function forgetRunningJob(): void
+    {
+        $this->runningJob = null;
+        $this->locksHeldByRunningJob = [];
+    }
+
+    /**
+     * @param  array<int, Lock>  $locks
+     */
+    private function release(array $locks): void
+    {
+        foreach ($locks as $lock) {
+            try {
+                $lock->release();
+            } catch (Throwable $e) {
+                report($e);
+            }
         }
     }
 

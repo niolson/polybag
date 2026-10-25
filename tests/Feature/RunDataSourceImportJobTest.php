@@ -1,7 +1,9 @@
 <?php
 
 use App\Contracts\DataSourceInterface;
+use App\Jobs\Middleware\PreventOverlappingImports;
 use App\Jobs\RunDataSourceImportJob;
+use App\Jobs\ScheduledDataSourceImportJob;
 use App\Models\DataSource;
 use App\Models\Setting;
 use App\Models\Shipment;
@@ -10,12 +12,16 @@ use App\Notifications\ImportCompleted;
 use App\Notifications\ImportStopped;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use Illuminate\Contracts\Queue\ShouldBeUniqueUntilProcessing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\CallQueuedHandler;
 use Illuminate\Queue\MaxAttemptsExceededException;
-use Illuminate\Queue\Middleware\WithoutOverlapping;
 use Illuminate\Queue\TimeoutExceededException;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use Symfony\Component\ErrorHandler\Error\FatalError;
 
 uses(RefreshDatabase::class);
@@ -170,12 +176,11 @@ it('scopes the overlap lock to the data source id', function (): void {
     $middleware = $job->middleware();
 
     expect($middleware)->toHaveCount(1)
-        ->and($middleware[0])->toBeInstanceOf(WithoutOverlapping::class)
+        ->and($middleware[0])->toBeInstanceOf(PreventOverlappingImports::class)
         ->and($middleware[0]->key)->toBe('data-source-import:42')
         ->and($middleware[0]->releaseAfter)->toBe(60)
         ->and($middleware[0]->expiresAfter)->toBe(1860)
         ->and($job->timeout)->toBe(1800)
-        ->and($job->tries)->toBe(60)
         ->and($job->maxExceptions)->toBe(1)
         ->and($job->failOnTimeout)->toBeTrue()
         ->and($job->connection)->toBe('imports')
@@ -183,6 +188,108 @@ it('scopes the overlap lock to the data source id', function (): void {
         ->and(config('queue.connections.redis.retry_after'))->toBe(90)
         ->and(config('queue.connections.database.retry_after'))->toBe(90)
         ->and(config('queue.connections.imports.retry_after'))->toBe(1860);
+});
+
+it('waits behind another import for the lock expiry plus a margin, by time rather than attempts', function (): void {
+    $this->freezeTime();
+
+    $retryUntil = (new RunDataSourceImportJob(42, 1))->retryUntil();
+
+    expect($retryUntil->getTimestamp())->toBe(now()->addMinutes(35)->getTimestamp());
+});
+
+it('runs an import that gets the lock, and releases the lock afterwards', function (): void {
+    $job = (new RunDataSourceImportJob(42, 1))->withFakeQueueInteractions();
+    $ran = false;
+
+    $job->middleware()[0]->handle($job, function () use (&$ran): void {
+        $ran = true;
+        expect(Cache::lock('data-source-import:42', 10)->get())->toBeFalse();
+    });
+
+    expect($ran)->toBeTrue()
+        ->and(Cache::lock('data-source-import:42', 10)->get())->toBeTrue();
+    $job->assertNotReleased();
+});
+
+it('releases the lock when the import throws', function (): void {
+    $job = (new RunDataSourceImportJob(42, 1))->withFakeQueueInteractions();
+
+    expect(function () use ($job): void {
+        $job->middleware()[0]->handle($job, function (): void {
+            throw new RuntimeException('Source unavailable');
+        });
+    })->toThrow(RuntimeException::class);
+
+    expect(Cache::lock('data-source-import:42', 10)->get())->toBeTrue();
+});
+
+it('makes an import someone asked for wait behind a running import', function (): void {
+    Cache::lock('data-source-import:42', 1860)->get();
+    $job = (new RunDataSourceImportJob(42, 1))->withFakeQueueInteractions();
+
+    $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
+
+    $job->assertReleased(delay: 60);
+});
+
+it('skips a scheduled import while another import of the connection is running', function (): void {
+    Cache::lock('data-source-import:42', 1860)->get();
+    $job = (new ScheduledDataSourceImportJob(42))->withFakeQueueInteractions();
+
+    $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
+
+    $job->assertNotReleased();
+    $job->assertNotFailed();
+});
+
+it('leaves a running import\'s lock held when a waiting import fails', function (): void {
+    $running = Cache::lock('data-source-import:42', 1860);
+    $running->get();
+    $source = DataSource::factory()->create();
+
+    (new RunDataSourceImportJob($source->id, User::factory()->create()->id))
+        ->failed(new MaxAttemptsExceededException('has been attempted too many times.'));
+
+    expect(Cache::lock('data-source-import:42', 10)->get())->toBeFalse();
+});
+
+it('holds one waiting scheduled import per connection', function (): void {
+    $job = new ScheduledDataSourceImportJob(42);
+
+    expect($job)->toBeInstanceOf(ShouldBeUniqueUntilProcessing::class)
+        ->and($job->uniqueId())->toBe('42')
+        ->and($job->wasScheduled())->toBeTrue()
+        ->and($job->userId)->toBeNull()
+        ->and((new RunDataSourceImportJob(42, 1))->wasScheduled())->toBeFalse();
+});
+
+it('tells the active admins when a scheduled import stops', function (): void {
+    $admin = User::factory()->admin()->create();
+    $packer = User::factory()->create();
+    $source = DataSource::factory()->create(['name' => 'Drop Day Store']);
+
+    (new ScheduledDataSourceImportJob($source->id))->failed(new RuntimeException('Source unavailable'));
+
+    expect($admin->notifications()->sole()->type)->toBe(ImportStopped::class)
+        ->and($packer->notifications()->count())->toBe(0);
+});
+
+it('logs rather than notifies when a scheduled Amazon import cannot run', function (): void {
+    $log = Log::spy();
+    $admin = User::factory()->admin()->create();
+    $source = DataSource::factory()->create([
+        'source_type' => AmazonSource::class,
+        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+    ]);
+
+    app()->call([new ScheduledDataSourceImportJob($source->id), 'handle']);
+
+    $log->shouldHaveReceived('warning', [
+        "Skipped a scheduled import from {$source->name}: Amazon SP-API imports require Multi-Factor Authentication to be enabled. Enable it in App Settings → Security.",
+        ['data_source_id' => $source->id],
+    ]);
+    expect($admin->notifications()->count())->toBe(0);
 });
 
 it('tells the user who started an import and the active admins that it stopped', function (Throwable $exception, string $reason): void {
@@ -232,4 +339,35 @@ it('notifies an admin who started an import once', function (): void {
     (new RunDataSourceImportJob($source->id, $admin->id))->failed(new RuntimeException('Source unavailable'));
 
     expect($admin->notifications()->count())->toBe(1);
+});
+
+it('lets the scheduler queue a connection again after a scheduled import fails before it starts', function (): void {
+    $queue = Queue::fake();
+    $admin = User::factory()->admin()->create();
+    $source = DataSource::factory()->create();
+
+    ScheduledDataSourceImportJob::dispatch($source->id);
+    ScheduledDataSourceImportJob::dispatch($source->id);
+
+    expect($queue->pushed(ScheduledDataSourceImportJob::class))->toHaveCount(1);
+
+    // Laravel's own failure path for a job that never reached processing,
+    // which leaves a `ShouldBeUniqueUntilProcessing` lock alone.
+    app(CallQueuedHandler::class)->failed(
+        ['command' => serialize($queue->pushed(ScheduledDataSourceImportJob::class)->sole())],
+        new MaxAttemptsExceededException('has been attempted too many times.'),
+        'failed-before-processing',
+    );
+
+    ScheduledDataSourceImportJob::dispatch($source->id);
+
+    expect($queue->pushed(ScheduledDataSourceImportJob::class))->toHaveCount(2)
+        ->and($admin->notifications()->sole()->data['body'])->toBe('The import stopped before it finished, every time it was tried.');
+});
+
+it('gives a scheduled import no deadline, and its uniqueness an expiry', function (): void {
+    $job = new ScheduledDataSourceImportJob(42);
+
+    expect($job->retryUntil())->toBeNull()
+        ->and($job->uniqueFor)->toBe(3600);
 });
