@@ -226,8 +226,8 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
         'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '5.00']]],
     ];
     Saloon::fake([
-        GraphQL::class => answeringShopifyScopes(
-            MockResponse::make(['data' => ['fulfillmentOrders' => [
+        GraphQL::class => answeringShopifyPages([
+            '' => MockResponse::make(['data' => ['fulfillmentOrders' => [
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => [[
                     'id' => 'gid://shopify/FulfillmentOrder/8001', 'status' => 'IN_PROGRESS',
@@ -240,7 +240,8 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
                     ],
                 ]],
             ]]]),
-            MockResponse::make(['data' => ['fulfillmentOrder' => ['lineItems' => [
+        ], [
+            'items-1' => MockResponse::make(['data' => ['fulfillmentOrder' => ['lineItems' => [
                 'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
                 'nodes' => [
                     array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/2', 'sku' => 'SKU-2']),
@@ -248,7 +249,7 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
                     array_merge($baseItem, ['id' => 'gid://shopify/FulfillmentOrderLineItem/4', 'sku' => 'DONE', 'remainingQuantity' => 0]),
                 ],
             ]]]]),
-        ),
+        ]),
     ]);
 
     $source = new ShopifySource(shopifyConfig());
@@ -256,18 +257,19 @@ it('paginates fulfillment order line items and excludes non-shipping work', func
 
     expect($source->fetchShipmentItems('gid://shopify/FulfillmentOrder/8001')->pluck('sku')->all())
         ->toBe(['SKU-1', 'SKU-2']);
-    Saloon::assertSentCount(3);
+    // The scopes, then a page and its later line items for each pass.
+    Saloon::assertSentCount(5);
 });
 
 it('handles fulfillment-order cursor pagination', function (): void {
     Saloon::fake([
-        GraphQL::class => answeringShopifyScopes(
-            mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()], hasNextPage: true, endCursor: 'cursor_abc'),
-            mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
+        GraphQL::class => answeringShopifyPages([
+            '' => mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode()], hasNextPage: true, endCursor: 'cursor_abc'),
+            'cursor_abc' => mockShopifyFulfillmentOrders([shopifyFulfillmentOrderNode([
                 'id' => 'gid://shopify/FulfillmentOrder/7002',
                 'order' => ['id' => 'gid://shopify/Order/1002', 'name' => '#1002'],
             ])]),
-        ),
+        ]),
     ]);
 
     $source = new ShopifySource(shopifyConfig());
@@ -277,7 +279,8 @@ it('handles fulfillment-order cursor pagination', function (): void {
     expect($shipments[0]['shipment_reference'])->toBe('#1001');
     expect($shipments[1]['shipment_reference'])->toBe('#1002');
 
-    Saloon::assertSentCount(3);
+    // The scopes, then two pages for each pass.
+    Saloon::assertSentCount(5);
 });
 
 it('maps line items using remaining quantity', function (): void {

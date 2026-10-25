@@ -5,6 +5,7 @@ namespace App\Services\ShipmentImport\Sources;
 use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\Contracts\ReadsInPages;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
@@ -26,14 +27,16 @@ use App\Services\ShopifyGoodsFingerprint;
 use App\Services\ShopifyShippingLabelService;
 use App\Support\Gtin;
 use Carbon\CarbonImmutable;
+use Closure;
 use DomainException;
+use Generator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 use InvalidArgumentException;
 use RuntimeException;
 
-class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReconcilesSupersededRecords
+class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReadsInPages, ReconcilesSupersededRecords
 {
     private const ACCESS_SCOPES_QUERY = <<<'GRAPHQL'
         query AccessScopes {
@@ -100,8 +103,22 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
     private ShopifyGoodsFingerprint $goods;
 
-    /** @var array<string, array> Cached order data keyed by source record ID */
-    private array $orderCache = [];
+    /**
+     * The items of the rows on the page in hand, keyed by source record ID,
+     * for {@see fetchShipmentItems()}. Replaced by each page.
+     *
+     * @var array<string, Collection<int, array<string, mixed>>>
+     */
+    private array $pageItems = [];
+
+    /**
+     * The fulfillment orders a search for changes found to import, which
+     * {@see fetchShipmentPages()} reads by ID. Null after a full read, whose
+     * pages read every open one again.
+     *
+     * @var list<string>|null
+     */
+    private ?array $changedFulfillmentOrderIds = null;
 
     /**
      * The fulfillment orders a search for changes returned, open or not, for
@@ -202,6 +219,66 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
           fulfillmentOrders(first: 250, after: $cursor, includeClosed: false) {
             pageInfo { hasNextPage endCursor }
             nodes { ...ImportedFulfillmentOrder }
+          }
+        }
+        GRAPHQL;
+
+    /**
+     * What identifies a fulfillment order as work ({@see ShopifyFulfillmentOrderIdentity}):
+     * its order, its location, and its goods. None of the address, barcodes,
+     * part number or customs fields a row reads.
+     */
+    private const FULFILLMENT_ORDER_IDENTITY_FRAGMENT = <<<'GRAPHQL'
+        fragment FulfillmentOrderIdentity on FulfillmentOrder {
+          id status
+          order { id }
+          assignedLocation { location { id } }
+          lineItems(first: 40) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              sku remainingQuantity requiresShipping
+              variant { id }
+            }
+          }
+        }
+        GRAPHQL;
+
+    /**
+     * Every open fulfillment order's identity, read before any row
+     * (`import-memory/01`). Every field it selects is one
+     * {@see FULFILLMENT_ORDERS_QUERY} selects too, at the same page sizes, so
+     * a page requests no more points than one of those. Each page's log line
+     * records what it requested.
+     */
+    private const FULFILLMENT_ORDER_IDENTITIES_QUERY = <<<'GRAPHQL'
+        query FulfillmentOrderIdentities($cursor: String) {
+          fulfillmentOrders(first: 250, after: $cursor, includeClosed: false) {
+            pageInfo { hasNextPage endCursor }
+            nodes { ...FulfillmentOrderIdentity }
+          }
+        }
+        GRAPHQL;
+
+    /** Fulfillment orders' identities by ID. */
+    private const FULFILLMENT_ORDER_IDENTITY_NODES_QUERY = <<<'GRAPHQL'
+        query ChangedFulfillmentOrderIdentities($ids: [ID!]!) {
+          nodes(ids: $ids) {
+            ...FulfillmentOrderIdentity
+          }
+        }
+        GRAPHQL;
+
+    /** The rest of a fulfillment order's line items, as its identity reads them. */
+    private const FULFILLMENT_ORDER_IDENTITY_ITEMS_QUERY = <<<'GRAPHQL'
+        query FulfillmentOrderIdentityItems($id: ID!, $cursor: String) {
+          fulfillmentOrder(id: $id) {
+            lineItems(first: 250, after: $cursor) {
+              pageInfo { hasNextPage endCursor }
+              nodes {
+                sku remainingQuantity requiresShipping
+                variant { id }
+              }
+            }
           }
         }
         GRAPHQL;
@@ -348,19 +425,95 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         }
     }
 
+    /**
+     * Every row at once, for a caller that wants the whole set, such as a dry
+     * run. The import reads in pages instead ({@see ReadsInPages}).
+     */
     public function fetchShipments(): Collection
     {
-        $this->orderCache = [];
+        $this->fetchIdentities();
+
+        $rows = [];
+        $items = [];
+
+        foreach ($this->fetchShipmentPages() as $page) {
+            array_push($rows, ...$page->all());
+            $items += $this->pageItems;
+        }
+
+        $this->pageItems = $items;
+
+        return collect($rows);
+    }
+
+    /**
+     * The identity of every fulfillment order this run imports, for
+     * re-pointing and closure. Decides what the run reads
+     * ({@see readsChangesSince()}), and so what {@see fetchShipmentPages()}
+     * reads after it.
+     *
+     * @return Collection<int, ShopifyFulfillmentOrderIdentity>
+     */
+    public function fetchIdentities(): Collection
+    {
+        $this->pageItems = [];
+        $this->changedFulfillmentOrderIds = null;
         $this->answeredFulfillmentOrderIds = null;
         $this->pendingReadState = null;
 
         $scopes = $this->assertImportScopes();
+        $since = $this->readsChangesSince(in_array(self::ALL_ORDERS_SCOPE, $scopes, true));
 
-        return $this->readFulfillmentOrders(in_array(self::ALL_ORDERS_SCOPE, $scopes, true));
+        if ($since === null) {
+            return $this->openFulfillmentOrderIdentities();
+        }
+
+        $identities = $this->changedFulfillmentOrderIdentities($since);
+        $this->changedFulfillmentOrderIds = $identities
+            ->map(fn (ShopifyFulfillmentOrderIdentity $identity): string => $identity->fulfillmentOrderId)
+            ->all();
+
+        return $identities;
     }
 
     /**
-     * The fulfillment orders a run imports (`order-reconciliation/11`).
+     * The rows of the fulfillment orders {@see fetchIdentities()} identified,
+     * a page at a time: every open one after a full read, read again, or the
+     * changed ones it found open, by ID.
+     *
+     * A fulfillment order created between the two reads is imported without
+     * an identity, so it is never re-pointed onto; one closed between them is
+     * left for the next run to close.
+     *
+     * @return Generator<int, Collection<int, array<string, mixed>>>
+     */
+    public function fetchShipmentPages(): Generator
+    {
+        if ($this->changedFulfillmentOrderIds === null) {
+            yield from $this->openFulfillmentOrderPages();
+
+            return;
+        }
+
+        foreach (array_chunk($this->changedFulfillmentOrderIds, self::NODES_BATCH_SIZE) as $ids) {
+            $json = $this->graphql(
+                $this->importQuery(self::FULFILLMENT_ORDER_NODES_QUERY),
+                $this->lineItemVariables(['ids' => $ids]),
+            );
+
+            // A deleted one comes back null, and one closed since the search
+            // is no longer imported.
+            $rows = $this->importedRows(array_filter($json['data']['nodes'] ?? [], 'is_array'));
+            unset($json);
+
+            yield $rows;
+        }
+    }
+
+    /**
+     * Whether a run reads only what changed, and from when
+     * (`order-reconciliation/11`). Null when it reads every open fulfillment
+     * order.
      *
      * A connection that has read through searches for the orders updated
      * since, and imports their open fulfillment orders: one request when
@@ -381,16 +534,14 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      * failed to import, which a search would not offer again until its order
      * changed. A connection idle for more than a day reads in full for the
      * same reason, rather than searching through every order closed meanwhile.
-     *
-     * @return Collection<int, array<string, mixed>>
      */
-    private function readFulfillmentOrders(bool $canSearchAllOrders): Collection
+    private function readsChangesSince(bool $canSearchAllOrders): ?CarbonImmutable
     {
         $startedAt = now()->toImmutable();
         $dataSource = $this->dataSource();
 
         if ($dataSource === null) {
-            return $this->fetchFulfillmentOrderShipments();
+            return null;
         }
 
         $accountKey = 'shopify:'.strtolower((string) ($this->config['shop_domain'] ?? ''));
@@ -414,10 +565,10 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         if ($readsInFull) {
             $this->pendingReadState['import_swept_at'] = $startedAt;
 
-            return $this->fetchFulfillmentOrderShipments();
+            return null;
         }
 
-        return $this->fetchChangedFulfillmentOrderShipments($updatedThrough->toImmutable()->subSeconds(self::READ_OVERLAP_SECONDS));
+        return $updatedThrough->toImmutable()->subSeconds(self::READ_OVERLAP_SECONDS);
     }
 
     private function dataSource(): ?DataSource
@@ -656,41 +807,29 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         return (int) min(self::MAX_THROTTLE_WAIT_SECONDS, max(1, ceil(($requested - $available) / $restoreRate)));
     }
 
+    /**
+     * The items of a row on the page in hand.
+     */
     public function fetchShipmentItems(string $sourceRecordId): Collection
     {
-        $order = $this->orderCache[$sourceRecordId] ?? null;
-
-        if (! $order) {
-            return collect();
-        }
-
-        return collect($order['lineItems'] ?? [])
-            ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0)
-            ->map(fn (array $item): array => $this->mapFulfillmentOrderLineItem($item))
-            ->values();
+        return $this->pageItems[$sourceRecordId] ?? collect();
     }
 
     /**
      * Re-point shipments whose fulfillment order Shopify has replaced.
      *
-     * Delegated whole to {@see ShopifyFulfillmentOrderRepointer}: what belongs
-     * here is only the reading of Shopify's own shape into the identity that
-     * survives a replacement — the order, the assigned location, and the goods.
-     * All three are already on the mapped row, so recognizing a replacement
-     * costs no extra request and does not depend on item import being on.
+     * Delegated whole to {@see ShopifyFulfillmentOrderRepointer}, with every
+     * identity {@see fetchIdentities()} read: the identity that survives a
+     * replacement is the order, the assigned location, and the goods. Read
+     * whether or not item import is on.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments
+     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities
      */
-    public function reconcileSupersededRecords(DataSource $dataSource, Collection $shipments): int
+    public function reconcileSupersededRecords(DataSource $dataSource, Collection $identities): int
     {
         return app(ShopifyFulfillmentOrderRepointer::class)->repoint(
             $dataSource,
-            $shipments->map(fn (array $row): ShopifyFulfillmentOrderIdentity => new ShopifyFulfillmentOrderIdentity(
-                fulfillmentOrderId: (string) $row['source_record_id'],
-                orderId: $row['metadata']['shopify_order_id'] ?? null,
-                locationId: $row['metadata']['shopify_location_id'] ?? null,
-                goodsFingerprint: $row['metadata'][ShopifyGoodsFingerprint::METADATA_KEY] ?? null,
-            )),
+            $identities,
             $this->answeredFulfillmentOrderIds,
         );
     }
@@ -702,17 +841,17 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      * Where the connection read through is then recorded, and only if every
      * lookup answered: a search for changes would not return a Shipment's
      * closed fulfillment order again, so a failed one reads the same changes
-     * next run. A failed fetch never gets here, and a failed write is retried
-     * by the daily full read.
+     * next run. A read that failed, even partway, never gets here, and a
+     * failed write is retried by the daily full read.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments
+     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities  every identity {@see fetchIdentities()} read
      */
-    public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $shipments): SourceClosureResult
+    public function closeRecordsClosedAtSource(DataSource $dataSource, Collection $identities): SourceClosureResult
     {
         $result = app(ShopifyClosedFulfillmentOrderCloser::class)->close(
             $dataSource,
             $this->connector,
-            $shipments,
+            $identities,
             $this->answeredFulfillmentOrderIds,
         );
 
@@ -724,14 +863,47 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     }
 
     /**
-     * Every open fulfillment order.
+     * Every open fulfillment order's identity.
      *
-     * @return Collection<int, array<string, mixed>>
+     * @return Collection<int, ShopifyFulfillmentOrderIdentity>
      */
-    private function fetchFulfillmentOrderShipments(): Collection
+    private function openFulfillmentOrderIdentities(): Collection
     {
-        $shipments = [];
+        $identities = [];
         $cursor = null;
+
+        do {
+            $json = $this->graphql($this->identityQuery(self::FULFILLMENT_ORDER_IDENTITIES_QUERY), array_filter(['cursor' => $cursor]));
+            $data = $json['data']['fulfillmentOrders'] ?? [];
+
+            foreach ($data['nodes'] ?? [] as $fulfillmentOrder) {
+                if (($identity = $this->importedIdentity($fulfillmentOrder)) !== null) {
+                    $identities[] = $identity;
+                }
+            }
+
+            Log::info('Read a page of Shopify fulfillment order identities', [
+                'identities_held' => count($identities),
+                ...self::queryCost($json),
+                ...ImportRunRecorder::memoryContext(),
+            ]);
+
+            $pageInfo = $data['pageInfo'] ?? [];
+            $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
+        } while ($cursor !== null);
+
+        return collect($identities);
+    }
+
+    /**
+     * Every open fulfillment order's row, a page at a time.
+     *
+     * @return Generator<int, Collection<int, array<string, mixed>>>
+     */
+    private function openFulfillmentOrderPages(): Generator
+    {
+        $cursor = null;
+        $page = 0;
 
         do {
             $json = $this->graphql(
@@ -740,34 +912,32 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             );
 
             $data = $json['data']['fulfillmentOrders'] ?? [];
-
-            foreach ($data['nodes'] ?? [] as $fulfillmentOrder) {
-                if (($row = $this->importedRow($fulfillmentOrder)) !== null) {
-                    $shipments[] = $row;
-                }
-            }
+            $rows = $this->importedRows($data['nodes'] ?? []);
+            $pageInfo = $data['pageInfo'] ?? [];
+            $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
 
             // The last of these before a worker dies of its memory limit
             // says how far the read got.
             Log::info('Read a page of Shopify fulfillment orders', [
-                'rows_held' => count($shipments),
+                'page' => ++$page,
+                'rows' => $rows->count(),
+                ...self::queryCost($json),
                 ...ImportRunRecorder::memoryContext(),
             ]);
 
-            $pageInfo = $data['pageInfo'] ?? [];
-            $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
-        } while ($cursor !== null);
+            unset($json, $data);
 
-        return collect($shipments);
+            yield $rows;
+        } while ($cursor !== null);
     }
 
     /**
-     * The open fulfillment orders of every order updated after `$since`,
-     * noting every fulfillment order those orders hold.
+     * The identities of the open fulfillment orders of every order updated
+     * after `$since`, noting every fulfillment order those orders hold.
      *
-     * @return Collection<int, array<string, mixed>>
+     * @return Collection<int, ShopifyFulfillmentOrderIdentity>
      */
-    private function fetchChangedFulfillmentOrderShipments(CarbonImmutable $since): Collection
+    private function changedFulfillmentOrderIdentities(CarbonImmutable $since): Collection
     {
         $statuses = $this->changedFulfillmentOrderStatuses($since);
         $this->answeredFulfillmentOrderIds = array_keys($statuses);
@@ -777,24 +947,21 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             fn (string $status): bool => in_array($status, self::IMPORTED_STATUSES, true),
         ));
 
-        $shipments = [];
+        $identities = [];
 
         foreach (array_chunk($openIds, self::NODES_BATCH_SIZE) as $ids) {
-            $json = $this->graphql(
-                $this->importQuery(self::FULFILLMENT_ORDER_NODES_QUERY),
-                $this->lineItemVariables(['ids' => $ids]),
-            );
+            $json = $this->graphql($this->identityQuery(self::FULFILLMENT_ORDER_IDENTITY_NODES_QUERY), ['ids' => $ids]);
 
             foreach ($json['data']['nodes'] ?? [] as $fulfillmentOrder) {
                 // A deleted one comes back null, and one closed since the
                 // search is no longer imported.
-                if (is_array($fulfillmentOrder) && ($row = $this->importedRow($fulfillmentOrder)) !== null) {
-                    $shipments[] = $row;
+                if (is_array($fulfillmentOrder) && ($identity = $this->importedIdentity($fulfillmentOrder)) !== null) {
+                    $identities[] = $identity;
                 }
             }
         }
 
-        return collect($shipments);
+        return collect($identities);
     }
 
     /**
@@ -841,6 +1008,27 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     }
 
     /**
+     * The rows a page of fulfillment orders imports as. Their items replace
+     * the last page's, for {@see fetchShipmentItems()}.
+     *
+     * @param  iterable<int, array<string, mixed>>  $fulfillmentOrders
+     * @return Collection<int, array<string, mixed>>
+     */
+    private function importedRows(iterable $fulfillmentOrders): Collection
+    {
+        $this->pageItems = [];
+        $rows = [];
+
+        foreach ($fulfillmentOrders as $fulfillmentOrder) {
+            if (($row = $this->importedRow($fulfillmentOrder)) !== null) {
+                $rows[] = $row;
+            }
+        }
+
+        return collect($rows);
+    }
+
+    /**
      * The row a fulfillment order imports as, or null when it imports none.
      *
      * @param  array<string, mixed>  $fulfillmentOrder
@@ -852,11 +1040,64 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             return null;
         }
 
-        $fulfillmentOrder['lineItems'] = $this->allFulfillmentOrderItems($fulfillmentOrder);
+        $fulfillmentOrder['lineItems'] = $this->allLineItems(
+            $fulfillmentOrder['lineItems'] ?? [],
+            fn (string $cursor): array => $this->graphql(
+                $this->lineItemQuery(self::FULFILLMENT_ORDER_ITEMS_QUERY),
+                $this->lineItemVariables(['id' => $fulfillmentOrder['id'], 'cursor' => $cursor]),
+            ),
+        );
+
         $mapped = $this->mapFulfillmentOrderToShipment($fulfillmentOrder);
-        $this->orderCache[$mapped['source_record_id']] = $fulfillmentOrder;
+
+        $this->pageItems[$mapped['source_record_id']] = collect($fulfillmentOrder['lineItems'])
+            ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0)
+            ->map(fn (array $item): array => $this->mapFulfillmentOrderLineItem($item))
+            ->values();
 
         return $mapped;
+    }
+
+    /**
+     * The identity of a fulfillment order the import imports, or null when it
+     * imports none: the same statuses {@see importedRow()} imports.
+     *
+     * @param  array<string, mixed>  $fulfillmentOrder
+     */
+    private function importedIdentity(array $fulfillmentOrder): ?ShopifyFulfillmentOrderIdentity
+    {
+        if (! in_array($fulfillmentOrder['status'] ?? '', self::IMPORTED_STATUSES, true)) {
+            return null;
+        }
+
+        $fulfillmentOrder['lineItems'] = $this->allLineItems(
+            $fulfillmentOrder['lineItems'] ?? [],
+            fn (string $cursor): array => $this->graphql(
+                self::FULFILLMENT_ORDER_IDENTITY_ITEMS_QUERY,
+                ['id' => $fulfillmentOrder['id'], 'cursor' => $cursor],
+            ),
+        );
+
+        return $this->identityFor($fulfillmentOrder);
+    }
+
+    /**
+     * What identifies a fulfillment order whose line items are all in hand.
+     * Read the same way for its identity and its row, so the two agree.
+     *
+     * @param  array<string, mixed>  $fulfillmentOrder
+     */
+    private function identityFor(array $fulfillmentOrder): ShopifyFulfillmentOrderIdentity
+    {
+        $orderId = data_get($fulfillmentOrder, 'order.id');
+        $locationId = data_get($fulfillmentOrder, 'assignedLocation.location.id');
+
+        return new ShopifyFulfillmentOrderIdentity(
+            fulfillmentOrderId: (string) $fulfillmentOrder['id'],
+            orderId: $orderId === null ? null : (string) $orderId,
+            locationId: $locationId === null ? null : (string) $locationId,
+            goodsFingerprint: $this->goods->forLineItems($fulfillmentOrder['lineItems'] ?? [], 'remainingQuantity'),
+        );
     }
 
     /** A query reading fulfillment orders as the import does. */
@@ -865,30 +1106,48 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         return $this->lineItemQuery($query."\n".self::IMPORTED_FULFILLMENT_ORDER_FRAGMENT);
     }
 
-    /** @return array<int, array<string, mixed>> */
-    private function allFulfillmentOrderItems(array $fulfillmentOrder): array
+    /** A query reading fulfillment orders' identities. */
+    private function identityQuery(string $query): string
     {
-        $connection = $fulfillmentOrder['lineItems'] ?? [];
+        return $query."\n".self::FULFILLMENT_ORDER_IDENTITY_FRAGMENT;
+    }
+
+    /**
+     * Every line item of a fulfillment order, reading the pages after the
+     * first with `$nextPage`.
+     *
+     * @param  array<string, mixed>  $connection  the fulfillment order's `lineItems`
+     * @param  Closure(string): array<string, mixed>  $nextPage  the response for the line items after a cursor
+     * @return array<int, array<string, mixed>>
+     */
+    private function allLineItems(array $connection, Closure $nextPage): array
+    {
         $items = $connection['nodes'] ?? [];
         $pageInfo = $connection['pageInfo'] ?? [];
         $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
 
         while ($cursor !== null) {
-            $json = $this->graphql(
-                $this->lineItemQuery(self::FULFILLMENT_ORDER_ITEMS_QUERY),
-                $this->lineItemVariables([
-                    'id' => $fulfillmentOrder['id'],
-                    'cursor' => $cursor,
-                ]),
-            );
-
-            $connection = $json['data']['fulfillmentOrder']['lineItems'] ?? [];
+            $connection = $nextPage($cursor)['data']['fulfillmentOrder']['lineItems'] ?? [];
             array_push($items, ...($connection['nodes'] ?? []));
             $pageInfo = $connection['pageInfo'] ?? [];
             $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
         }
 
         return $items;
+    }
+
+    /**
+     * What a read cost against Shopify's limit of 1,000 points a query.
+     *
+     * @param  array<string, mixed>  $json
+     * @return array{requested_cost: mixed, actual_cost: mixed}
+     */
+    private static function queryCost(array $json): array
+    {
+        return [
+            'requested_cost' => $json['extensions']['cost']['requestedQueryCost'] ?? null,
+            'actual_cost' => $json['extensions']['cost']['actualQueryCost'] ?? null,
+        ];
     }
 
     /**
@@ -928,6 +1187,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0);
         $value = $lineItems->sum(fn (array $item): float => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0)
             * (int) ($item['remainingQuantity'] ?? 0));
+        $identity = $this->identityFor($fulfillmentOrder);
 
         return [
             ...$this->customsFields($order),
@@ -966,15 +1226,12 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 'is_active' => $shopifyLocation['isActive'] ?? true,
             ],
             'metadata' => [
-                'shopify_order_id' => $order['id'] ?? null,
+                'shopify_order_id' => $identity->orderId,
                 'shopify_fulfillment_order_id' => $fulfillmentOrder['id'],
-                'shopify_location_id' => $shopifyLocation['id'] ?? null,
+                'shopify_location_id' => $identity->locationId,
                 // Recorded so a replacement fulfillment order can be told from
                 // a sibling later, when this one is closed and unreadable.
-                ShopifyGoodsFingerprint::METADATA_KEY => $this->goods->forLineItems(
-                    $fulfillmentOrder['lineItems'] ?? [],
-                    'remainingQuantity',
-                ),
+                ShopifyGoodsFingerprint::METADATA_KEY => $identity->goodsFingerprint,
             ],
         ];
     }

@@ -21,15 +21,16 @@ interface ReconcilesSupersededRecords
     /**
      * Re-point shipments whose source record has been replaced upstream.
      *
-     * Called once per import run with the complete fetched set — whether the
-     * record a shipment currently names is still on offer is only answerable
-     * with all of them in hand, never a chunk at a time.
+     * Called once per import run with the complete fetched set, before any
+     * write — whether the record a shipment currently names is still on
+     * offer is only answerable with all of them in hand, never a chunk at a
+     * time. A source that reads in pages is given its identities instead.
      *
      * Implementations must fail toward leaving the shipment alone: a record
      * wrongly imported twice is visible and can be voided, where a shipment
      * wrongly re-pointed at another order's work loses goods silently.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments  mapped source rows
+     * @param  Collection<int, mixed>  $shipments  mapped source rows; from a source that reads in pages, what {@see ReadsInPages::fetchIdentities()} returned
      * @return int how many shipments were re-pointed
      */
     public function reconcileSupersededRecords(DataSource $dataSource, Collection $shipments): int;

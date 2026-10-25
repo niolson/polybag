@@ -2,6 +2,7 @@
 
 namespace App\Services\ShipmentImport;
 
+use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\DataTransferObjects\ShipmentImport\SourceOrderReport;
 use App\DataTransferObjects\ShipmentImport\SourceParcel;
@@ -88,10 +89,10 @@ class ShopifyClosedFulfillmentOrderCloser
     ) {}
 
     /**
-     * @param  Collection<int, array<string, mixed>>  $shipments  every row the run fetched
+     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities  every fulfillment order the run read
      * @param  list<string>|null  $answeredIds  the fulfillment orders a search for changes returned; null after a full read
      */
-    public function close(DataSource $dataSource, ShopifyConnector $connector, Collection $shipments, ?array $answeredIds = null): SourceClosureResult
+    public function close(DataSource $dataSource, ShopifyConnector $connector, Collection $identities, ?array $answeredIds = null): SourceClosureResult
     {
         $ignoredLocationIds = DataSourceLocation::query()
             ->where('data_source_id', $dataSource->id)
@@ -99,7 +100,7 @@ class ShopifyClosedFulfillmentOrderCloser
             ->pluck('external_id')
             ->flip();
 
-        $candidates = $this->candidates($dataSource, $shipments, $ignoredLocationIds, $answeredIds);
+        $candidates = $this->candidates($dataSource, $identities, $ignoredLocationIds, $answeredIds);
 
         $closed = 0;
         $errors = [];
@@ -148,20 +149,24 @@ class ShopifyClosedFulfillmentOrderCloser
      * (decision 7). A fulfillment order the repointer moved a Shipment onto
      * was fetched, so that Shipment is not one either.
      *
-     * @param  Collection<int, array<string, mixed>>  $shipments
+     * An identity's location is the Shopify location its row's
+     * `source_location` names, so the identities answer this as the rows
+     * would.
+     *
+     * @param  Collection<int, ShopifyFulfillmentOrderIdentity>  $identities
      * @param  Collection<string, int>  $ignoredLocationIds
      * @param  list<string>|null  $answeredIds
      * @return Collection<string, Shipment> keyed by fulfillment order ID
      */
-    private function candidates(DataSource $dataSource, Collection $shipments, Collection $ignoredLocationIds, ?array $answeredIds): Collection
+    private function candidates(DataSource $dataSource, Collection $identities, Collection $ignoredLocationIds, ?array $answeredIds): Collection
     {
         if ($answeredIds === []) {
             return collect();
         }
 
-        $offered = $shipments
-            ->reject(fn (array $row): bool => $ignoredLocationIds->has((string) ($row['source_location']['external_id'] ?? '')))
-            ->mapWithKeys(fn (array $row): array => [(string) $row['source_record_id'] => true]);
+        $offered = $identities
+            ->reject(fn (ShopifyFulfillmentOrderIdentity $identity): bool => $ignoredLocationIds->has((string) $identity->locationId))
+            ->mapWithKeys(fn (ShopifyFulfillmentOrderIdentity $identity): array => [$identity->fulfillmentOrderId => true]);
 
         return Shipment::query()
             ->where('data_source_id', $dataSource->id)

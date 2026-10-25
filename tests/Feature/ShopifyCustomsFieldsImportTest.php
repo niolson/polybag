@@ -96,7 +96,8 @@ function customsFieldsFulfillmentOrder(array $variant = []): array
 
 /**
  * Import `$fulfillmentOrder` through `$dataSource`, returning the bodies of
- * the GraphQL requests other than the scope check.
+ * the GraphQL requests that read rows: not the scope check, nor the read of
+ * identities before them, which selects none of what these tests look for.
  *
  * @param  array<string, mixed>  $fulfillmentOrder
  * @return list<array{query: string, variables: array<string, mixed>}>
@@ -112,7 +113,9 @@ function importCustomsFieldsFulfillmentOrder(DataSource $dataSource, array $fulf
             return shopifyAccessScopesResponse();
         }
 
-        $requests[] = ['query' => (string) $body['query'], 'variables' => $body['variables'] ?? []];
+        if (! str_contains((string) $body['query'], 'FulfillmentOrderIdentit')) {
+            $requests[] = ['query' => (string) $body['query'], 'variables' => $body['variables'] ?? []];
+        }
 
         return MockResponse::make(['data' => ['fulfillmentOrders' => [
             'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
