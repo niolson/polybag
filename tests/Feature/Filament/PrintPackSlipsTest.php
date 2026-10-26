@@ -42,7 +42,7 @@ function dispatchedShipmentIds(mixed $page, User $user): array
 {
     $dispatch = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips');
 
-    return collect($dispatch['params']['jobs'])
+    return collect(fetchPackSlipJobs(test(), $dispatch['params']['jobs']))
         ->flatMap(fn (array $job): array => array_keys(app(PackSlipReceipts::class)->open($job['receipt'], $user)->itemsVersions))
         ->all();
 }
@@ -76,7 +76,7 @@ it('prints the next N, and the Shipments leave the list only once the receipt is
     // Nothing is recorded until QZ Tray acknowledges the job.
     Livewire::test(PrintPackSlips::class)->assertCanSeeTableRecords($shipments);
 
-    $job = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs'][0];
+    $job = fetchPackSlipJobs($this, collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs'])[0];
     $this->postJson(route('pack-slips.printed'), ['receipt' => $job['receipt']])->assertOk();
 
     Livewire::test(PrintPackSlips::class)
@@ -196,16 +196,23 @@ it('shows that pack slips print from pick batches when picking is required', fun
         ->assertActionHidden('printNext');
 });
 
-it('reports the renderer being unavailable without dispatching a print', function (): void {
+it('reports the renderer being unavailable when the browser asks for a job, and records nothing', function (): void {
     $this->mock(GotenbergService::class)
         ->shouldReceive('pdfFromView')
         ->andThrow(new RuntimeException('PDF renderer unavailable. Is Gotenberg running?'));
-    Shipment::factory()->create();
+    $shipment = Shipment::factory()->create();
 
-    Livewire::test(PrintPackSlips::class)
+    $page = Livewire::test(PrintPackSlips::class)
         ->callAction('printNext')
-        ->assertNotDispatched('print-pack-slips')
-        ->assertNotified('PDF Not Created');
+        ->assertDispatched('print-pack-slips');
+
+    $job = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs'][0];
+
+    $this->postJson($job['url'])
+        ->assertStatus(503)
+        ->assertJson(['error' => GotenbergService::UNAVAILABLE]);
+
+    expect($shipment->fresh()->hasPrintedPackSlip())->toBeFalse();
 });
 
 it('says so when there is nothing to print', function (): void {
@@ -222,7 +229,7 @@ function acknowledgePrint(mixed $page, mixed $test): void
 {
     $dispatch = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips');
 
-    foreach ($dispatch['params']['jobs'] as $job) {
+    foreach (fetchPackSlipJobs($test, $dispatch['params']['jobs']) as $job) {
         $test->postJson(route('pack-slips.printed'), ['receipt' => $job['receipt']])->assertOk();
     }
 }

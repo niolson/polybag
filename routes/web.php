@@ -10,6 +10,7 @@ use App\Http\Controllers\LabelPrintController;
 use App\Http\Controllers\OAuthCallbackController;
 use App\Http\Controllers\PackSlipController;
 use App\Http\Controllers\PackSlipPrintController;
+use App\Http\Controllers\PackSlipPrintJobController;
 use App\Http\Controllers\PickBatchController;
 use App\Http\Controllers\QzProvisionScriptController;
 use App\Http\Controllers\QzSignController;
@@ -75,6 +76,14 @@ Route::get('/pack-slips/view/{key}', [PackSlipController::class, 'run'])
 // or from Mark as printed on a pack slip view. One request per print job.
 Route::post('/pack-slips/printed', [PackSlipPrintController::class, 'store'])
     ->name('pack-slips.printed')
+    ->middleware(['auth', 'throttle:120,1']);
+
+// Draws one print job of a run the server staged for the signed-in user. One request
+// per job of 200 slips, so no request holds a whole run.
+Route::post('/pack-slips/print-runs/{key}/jobs/{index}', [PackSlipPrintJobController::class, 'show'])
+    ->whereAlphaNumeric('key')
+    ->whereNumber('index')
+    ->name('pack-slips.print-jobs.show')
     ->middleware(['auth', 'throttle:120,1']);
 
 Route::middleware(['auth', 'manager'])->group(function (): void {

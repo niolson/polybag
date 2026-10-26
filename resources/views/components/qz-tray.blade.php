@@ -419,23 +419,52 @@
 
         const slipCount = (n) => n === 1 ? '1 pack slip' : `${n} pack slips`;
 
+        // Draw one print job the server staged: its PDF and the receipt that records it.
+        // A job already carrying its data (a single Shipment's slip) needs no request.
+        async function fetchPackSlipJob(job) {
+            if (job.data) {
+                return job;
+            }
+
+            const response = await fetch(job.url, {
+                method: 'POST',
+                headers: {
+                    'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '',
+                    'Accept': 'application/json',
+                },
+            });
+
+            if (!response.ok) {
+                const body = await response.json().catch(() => ({}));
+
+                throw new Error(body.error || `The pack slips could not be made (HTTP ${response.status}).`);
+            }
+
+            return await response.json();
+        }
+
         // Print a run of pack slips, sent by the server as consecutive jobs of
-        // bounded size, each with its own receipt. A job is recorded only once QZ
-        // reports it sent; the run stops at the first job that fails, and the jobs
-        // before it stay recorded. "Sent" is as far as QZ can see: a printer that
-        // jams afterwards is recovered by reprinting.
+        // bounded size, each with its own receipt. Each job is requested just before
+        // it is sent, so the browser holds one PDF at a time and no request draws more
+        // than one job. A job is recorded only once QZ reports it sent; the run stops
+        // at the first job that fails to draw or to send, and the jobs before it stay
+        // recorded. "Sent" is as far as QZ can see: a printer that jams afterwards is
+        // recovered by reprinting.
         async function printPackSlipJobs(jobs) {
             const total = jobs.reduce((sum, job) => sum + job.count, 0);
             const unrecorded = [];
             let sent = 0;
             let failure = null;
 
-            for (const job of jobs) {
+            for (const staged of jobs) {
                 showStatus(jobs.length > 1
-                    ? `Sending pack slips ${sent + 1}–${sent + job.count} of ${total} to the printer...`
-                    : `Sending ${slipCount(job.count)} to the printer...`, 'info');
+                    ? `Sending pack slips ${sent + 1}–${sent + staged.count} of ${total} to the printer...`
+                    : `Sending ${slipCount(staged.count)} to the printer...`, 'info');
+
+                let job;
 
                 try {
+                    job = await fetchPackSlipJob(staged);
                     await sendPackSlips(job.data);
                 } catch (error) {
                     console.error('Pack slip print error:', error);
@@ -445,8 +474,9 @@
 
                 sent += job.count;
 
+                // Only the receipt is kept: the PDF is not needed again.
                 if (!await acknowledgePackSlips(job.receipt)) {
-                    unrecorded.push(job);
+                    unrecorded.push({ receipt: job.receipt, count: job.count });
                 }
             }
 

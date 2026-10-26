@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipQueueFilters;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Enums\PackSlipQueueTab;
@@ -14,9 +13,8 @@ use App\Models\PickBatch;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\User;
-use App\Services\GotenbergService;
+use App\Services\PackSlips\PackSlipPrintRuns;
 use App\Services\PackSlips\PackSlipQueue;
-use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\PackSlips\PackSlipViews;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -34,7 +32,6 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use LogicException;
-use Throwable;
 use UnitEnum;
 
 /**
@@ -260,26 +257,10 @@ class PrintPackSlips extends Page implements HasTable
             return;
         }
 
-        try {
-            $jobs = app(PackSlipRenderer::class)->printJobs($run, $this->user());
-        } catch (Throwable $e) {
-            report($e);
-
-            Notification::make()
-                ->danger()
-                ->title('PDF Not Created')
-                ->body(GotenbergService::UNAVAILABLE)
-                ->send();
-
-            return;
-        }
-
-        // Recorded on each Shipment only when the browser redeems a job's receipt,
-        // once QZ Tray reports that job sent.
-        $this->dispatch('print-pack-slips', jobs: array_map(
-            fn (PackSlipPrintJob $job): array => $job->toBrowserPayload(),
-            $jobs,
-        ));
+        // Each job is drawn by its own request as the browser sends it, and recorded on
+        // its Shipments only when the browser redeems that job's receipt, once QZ Tray
+        // reports the job sent.
+        $this->dispatch('print-pack-slips', jobs: app(PackSlipPrintRuns::class)->stage($run, $this->user()));
     }
 
     private function queueFilters(): PackSlipQueueFilters

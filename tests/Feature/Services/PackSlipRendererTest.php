@@ -47,6 +47,18 @@ it('brands each slip from its own Shipment\'s Client', function (): void {
         ->toContain('Thanks from Globex');
 });
 
+it('declares each logo once however many slips use it', function (): void {
+    Storage::disk('public')->put('logos/acme.png', str_repeat('acme-logo', 50));
+    $client = Client::factory()->create(['logo' => 'logos/acme.png']);
+    $shipments = Shipment::factory()->count(5)->create(['client_id' => $client->id]);
+    $uri = 'data:image/png;base64,'.base64_encode(str_repeat('acme-logo', 50));
+
+    $html = renderPackSlips(new PackSlipRun($shipments->pluck('id')->all()));
+
+    expect(substr_count($html, $uri))->toBe(1)
+        ->and(substr_count($html, 'class="logo logo-0"'))->toBe(5);
+});
+
 it('falls back to the tenant pack slip logo when the Client has none', function (): void {
     Storage::disk('public')->put('logos/tenant.png', 'tenant-logo');
     app(SettingsService::class)->set('pack_slip_logo', 'logos/tenant.png');

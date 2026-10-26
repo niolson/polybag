@@ -28,7 +28,8 @@
             align-items: flex-start;
         }
         .logo-cell { flex: 0 0 50%; }
-        .logo-cell img { max-width: 100%; max-height: 0.55in; object-fit: contain; object-position: left top; }
+        /* The image is a background, declared once per logo below: an <img> would repeat the base64 on every slip. */
+        .logo { width: 100%; height: 0.55in; background-repeat: no-repeat; background-size: contain; background-position: left top; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .return-address-cell { flex: 1; font-size: 9pt; line-height: 1.35; text-align: right; color: #000; }
         .return-address-cell .co { font-weight: bold; color: #111; }
 
@@ -83,6 +84,22 @@
         .mark-status.error { color: #b91c1c; }
         @media print { .actions { display: none; } }
     </style>
+    @php
+        $logoClasses = [];
+
+        foreach ($slips as $slip) {
+            if (! empty($slip->logoDataUri) && ! isset($logoClasses[$slip->logoDataUri])) {
+                $logoClasses[$slip->logoDataUri] = 'logo-'.count($logoClasses);
+            }
+        }
+    @endphp
+    @if ($logoClasses)
+    <style>
+        @foreach ($logoClasses as $logoDataUri => $logoClass)
+        .{{ $logoClass }} { background-image: url("{{ $logoDataUri }}"); }
+        @endforeach
+    </style>
+    @endif
 </head>
 <body>
     @if(request()->boolean('print'))
@@ -144,7 +161,7 @@
         <div class="row-header">
             <div class="logo-cell">
                 @if (!empty($slip->logoDataUri))
-                    <img src="{{ $slip->logoDataUri }}" alt="Logo">
+                    <div class="logo {{ $logoClasses[$slip->logoDataUri] }}" role="img" aria-label="Logo"></div>
                 @endif
             </div>
             <div class="return-address-cell">

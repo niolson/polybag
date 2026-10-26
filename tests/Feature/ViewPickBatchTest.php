@@ -106,7 +106,7 @@ it('prints batch pack slips through the pack slip renderer, branded per Shipment
 
     // Pack slips are 4x6 label stock, so they go through the pack slip path to the
     // label printer, not to the document printer as a report.
-    $jobs = collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs'];
+    $jobs = fetchPackSlipJobs($this, collect($page->effects['dispatches'])->firstWhere('name', 'print-pack-slips')['params']['jobs']);
 
     expect($jobs)->toHaveCount(1)
         ->and($jobs[0]['count'])->toBe(1)
@@ -154,7 +154,7 @@ it('records batch pack slips on each Shipment only when the job\'s receipt is re
 
     expect(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(0);
 
-    $receipt = dispatchedParams($page->effects, 'print-pack-slips')['jobs'][0]['receipt'];
+    $receipt = fetchPackSlipJobs($this, dispatchedParams($page->effects, 'print-pack-slips')['jobs'])[0]['receipt'];
     $this->postJson(route('pack-slips.printed'), ['receipt' => $receipt])->assertOk();
 
     $shipments->each(function (Shipment $shipment): void {
@@ -187,24 +187,25 @@ it('prints the summary and then the slips with Print Both, recording only the sl
         ->assertNotDispatched('print-pack-slips');
 
     $params = dispatchedParams($page->effects, 'print-pick-batch');
-    $slips = base64_decode($params['jobs'][0]['data']);
+    $jobs = fetchPackSlipJobs($this, $params['jobs']);
+    $slips = base64_decode($jobs[0]['data']);
 
     expect($views[0])->toBe('pick-batches.summary')
         ->and(base64_decode($params['summary']))->toBe('%PDF-summary')
-        ->and($params['jobs'])->toHaveCount(1)
-        ->and($params['jobs'][0]['count'])->toBe(2)
+        ->and($jobs)->toHaveCount(1)
+        ->and($jobs[0]['count'])->toBe(2)
         ->and($slips)->toContain('T001')->toContain('T002')
         ->and($batch->fresh()->summary_printed_at)->not->toBeNull()
         ->and(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(0);
 
-    $this->postJson(route('pack-slips.printed'), ['receipt' => $params['jobs'][0]['receipt']])->assertOk();
+    $this->postJson(route('pack-slips.printed'), ['receipt' => $jobs[0]['receipt']])->assertOk();
 
     expect(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(2);
 });
 
 it('sends a batch over the job limit through Print Both as several jobs, recording only those acknowledged', function (): void {
     [$batch, $shipments] = batchOfShipments(PackSlipRenderer::SLIPS_PER_PRINT_JOB + 1);
-    $this->mock(GotenbergService::class)->shouldReceive('pdfFromView')->times(3)->andReturn('%PDF-fake');
+    $this->mock(GotenbergService::class)->shouldReceive('pdfFromView')->twice()->andReturn('%PDF-fake'); // the summary, then only the job fetched
 
     $page = Livewire::test(ViewPickBatch::class, ['record' => $batch->id])
         ->set('printMode', true)
@@ -216,8 +217,9 @@ it('sends a batch over the job limit through Print Both as several jobs, recordi
     expect($params['summary'])->not->toBeEmpty()
         ->and(array_column($params['jobs'], 'count'))->toBe([PackSlipRenderer::SLIPS_PER_PRINT_JOB, 1]);
 
-    // The second job failed in the browser, so only the first was acknowledged.
-    $this->postJson(route('pack-slips.printed'), ['receipt' => $params['jobs'][0]['receipt']])->assertOk();
+    // The second job failed in the browser, so only the first was drawn and acknowledged.
+    $first = $this->postJson($params['jobs'][0]['url'])->assertOk()->json();
+    $this->postJson(route('pack-slips.printed'), ['receipt' => $first['receipt']])->assertOk();
 
     expect(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(PackSlipRenderer::SLIPS_PER_PRINT_JOB)
         ->and($shipments->last()->fresh()->hasPrintedPackSlip())->toBeFalse();
