@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AddRequestLogContext;
 use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsureUserIsAdmin;
@@ -77,6 +78,8 @@ return Application::configure(basePath: dirname(__DIR__))
         ]);
         $middleware->redirectGuestsTo(fn (): string => route('filament.app.auth.login'));
         $middleware->append(ContentSecurityPolicy::class);
+        // So a fatal error's log line says which request it killed.
+        $middleware->prepend(AddRequestLogContext::class);
         // A no-op unless LOG_REQUEST_TIMING is on.
         $middleware->append(RecordRequestTiming::class);
         // The panel registers it too, since its routes carry their own stack.
