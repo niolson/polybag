@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Support\LivewireRequestWork;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -19,9 +20,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class RecordRequestTiming
 {
-    /** Methods whose first parameter names a Filament action. */
-    private const ACTION_METHODS = ['mountAction', 'mountTableAction', 'callMountedAction'];
-
     public function handle(Request $request, Closure $next): Response
     {
         return $next($request);
@@ -45,50 +43,7 @@ class RecordRequestTiming
             'status' => $response->getStatusCode(),
             'ms' => (int) round((microtime(true) - $startedAt) * 1000),
             'peak_mb' => round(memory_get_peak_usage(true) / 1048576, 1),
-            'livewire' => $request->hasHeader('X-Livewire') ? $this->livewireWork($request) : null,
+            'livewire' => $request->hasHeader('X-Livewire') ? LivewireRequestWork::of($request) : null,
         ], fn (mixed $value): bool => $value !== null));
-    }
-
-    /**
-     * @return list<array{component: string, calls: list<string>, updates: list<string>}>
-     */
-    private function livewireWork(Request $request): array
-    {
-        $components = $request->input('components');
-
-        if (! is_array($components)) {
-            return [];
-        }
-
-        $work = [];
-
-        foreach ($components as $component) {
-            if (! is_array($component)) {
-                continue;
-            }
-
-            $snapshot = is_string($component['snapshot'] ?? null) ? json_decode($component['snapshot'], true) : null;
-
-            $work[] = [
-                'component' => (string) ($snapshot['memo']['name'] ?? 'unknown'),
-                'calls' => array_values(array_map($this->callName(...), array_filter((array) ($component['calls'] ?? []), is_array(...)))),
-                'updates' => array_map(strval(...), array_keys((array) ($component['updates'] ?? []))),
-            ];
-        }
-
-        return $work;
-    }
-
-    /**
-     * @param  array<string, mixed>  $call
-     */
-    private function callName(array $call): string
-    {
-        $method = (string) ($call['method'] ?? 'unknown');
-        $action = $call['params'][0] ?? null;
-
-        return in_array($method, self::ACTION_METHODS, true) && is_string($action)
-            ? "{$method}:{$action}"
-            : $method;
     }
 }
