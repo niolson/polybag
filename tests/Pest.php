@@ -669,3 +669,18 @@ function assertMatchesFedexSchema(array $body, string $schema): void
 {
     assertMatchesApiSchema($body, $schema, 'fedexShip');
 }
+
+/**
+ * Fetch each staged pack slip print job as the browser would, one request each,
+ * and return their payloads: the base64 PDF, its receipt and its slip count.
+ *
+ * @param  list<array{count: int, url: string}>  $jobs
+ * @return list<array{data: string, receipt: string, count: int}>
+ */
+function fetchPackSlipJobs(mixed $test, array $jobs): array
+{
+    return array_map(
+        fn (array $job): array => $test->postJson($job['url'])->assertOk()->json(),
+        $jobs,
+    );
+}

@@ -51,7 +51,7 @@ class PackSlipRenderer
     }
 
     /**
-     * The run as print-bridge jobs, in run order.
+     * The run as print-bridge jobs, in run order, all drawn now.
      *
      * @return list<PackSlipPrintJob>
      *
@@ -59,15 +59,26 @@ class PackSlipRenderer
      */
     public function printJobs(PackSlipRun $run, User $user): array
     {
-        return array_map(function (PackSlipRun $chunk) use ($user): PackSlipPrintJob {
-            $receipt = $this->receipts->issue($chunk->shipmentIds, $user);
+        return array_map(
+            fn (PackSlipRun $chunk): PackSlipPrintJob => $this->printJob($chunk, $user),
+            $run->chunk(self::SLIPS_PER_PRINT_JOB),
+        );
+    }
 
-            return new PackSlipPrintJob(
-                pdf: $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($chunk)),
-                receipt: $this->receipts->seal($receipt),
-                count: $receipt->count(),
-            );
-        }, $run->chunk(self::SLIPS_PER_PRINT_JOB));
+    /**
+     * One print-bridge job: the slips of a chunk no longer than SLIPS_PER_PRINT_JOB.
+     *
+     * @throws \RuntimeException if the PDF renderer is unavailable
+     */
+    public function printJob(PackSlipRun $chunk, User $user): PackSlipPrintJob
+    {
+        $receipt = $this->receipts->issue($chunk->shipmentIds, $user);
+
+        return new PackSlipPrintJob(
+            pdf: $this->gotenberg->pdfFromView(self::VIEW, $this->viewData($chunk)),
+            receipt: $this->receipts->seal($receipt),
+            count: $receipt->count(),
+        );
     }
 
     /**

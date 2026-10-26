@@ -2,13 +2,12 @@
 
 namespace App\Filament\Resources\PickBatches\Pages;
 
-use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\Enums\PickBatchStatus;
 use App\Filament\Actions\ToggleAction;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\PickBatch;
 use App\Services\GotenbergService;
-use App\Services\PackSlips\PackSlipRenderer;
+use App\Services\PackSlips\PackSlipPrintRuns;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
 use Filament\Actions\Action;
@@ -84,17 +83,10 @@ class ViewPickBatch extends ViewRecord
                 ->icon('heroicon-o-document-text')
                 ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
                 ->action(function (): void {
-                    try {
-                        $jobs = $this->packSlipJobs();
-                    } catch (Throwable $e) {
-                        $this->notifyRendererUnavailable($e);
-
-                        return;
-                    }
-
-                    // Recorded on each Shipment only when the browser redeems a job's
+                    // Each job is drawn by its own request as the browser sends it, and
+                    // recorded on each Shipment only when the browser redeems the job's
                     // receipt, once QZ Tray reports that job sent.
-                    $this->dispatch('print-pack-slips', jobs: $jobs);
+                    $this->dispatch('print-pack-slips', jobs: $this->packSlipJobs());
                 }),
 
             // Print mode — the summary to the document printer, then the slips to the
@@ -107,14 +99,13 @@ class ViewPickBatch extends ViewRecord
                 ->action(function (): void {
                     try {
                         $summary = $this->summaryPdf();
-                        $jobs = $this->packSlipJobs();
                     } catch (Throwable $e) {
                         $this->notifyRendererUnavailable($e);
 
                         return;
                     }
 
-                    $this->dispatch('print-pick-batch', summary: $summary, jobs: $jobs);
+                    $this->dispatch('print-pick-batch', summary: $summary, jobs: $this->packSlipJobs());
                     $this->record->update(['summary_printed_at' => now()]);
                 }),
 
@@ -185,18 +176,16 @@ class ViewPickBatch extends ViewRecord
     }
 
     /**
-     * The batch's pack slips in tote order, as receipt-carrying print jobs for the browser.
+     * The batch's pack slips in tote order, staged as print jobs the browser fetches one
+     * request at a time, each carrying its own receipt.
      *
-     * @return list<array{data: string, receipt: string, count: int}>
+     * @return list<array{count: int, url: string}>
      */
     private function packSlipJobs(): array
     {
-        return array_map(
-            fn (PackSlipPrintJob $job): array => $job->toBrowserPayload(),
-            app(PackSlipRenderer::class)->printJobs(
-                app(PickBatchService::class)->packSlipRun($this->pickBatch()),
-                auth()->user(),
-            ),
+        return app(PackSlipPrintRuns::class)->stage(
+            app(PickBatchService::class)->packSlipRun($this->pickBatch()),
+            auth()->user(),
         );
     }
 

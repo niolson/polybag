@@ -2,7 +2,7 @@
 
 # A pack slip run renders every PDF in one web request
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -46,3 +46,91 @@ branding images:
 - Memory, time and PDF size are measured for each run size and recorded here.
 - The largest run the UI allows completes within the web memory limit and the request
   timeouts, with a stated margin.
+
+## Measurements
+
+Run against the Docker image (standalone profile, `app` php-fpm with the shipped 128M
+`memory_limit`, Gotenberg 8, `LOG_REQUEST_TIMING=true`), on a development workstation
+with nothing else loaded. 1,909 open Shipments with four items each; one Client with a
+logo. Driven through a real browser: Print Pack Slips → Print next N. Raw captures are
+in `.scratch/capacity-audit/04/`. QZ Tray was not present, so the last step, the bridge
+accepting the payload, is not measured; the browser did accept every response.
+
+Limits found: PHP `max_execution_time` 30 s under php-fpm, nginx `fastcgi_read_timeout`
+at its 60 s default (`docker/nginx.conf` sets none), and Saloon's 30 s default timeout on
+each Gotenberg call (`GotenbergService` sets none).
+
+### Before: one request renders the whole run (100 KB logo)
+
+| Slips | Jobs | PDF per 200-slip job | Request wall time | Request peak memory | Response |
+|---|---|---|---|---|---|
+| 50 | 1 | 201 KB | 2.0 s | 21 MB | 0.5 MB |
+| 200 | 1 | 423 KB | 3.5 s | 61 MB | 0.8 MB |
+| 500 | 3 | 424 KB | 8.6 s | 65 MB | 1.7 MB |
+| 1,000 | 5 | 424 KB | 17.0 s | 67 MB | 3.1 MB |
+
+So 1,000 slips fit, but held one php-fpm worker for 17 s, and the margin against nginx's
+60 s was 3.5×, on an idle workstation.
+
+The logo broke it. The pack slip view inlined the logo as a base64 data URI **on every
+slip**, and a Client logo can be up to 10 MB. The HTML for one 200-slip job grows as
+logo × 200, and `GotenbergService` holds it again in the multipart body:
+
+| Logo | 200-slip job |
+|---|---|
+| 100 KB | 200 OK, 61 MB peak |
+| 300 KB | HTTP 500, out of memory |
+| 1 MB, 4 MB | HTTP 500, out of memory |
+
+The fatal error reaches nobody: no entry in `laravel.log`, nothing in the container
+logs, only a 500 in the browser. Splitting the run into requests cannot fix this, since a
+single job already fails; the HTML had to stop repeating the logo.
+
+### After: logo declared once, one request per job
+
+The staging request (what Print next N now costs) takes 0.3–0.5 s and 6–10 MB at every
+run size. Each job is its own request:
+
+| Slips | Jobs | Logo | Each job's request | PDF per 200-slip job | Peak memory per job request |
+|---|---|---|---|---|---|
+| 50 | 1 | 100 KB | 1.1 s | 201 KB | 6 MB |
+| 200 | 1 | 100 KB | 3.2 s | 425 KB | 6 MB |
+| 500 | 3 | 100 KB | 3.2, 3.3, 1.8 s | 425 KB | 6 MB |
+| 1,000 | 5 | 100 KB | 3.1–3.3 s | 425 KB | 6 MB |
+| 200 | 1 | 1 MB | 12.1 s | 1.3 MB | under 55 MB |
+| 1,000 | 5 | 1 MB | 11.3–11.6 s | 1.3 MB | under 55 MB |
+| 50 | 1 | 9 MB | 23 s | 9.3 MB | under 55 MB |
+| 200 | 1 | 9 MB | fails at 30 s (Saloon timeout) | n/a | under 55 MB |
+
+The largest run the UI allows, 1,000 slips, is five requests of about 3 s with a typical
+logo and about 12 s with a 1 MB one (an incompressible test image; a real 1 MB logo is
+usually a large photo-like PNG). That leaves a 5× margin on nginx's 60 s and 2.5× on
+Saloon's 30 s. Peak memory is under half the 128M limit throughout. The browser holds one
+PDF at a time.
+
+Not fixed: a logo near the 10 MB upload cap still cannot be rendered. 200 slips with a
+9 MB logo exceed the 30 s Gotenberg timeout, because Chromium decodes the image for every
+slip. The failure is now a clear "The PDF could not be made" on the first job, not a
+silent 500. Resizing logos at upload would remove it; left for a separate decision.
+
+## Built
+
+- Option 2: one request per print job. Print next N, Print selected, Reprint and a pick
+  batch's Pack Slips and Print Both now only stage the run
+  (`PackSlipPrintRuns::stage()`), and the browser fetches each 200-slip job from
+  `POST /pack-slips/print-runs/{key}/jobs/{index}` just before sending it to QZ Tray.
+  Option 1 was not enough on its own, and option 3 was not needed: a job takes seconds.
+- The staged run lives in the cache for one hour under a random key, bound to the user.
+  A job request names only the key and a position, so the browser never picks Shipment
+  IDs, and another user's key answers 410. Tote codes and the run title are kept.
+- Receipts are unchanged. Each fetch issues its own sealed receipt; nothing is recorded
+  until the browser redeems it after QZ reports the job sent. Fetching a job twice records
+  nothing. A render failure on job N stops the run with a visible message, and jobs
+  before it stay recorded, so one failure still costs at most 200 slips.
+- A single Shipment's Print Pack Slip still sends its one job inline; the browser takes
+  either form.
+- The pack slip view declares each logo once as a CSS background and shares it across the
+  slips, instead of an `<img>` data URI per slip. This also shrinks the PDF.
+- Workstation: no QZ Tray, certificate or printer setting changes. The browser now makes
+  one extra request per job while printing, so a workstation must keep its session open
+  for the length of a run (seconds).
