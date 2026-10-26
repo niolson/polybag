@@ -135,3 +135,17 @@ it('splits a run into chunks that keep order and their own tote codes', function
         ->and($second->shipmentIds)->toBe([9])
         ->and($second->toteCodes)->toBe([9 => 'T3']);
 });
+
+it('downsizes an oversized raster logo for the slip', function (): void {
+    $image = imagecreatetruecolor(3000, 500);
+    ob_start();
+    imagepng($image);
+    Storage::disk('public')->put('logos/big.png', (string) ob_get_clean());
+    $client = Client::factory()->create(['logo' => 'logos/big.png']);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+
+    $slips = app(PackSlipRenderer::class)->view(new PackSlipRun([$shipment->id]), User::factory()->create())->getData()['slips'];
+    $png = base64_decode(substr((string) $slips[0]->logoDataUri, strlen('data:image/png;base64,')));
+
+    expect(getimagesizefromstring($png)[0])->toBe(600);
+});

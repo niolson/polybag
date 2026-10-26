@@ -10,6 +10,7 @@ use App\Models\Location;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\GotenbergService;
+use App\Services\LogoDownscaler;
 use App\Services\Scanning\ScanCode;
 use App\Services\SettingsService;
 use Illuminate\Contracts\View\View;
@@ -35,6 +36,7 @@ class PackSlipRenderer
         private readonly GotenbergService $gotenberg,
         private readonly SettingsService $settings,
         private readonly PackSlipReceipts $receipts,
+        private readonly LogoDownscaler $downscaler,
     ) {}
 
     /**
@@ -147,6 +149,14 @@ class PackSlipRenderer
             default => 'image/png',
         };
 
-        return 'data:'.$mimeType.';base64,'.base64_encode((string) Storage::disk('public')->get($path));
+        // The logo prints in a 0.55 in box, so 600 x 200 px is about 300 DPI with room to spare.
+        $logo = $this->downscaler->fit(
+            (string) Storage::disk('public')->get($path),
+            $mimeType,
+            maxWidth: 600,
+            maxHeight: 200,
+        );
+
+        return 'data:'.$logo['mime'].';base64,'.base64_encode($logo['bytes']);
     }
 }

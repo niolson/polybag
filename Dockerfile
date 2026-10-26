@@ -48,6 +48,8 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     curl \
     libzip-dev \
     libpng-dev \
+    libjpeg-dev \
+    libwebp-dev \
     libicu-dev \
     libonig-dev \
     libpq-dev \
@@ -57,6 +59,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y --no-install-reco
     odbcinst \
     openssh-client \
     unzip \
+    && docker-php-ext-configure gd --with-jpeg --with-webp \
     && docker-php-ext-install \
         pdo_mysql \
         pdo_pgsql \
