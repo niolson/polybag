@@ -236,6 +236,39 @@ services:
       - default
       - shared
 
+  # Label batches (Batch Ship) run on their own queue, so a batch of hundreds neither
+  # waits behind the other jobs nor holds them up. Each process buys one label at a
+  # time; LABEL_WORKERS sets how many run at once (`capacity-audit/06`).
+  label-queue:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app
+      args:
+        APT_CACHE_BUST: ${APT_CACHE_BUST:-1}
+    restart: unless-stopped
+    # Hosted-mode secret injection; ignorable when self-hosting — see `app`.
+    env_file:
+      - path: /opt/shared/shared-secrets.env
+        required: false
+    volumes:
+      - ./.env:/var/www/html/.env
+    entrypoint: ["sh", "-c", "php artisan config:cache && php artisan queue:work --queue=labels --tries=1"]
+    deploy:
+      replicas: ${LABEL_WORKERS:-2}
+    depends_on:
+      app:
+        condition: service_healthy
+      mysql:
+        condition: service_healthy
+        required: false
+      redis:
+        condition: service_healthy
+        required: false
+    networks:
+      - default
+      - shared
+
   scheduler:
     build:
       context: .

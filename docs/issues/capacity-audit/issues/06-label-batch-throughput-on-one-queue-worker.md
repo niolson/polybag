@@ -2,7 +2,7 @@
 
 # Label batch throughput on one queue worker
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -52,3 +52,82 @@ in the batch. That is [`import-memory/02`](../../archive/import-memory/issues/02
 - Throughput is measured and recorded here.
 - A 500-Package batch finishes in a stated time, and work on `default` and `low`
   keeps moving while it runs.
+
+## Measurements
+
+Docker image (standalone profile, `app` and workers uncapped), fake carriers with
+`FAKE_CARRIER_LABEL_LATENCY_MS=1000`, MySQL 8.4 with encryption at rest on a workstation
+disk. 1,000 open Shipments with two items each, packed into one box size by
+`BatchLabelService::createBatch()`. Raw scripts are in `.scratch/capacity-audit/06/`.
+
+### Before: the premise was wrong
+
+The issue assumed the label jobs run on `low`, behind `default`. They did not.
+`GenerateLabelJob` calls `onQueue('low')`, but a bus batch pushes its jobs in bulk onto
+`$options['queue']`, which is unset, so every label job landed on **`default`**, in the same
+first-in-first-out line as everything else. With the batch queued, one worker serving
+`default,low`:
+
+| Batch | Time to finish | A `default` job queued during it waits (p50 / max) | A `low` job (p50 / max) |
+|---|---|---|---|
+| 8 | 20 s | 15 s / 20 s | 15 s / 20 s |
+| 20 | 47 s | 27 s / 47 s | 28 s / 48 s |
+
+Every other job on `default` (the export of each shipped label to its channel, the
+dashboard cache, a tracking refresh, a notification) waited for the whole batch, in the
+order it was queued. That includes `ExportShippedPackage`, which pushes each label's
+fulfillment to Shopify or Amazon, so a batch's exports arrived only once its labels were
+all bought. The priority of `default` over `low` that the issue describes was never in play
+for the labels.
+
+### Per label
+
+About **2.3 s** a label on this stack: 1.0 s of fake carrier latency and 1.3 s of the app,
+145 queries of which the slowest are inserts that commit (an audit row commits in 60 ms
+here). It does not grow with the batch: each `GenerateLabelJob` peaks at 6 MB on its
+first label and under 1 MB on the rest, in a process limited to 128M, so memory is not the
+constraint. Fake carriers build small sample documents, so a label whose response carries
+a large customs document was not measured; the job holds one response at a time.
+
+### After: a `labels` queue and `LABEL_WORKERS` processes
+
+Batches of 100 (500 for the last row), a `default` and a `low` probe job queued every five
+seconds while it ran:
+
+| Processes | Time | Labels / min | `default` job waits (p50 / max) | `low` job waits (p50 / max) |
+|---|---|---|---|---|
+| 1 | 245 s | 24.5 | 1.4 s / 3.0 s | 1.4 s / 3.0 s |
+| 2 | 147 s | 40.8 | 1.6 s / 2.8 s | 1.6 s / 2.9 s |
+| 4 | 90 s | 66.7 | 1.5 s / 2.9 s | 1.7 s / 3.0 s |
+| 4 (500 labels) | 459 s | 65.4 | 1.5 s / 2.9 s | 1.6 s / 3.1 s |
+
+Every label was bought in every run. Throughput scales to about 1.7× with two processes and
+2.7× with four, short of linear because each purchase commits several times to one MySQL.
+A job on `default` or `low` now waits only the worker's three-second poll, however long
+the batch.
+
+Each process held about 75 MB after buying 500 labels.
+
+### The request that starts a batch
+
+Batch Ship is capped at 100 shipments (the bulk action refuses more), so the 500-label batch
+above is five full batches' worth. `createBatch()`, which builds each shipment's package
+draft inside the Livewire request, took 13 s for 100 shipments on this stack and 16 MB;
+for 500 it would take 64 s, over nginx's 60 s, which is one more reason the cap matters.
+Most of that is commits (each package draft writes an audit row).
+
+## Built
+
+- `GenerateLabelJob::QUEUE` (`labels`), and `BatchLabelService` names it on the bus batch,
+  which is what moves the labels off `default`. A test pins it by asserting where the jobs
+  are pushed.
+- A `label-queue` service in `docker-compose.yml`: `queue:work --queue=labels`, with
+  `deploy.replicas: ${LABEL_WORKERS:-2}`. `composer run dev` starts one as well.
+- Option 1 and 2 of the issue together: the batch has its own queue, and its own worker
+  count. Two processes is the default: a batch of 100 finishes in two and a half minutes,
+  and only two purchases run at once. More is a decision about your carriers, as
+  `docs/self-hosting.md` says.
+- Not verified: concurrent purchases against live carrier accounts. Fake carriers cannot
+  say whether UPS, FedEx or USPS throttle or reject two purchases at once on one account.
+- The `ShadowValidateAddress` and `RebuildDailyShippingStats` jobs on `low` no longer wait
+  behind a batch, since the batch is not on `default` or `low`.

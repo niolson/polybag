@@ -460,6 +460,23 @@ it('queues the batch only after its rows commit', function (): void {
         ->and(collect($levels)->every(fn (int $level): bool => $level === $baseline))->toBeTrue();
 });
 
+it('puts every label job on the labels queue, whichever way the batch is pushed', function (): void {
+    Queue::fake();
+
+    $shipments = collect(range(1, 3))->map(function (): Shipment {
+        $shipment = Shipment::factory()->create();
+        ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+
+        return $shipment->load('shipmentItems.product');
+    });
+
+    $this->service->createBatch($shipments, BoxSize::factory()->create(), User::factory()->admin()->create(), 'pdf', null);
+
+    Queue::assertPushedOn(GenerateLabelJob::QUEUE, GenerateLabelJob::class);
+    Queue::assertPushed(GenerateLabelJob::class, 3);
+    Queue::assertNotPushed(GenerateLabelJob::class, fn (GenerateLabelJob $job, ?string $queue): bool => $queue !== GenerateLabelJob::QUEUE);
+});
+
 // --- a label job that dies (import-memory/02) ---
 
 it('finishes a batch on its real counts when its last label job dies', function (): void {
