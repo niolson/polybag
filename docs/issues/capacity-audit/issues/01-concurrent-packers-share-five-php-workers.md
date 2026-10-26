@@ -100,6 +100,31 @@ p50 / p95, in ms.
   adds about 15 MB beyond shared memory, and the container peaked at 170 MB with the
   20-worker pool.
 
+### test.polybag.app, 2026-10-25
+
+The same runs against the `test` tenant on the hosted server (2 CPUs, 1.9 GB, shared
+MySQL and Redis, nothing else busy), driven from outside through Cloudflare. Same think
+time and fake latency; the 20-worker pool was a temporary compose override.
+
+| Packers | Pool | Labels / min | Save after a scan | Ship → rates shown | Buy → label bought |
+|---|---|---|---|---|---|
+| 1 | 5 | 4.0 | 75 / 110 | 2,044 / 2,210 | 1,421 / 2,003 |
+| 5 | 5 | 19.0 | 69 / 106 | 2,016 / 2,190 | 1,415 / 1,931 |
+| 10 | 5 | 37.0 | 70 / 223 | 2,026 / 2,725 | 1,454 / 1,956 |
+| 20 | 5 | 54.3 | 73 / 1,111 | 3,452 / 6,121 | 4,428 / 5,533 |
+| 20 | 20 | 74.0 | 75 / 205 | 2,056 / 2,784 | 1,925 / 2,169 |
+
+- Requests run about three times faster than on the local stack (`saveDraft` 70 ms
+  against 200 ms), so a packer holds a worker for less time. Five workers carry 10
+  packers with little queueing and fall behind at 20. With 20 workers, 20 packers wait
+  about what one does.
+- The server held up. With 20 workers the load average peaked at 3.0 on two cores, the
+  `app` container peaked at 132 MB, and available memory never fell below 527 MB. Peak
+  memory per request stayed at 8 MB.
+- Cloudflare neither throttled nor blocked anything: about 3,900 requests in three minutes
+  from one address, 565 labels across the runs, no failures. The only limit hit was the
+  app's own login form, which allows five sign-ins a minute from one address.
+
 ## Options
 
 1. Set the pool explicitly in the image, for example `pm.max_children` from an env
