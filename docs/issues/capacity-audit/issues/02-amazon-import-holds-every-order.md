@@ -65,11 +65,28 @@ A whole import, `ShipmentImportService` writing the shipments, under the 256M li
 | 3,000, limit 3,000 | 3,000 | 168 MB |
 | 10,000, limit 3,000 | 3,000 | 168 MB |
 
-Live, Amazon's own throttle already bounds a run: `searchOrders` refills one request every
-three minutes with a burst of 20 (see `order-reconciliation/07`), so a run reads about 20
-pages, 2,000 orders, plus one page per three minutes it keeps running. That is why this
-has not failed. It is a property of Amazon's current rate limit, not of this code, and
-nothing here would notice it rising.
+### Real orders, and the throttle, against a live account
+
+Measured on 2026-10-26 with a read-only probe of the defunct production seller
+(`.scratch/capacity-audit/02/probe-real-orders.php`; the page captures are in
+`probe-real-orders.json`), sending the scheduled changes read's query, 800 days back.
+Nothing was imported and no order data was kept.
+
+- **Orders:** 3,100 read, 2,981 shipped and 119 cancelled (the account has been closed for
+  most of a year, so none open). 2.1 KB on the wire and 1.01 items per order.
+- **Memory:** 19.0 MB per 1,000 orders decoded, 21.7 MB per 1,000 held with the mapped rows
+  (a whole fetch). That is under the 28 MB the three-item fake orders cost, because real
+  orders here have one item. 3,000 orders hold about 65 MB; an order of three items would
+  bring that nearer the 85 MB estimated above.
+- **Throttle:** 31 pages came back in 28 seconds with no waiting, and the 32nd was a 429.
+  So the burst is about 30 pages, not the 20 that `order-reconciliation/07` assumed. The
+  response carried neither an `x-amzn-RateLimit-Limit` nor a `Retry-After` header. The
+  refill rate was not measured, and the "one request every three minutes" in the older
+  notes still stands unchecked.
+
+So a run's first burst reads about 3,100 orders before Amazon stops it, which is what the
+3,000 default allows. The cap and the throttle meet at about the same place today; the cap
+is what holds if Amazon raises the burst. The default stays at 3,000.
 
 ## Built
 
