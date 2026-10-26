@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Context;
 it('adds the method and path, never the query string', function (): void {
     $request = Request::create('/pack/12?token=secret', 'GET');
 
-    (new AddRequestLogContext)->handle($request, fn () => new Response);
+    (new AddRequestLogContext)->handle($request, fn (): Response => new Response);
 
     expect(Context::get('request'))->toBe(['method' => 'GET', 'path' => '/pack/12']);
 });
@@ -22,7 +22,7 @@ it('names the Livewire work of a Livewire request without its values', function 
         'calls' => [['method' => 'saveDraft', 'params' => [['secret' => '1600 Pennsylvania Ave']]]],
     ]]]);
 
-    (new AddRequestLogContext)->handle($request, fn () => new Response);
+    (new AddRequestLogContext)->handle($request, fn (): Response => new Response);
 
     expect(Context::get('request')['livewire'])->toBe([[
         'component' => 'app.filament.pages.pack',
