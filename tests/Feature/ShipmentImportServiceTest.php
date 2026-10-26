@@ -1526,6 +1526,10 @@ it('logs the peak memory of the run, not of earlier work in the same worker', fu
     $testLimit = ini_get('memory_limit');
     config(['shipment-import.behavior.memory_limit' => '2G']);
 
+    // Coverage instrumentation leaves a worker too little of the default
+    // limit for the allocation below, so raise it before making it.
+    ini_set('memory_limit', '2G');
+
     // An earlier job in this worker peaked 128 MB above where it is now.
     $earlier = str_repeat('x', 128 * 1048576);
     unset($earlier);
