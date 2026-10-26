@@ -242,9 +242,10 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     /**
      * The orders a scheduled import reads (`order-reconciliation/07`): every
      * order updated since the connection last read through, open or closed,
-     * in one search. `searchOrders` refills one request every three minutes
-     * with a burst of 20, so a run that only asks what changed costs one
-     * request in the usual case, however many orders are open.
+     * in one search. `searchOrders` is throttled hard (a probe of a live account
+     * got 31 pages, then a 429, `capacity-audit/02`), so a run that only asks
+     * what changed costs one request in the usual case, however many orders
+     * are open.
      *
      * Open orders are returned for import. Shipped and cancelled ones are kept
      * for {@see closeRecordsClosedAtSource()}, which closes their Shipments.
