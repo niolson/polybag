@@ -2,7 +2,7 @@
 
 # A pick batch at its 500-Shipment cap
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -31,3 +31,46 @@ For batches of 50, 200 and 500 Shipments, with few and with many distinct SKUs:
 - The numbers are recorded here.
 - A 500-Shipment batch with many distinct SKUs creates and prints within the web
   memory limit and the request timeouts, or the cap is lowered with a message.
+
+## Measurements
+
+Docker image (standalone profile, shipped 128M `memory_limit`, Gotenberg 8,
+`LOG_REQUEST_TIMING=true`), idle workstation. 2,005 products with bin locations; 1,500
+open Shipments with four items each, in two sets: **few** SKUs (every item drawn from 5
+products) and **many** (from 2,000). Batches were created with `autoGenerate()` (picking
+to totes on), then the summary printed through the real page: Pick Batches → Print
+Without Preview → Picking Summary, the same Livewire action `ViewPickBatch` runs. Raw
+captures are in `.scratch/capacity-audit/04/` (`pick-results.jsonl`).
+
+| Shipments | SKUs | Create batch | Summary request | Summary peak memory | Summary response (base64 PDF) |
+|---|---|---|---|---|---|
+| 50 | few | 0.3 s | 1.0 s | 6 MB | 94 KB |
+| 200 | few | 0.5 s | 0.6 s | 10 MB | 108 KB |
+| 500 | few | 1.8 s | 1.1 s | 18 MB | 132 KB |
+| 50 | many | 0.4 s | 0.9 s | 8 MB | 116 KB |
+| 200 | many | 1.1 s | 1.8 s | 14 MB | 212 KB |
+| 500 | many | 1.3 s | 3.5 s | 26 MB | 338 KB |
+
+Creation was run from the CLI under `memory_limit=128M` and succeeded at every size; its
+memory is not reported because the tinker session's own baseline (about 75 MB) swamps
+it, and growing the batch from 50 to 500 Shipments added about 8 MB. Creation issues about one
+query per Shipment (one insert each), 504 for a 500-Shipment batch; that is the cost to
+watch, not memory. Opening the batch page took about 0.1 s and 6-8 MB.
+
+The guess in the problem section was wrong in an interesting way: the summary grows with
+**distinct SKUs and line count**, not with Shipments alone. Each product row lists every
+Shipment (or tote) that contains it, so many SKUs across many Shipments cost the most,
+and few SKUs cost the least. Even the worst case measured, 500 Shipments with 2,000
+possible SKUs, is 3.5 s and 26 MB: a 17× margin on nginx's 60 s, 8× on Saloon's 30 s, and
+a fifth of the 128M limit.
+
+## Built
+
+Nothing needed to change. The 500-Shipment cap is within the web limits as it stands, so
+it stays. The batch's pack slips, which are the expensive part of printing a batch, are
+covered by [04](04-pack-slip-run-renders-in-one-request.md): they already render one
+200-slip job per request.
+
+Not measured: a batch where every Shipment carries many more than four distinct lines
+(for example 500 Shipments of 20 SKUs each). Cost grows with line count, so a much heavier batch
+would take proportionally longer; this was not tested.
