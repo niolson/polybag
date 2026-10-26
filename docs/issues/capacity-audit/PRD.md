@@ -56,6 +56,7 @@ As shipped in the `Dockerfile` and `docker-compose.yml`, checked 2026-10-24:
 | [04](issues/04-pack-slip-run-renders-in-one-request.md) | Pack slip run, up to 1,000 slips | Every PDF rendered and sent in one web request | Measured; one request per 200-slip job, and the logo declared once per slip view |
 | [05](issues/05-pick-batch-at-its-500-shipment-cap.md) | Pick batch, up to 500 Shipments | Summary PDF rendered in a web request | Measured; 3.5 s and 26 MB at the cap, no change needed |
 | [06](issues/06-label-batch-throughput-on-one-queue-worker.md) | Label batch | One job per Package, on one worker | Measured; the jobs were on `default`, not `low`; now their own queue and `LABEL_WORKERS` workers |
+| [07](issues/07-lists-and-search-over-a-large-database.md) | Lists and search over a large database | The Packages list and Prepaid Duties report sorted on unindexed columns; search scans every row | Measured at 200,000 Shipments; two indexes added, search left as is |
 
 The Shopify import is covered by `import-memory` and is not repeated here.
 
