@@ -20,6 +20,10 @@ services:
       - path: /opt/shared/shared-secrets.env
         required: false
     environment:
+      # php-fpm worker pool. Read by php-fpm itself, not Laravel, so it comes
+      # from Compose (the project's .env is used for substitution) rather than
+      # the mounted .env. Change it and recreate `app`. See docs/self-hosting.md.
+      PHP_FPM_MAX_CHILDREN: ${PHP_FPM_MAX_CHILDREN:-20}
       QZ_PRIVATE_KEY_PATH: ./storage/app/private/qz-private-key.pem
       QZ_CERTIFICATE_PATH: ./public/qz-certificate.pem
     volumes:

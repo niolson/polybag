@@ -315,6 +315,40 @@ comparing it with the digits printed under it.
 A SKU or order reference that begins with `%` cannot be scanned, since it is read as a
 PolyBag code. Open such an order from the Shipments list, whose search reads it as text.
 
+## How many people can pack at once
+
+The `app` container serves PHP with a pool of php-fpm workers, and each worker handles
+one request at a time. Every scan that saves progress, every page and every label
+purchase takes a worker; a rate shop or purchase holds it until the carriers answer,
+which takes seconds. When every worker is busy, the next request waits, and to the
+people packing the app just looks slow.
+
+The pool defaults to **20 workers**. In our load test that served 20 people packing at
+once on a two-CPU server, about as fast as one, with the container using under 150 MB.
+The image's stock pool of 5 started to fall behind at 10 to 20 packers. The measurements
+are in `docs/issues/capacity-audit/issues/01-concurrent-packers-share-five-php-workers.md`.
+
+To change it, set `PHP_FPM_MAX_CHILDREN` in the `.env` next to `docker-compose.yml` and
+recreate `app`:
+
+```bash
+COMPOSE="docker compose --profile standalone -f docker-compose.yml -f docker-compose.onprem.yml"
+
+$COMPOSE up -d --force-recreate app
+$COMPOSE restart nginx
+```
+
+Size it against three things:
+
+- **People.** Allow about one worker for each person packing or shipping at the same
+  time.
+- **Memory.** A worker adds about 15–20 MB to the container. 40 workers fit in well
+  under 1 GB.
+- **CPU and the database.** Raising the pool lets more requests run at once; it does not
+  make the server faster. On two CPUs the load test reached a load average of 3 at 20
+  workers. Each busy worker also holds a MySQL connection, so keep the pool, plus the
+  queue and scheduler containers, under MySQL's `max_connections` (151 by default).
+
 ## Upgrading
 
 The `app` container's entrypoint runs `php artisan migrate` before it starts php-fpm,

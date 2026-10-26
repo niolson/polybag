@@ -4,6 +4,11 @@ set -e
 # Fix ownership on mounted files (volume mounts bypass Dockerfile permissions)
 chown www-data:www-data storage/app/private/qz-private-key.pem 2>/dev/null || true
 
+# Size the worker pool from PHP_FPM_MAX_CHILDREN. Written here, not at build
+# time, so changing it takes a container recreate rather than a rebuild; and
+# first, so a bad value stops the container before it migrates anything.
+bash /usr/local/bin/php-fpm-pool.sh > /usr/local/etc/php-fpm.d/zz-polybag-pool.conf
+
 # Wait for database connection before migrating
 count=0
 until php artisan db:monitor --databases=mysql > /dev/null 2>&1 || [ $count -ge 30 ]; do
