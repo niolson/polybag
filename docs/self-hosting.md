@@ -349,10 +349,28 @@ Size it against three things:
   workers. Each busy worker also holds a MySQL connection, so keep the pool, plus the
   queue and scheduler containers, under MySQL's `max_connections` (151 by default).
 
+## How fast a label batch runs
+
+Batch Ship (up to 100 shipments at a time) buys its labels on a queue of its own, served
+by the `label-queue` container. Each of its processes buys one label at a time, so
+`LABEL_WORKERS` sets how many labels are bought at once. It defaults to **2**.
+
+In our load test, with a carrier answering in one second, a batch of 100 labels took
+4 minutes with one process, 2½ minutes with two and 1½ minutes with four: about 25, 41 and
+67 labels a minute. Every label bought, and the rest of the queue (shipment exports,
+dashboard refreshes, tracking) kept moving while the batch ran. The numbers are in
+`docs/issues/capacity-audit/issues/06-label-batch-throughput-on-one-queue-worker.md`.
+
+More processes finish a batch sooner, with diminishing returns once MySQL's commits become
+the limit, and only as far as your carriers allow purchases at once. We have tested the
+processes against fake carriers, not live ones; if a carrier starts refusing purchases
+under load, lower `LABEL_WORKERS`. Each process adds about 75 MB. Set it in the `.env`
+next to `docker-compose.yml` and recreate the container (`up -d label-queue`).
+
 ## Upgrading
 
 The `app` container's entrypoint runs `php artisan migrate` before it starts php-fpm,
-and the `queue`, `import-queue` and `scheduler` containers wait for `app` to report
+and the `queue`, `import-queue`, `label-queue` and `scheduler` containers wait for `app` to report
 healthy — which is after the migration — before they start. What that does not cover is
 a worker from the *previous* image that is still running when the migration starts: a
 label purchase it finishes after a data migration has swept the table is invisible to
@@ -363,7 +381,7 @@ So a release is three steps, not one:
 ```bash
 COMPOSE="docker compose --profile standalone -f docker-compose.yml -f docker-compose.onprem.yml"
 
-$COMPOSE stop queue import-queue scheduler
+$COMPOSE stop queue import-queue label-queue scheduler
 $COMPOSE up -d --build app            # migrates, then reports healthy
 $COMPOSE up -d --build                # the workers start against the migrated schema
 ```

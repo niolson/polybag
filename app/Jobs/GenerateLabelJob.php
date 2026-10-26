@@ -29,13 +29,19 @@ class GenerateLabelJob implements ShouldQueue
      */
     public int $tries = 1;
 
+    /**
+     * The queue a label batch runs on, served by its own worker so a batch of hundreds
+     * neither waits behind other jobs nor holds them up (`capacity-audit/06`).
+     */
+    public const string QUEUE = 'labels';
+
     public function __construct(
         public int $labelBatchItemId,
         public string $labelFormat,
         public ?int $labelDpi,
         public bool $hasReportPrinter = false,
     ) {
-        $this->onQueue('low');
+        $this->onQueue(self::QUEUE);
     }
 
     public function handle(): void

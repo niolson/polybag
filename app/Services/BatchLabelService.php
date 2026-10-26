@@ -241,7 +241,10 @@ class BatchLabelService
             return [$batch, $jobs];
         });
 
+        // The batch's own queue, not each job's: a bus batch pushes its jobs in bulk
+        // onto the connection's default queue unless the batch names one.
         $busBatch = Bus::batch($jobs)
+            ->onQueue(GenerateLabelJob::QUEUE)
             ->allowFailures()
             ->before(function () use ($batch): void {
                 $batch->update([
