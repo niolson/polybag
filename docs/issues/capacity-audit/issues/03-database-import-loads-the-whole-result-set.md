@@ -2,7 +2,7 @@
 
 # The database import loads its whole result set
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -42,3 +42,71 @@ Peak memory of a fetch against SQLite and MySQL source tables of 1,000, 10,000 a
 - Memory per 1,000 rows is measured and recorded here.
 - A query returning more rows than a run can hold fails with a message on the
   Connection, never with a silent fatal.
+
+## Measurements
+
+Peak memory of `DatabaseSource::fetchShipments()` before the change, in the Docker image
+(PHP 8.4 with the memory limit lifted, so the peak shows rather than a fatal), reading a
+table of 16 columns, including a 200-character `notes`. The figure is the growth over the
+process's own baseline. Scripts and output are in `.scratch/capacity-audit/03/`.
+
+| Rows | MySQL | SQLite |
+|---|---|---|
+| 1,000 | 2.4 MB | 2.5 MB |
+| 10,000 | 23.6 MB | 23.7 MB |
+| 100,000 | 234 MB | 234 MB |
+
+About **2.35 MB per 1,000 rows**, the same on both drivers. The import runs under
+`SHIPMENT_IMPORT_MEMORY_LIMIT` (256M) on top of a baseline of about 50 MB, so a query
+returning a little over 85,000 rows of this width dies of a fatal error, which is the
+silent failure the problem section describes. A table with wider rows fails sooner.
+
+After the change, the same read (identities, then every page, each page dropped):
+
+| Rows | MySQL | SQLite |
+|---|---|---|
+| 1,000 | 0.8 MB | 0.9 MB |
+| 10,000 | 1.3 MB | 1.4 MB |
+| 100,000 | 5.8 MB | 5.9 MB |
+
+A whole import, `ShipmentImportService` writing every row to MySQL under the 256M limit:
+
+| Rows | Peak memory | Time |
+|---|---|---|
+| 1,000 | 54.7 MB | 86 s |
+| 10,000 | 55.2 MB | 1,311 s |
+
+Ten times the rows added half a megabyte. The remaining 55 MB is the framework and the
+writes. Writing is slow, about 85 ms a row on this machine, and was not the subject; a
+100,000-row import would take about two and a half hours, so it was read but not written.
+1,000 rows with an items table and a mark-exported query (so MySQL ran item lookups and
+`UPDATE`s between pages) completed with all 1,000 shipments, items and exports recorded.
+
+## Built
+
+Option 2 in spirit, with a spool instead of a second read:
+
+- `DatabaseSource` implements `ReadsInPages`. `fetchIdentities()` runs the shipments
+  query once and writes each mapped row to an anonymous temporary file (`tmpfile()`:
+  mode 0600, deleted when closed or when the process ends) as it is read, keeping only
+  each row's source record ID. `fetchShipmentPages()` then reads the file back 250 rows at
+  a time. A Database source needs no identities for re-pointing or closure (its status
+  query asks about the Shipments already open here), so they only count the run.
+- On MySQL the read switches the connection to unbuffered mode for its length: `pdo_mysql`
+  otherwise buffers the whole result into PHP's memory at `execute()`. The read finishes
+  before the first write, so the connection holds no open result when the per-row items,
+  status and mark-exported queries run. A spool, not a stream held open across pages, also
+  means a slow page cannot run into the server's `net_write_timeout`.
+- **A row cap**, `SHIPMENT_IMPORT_MAX_DATABASE_ROWS` (default 250,000, `0` for none). Past
+  it the read stops, nothing is written, and the Connection records the message "The
+  shipments query returned more than 250,000 rows… limit it to open orders", which also
+  notifies the admins. It exists for the query that forgot its filter, and bounds the one
+  thing still held per row (its ID, under 100 bytes). It is documented in
+  `docs/data-sources/database.md`.
+- `fetchShipments()` stays for the dry run and other callers, and now maps rows as it
+  reads them, so it too no longer holds the raw rows beside the mapped ones.
+- Customer order data now touches local disk during a run. The file is private to the
+  process and goes when the run ends, including on a fatal error.
+- Not covered: PostgreSQL and SQL Server were not measured. Both hand rows over as
+  they are asked for without a driver option (`fetchBoundedRows()` documents it), so
+  they take the same path; only MySQL and SQLite were run.

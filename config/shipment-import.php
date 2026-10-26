@@ -17,6 +17,11 @@ return [
         // PHP memory_limit an import run sets, whatever the worker was started
         // with; the worker keeps it afterwards. Null leaves the limit alone.
         'memory_limit' => env('SHIPMENT_IMPORT_MEMORY_LIMIT', '256M'),
+
+        // The most rows one run reads from a Database connection's shipments query.
+        // A run holds one page of rows plus every row's ID, so this bounds the IDs
+        // and catches a query that forgot its status filter. 0 means no limit.
+        'max_database_rows' => (int) env('SHIPMENT_IMPORT_MAX_DATABASE_ROWS', 250000),
     ],
 
     /*

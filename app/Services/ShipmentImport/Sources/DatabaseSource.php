@@ -5,6 +5,7 @@ namespace App\Services\ShipmentImport\Sources;
 use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\Contracts\ReadsInPages;
 use App\DataTransferObjects\QueryPreviewResult;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\AuditAction;
@@ -25,8 +26,11 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Throwable;
 
-class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
+class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReadsInPages
 {
+    /** Mapped rows handed to the import at a time. */
+    public const int PAGE_SIZE = 250;
+
     private array $config;
 
     private FieldMapper $fieldMapper;
@@ -40,6 +44,14 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
     private int $statusLookups = 0;
 
     private int $failedStatusLookups = 0;
+
+    /**
+     * The shipments query's mapped rows, spooled to an anonymous temporary file by
+     * {@see fetchIdentities()}, and their source record IDs.
+     *
+     * @var array{file: resource, ids: list<string>}|null
+     */
+    private ?array $spool = null;
 
     public function __construct(array $config)
     {
@@ -71,26 +83,176 @@ class DatabaseSource implements ClosesRecordsClosedAtSource, DataSourceInterface
         }
     }
 
+    /**
+     * Every mapped row at once, for a caller that wants the whole set. The import
+     * itself reads in pages through {@see fetchIdentities()}.
+     */
     public function fetchShipments(): Collection
     {
-        $connection = $this->config['connection'];
+        $spool = $this->spoolShipmentRows();
 
-        // Use custom query if provided
+        try {
+            return collect(iterator_to_array($this->readSpool($spool['file']), false));
+        } finally {
+            fclose($spool['file']);
+        }
+    }
+
+    /**
+     * Run the shipments query once, writing each mapped row to a temporary file as it
+     * is read, and return the source record ID of every row. Neither the raw rows nor
+     * the mapped ones are held, so the run's memory does not depend on how many rows
+     * the query returns (`capacity-audit/03`).
+     *
+     * Reading everything before the first write also leaves the source connection
+     * free of an open result set, so the items, status and mark-exported queries of
+     * the pages that follow can use it.
+     *
+     * @return Collection<int, string>
+     *
+     * @throws InvalidArgumentException if the query returns more rows than a run takes
+     */
+    public function fetchIdentities(): Collection
+    {
+        $this->closeSpool();
+        $this->spool = $this->spoolShipmentRows();
+
+        return collect($this->spool['ids']);
+    }
+
+    /**
+     * @return \Generator<int, Collection<int, array<string, mixed>>>
+     */
+    public function fetchShipmentPages(): iterable
+    {
+        $spool = $this->spool ?? throw new \LogicException('fetchIdentities() reads the rows; call it before fetchShipmentPages().');
+
+        try {
+            $page = [];
+
+            foreach ($this->readSpool($spool['file']) as $row) {
+                $page[] = $row;
+
+                if (count($page) === self::PAGE_SIZE) {
+                    yield collect($page);
+
+                    $page = [];
+                }
+            }
+
+            if ($page !== []) {
+                yield collect($page);
+            }
+        } finally {
+            $this->closeSpool();
+        }
+    }
+
+    /**
+     * @return array{file: resource, ids: list<string>}
+     */
+    private function spoolShipmentRows(): array
+    {
         if (! empty($this->config['shipments_query'])) {
             $query = $this->normalizeQuery($this->config['shipments_query']);
             RawSqlGuard::assertStatementType($query, RawSqlGuard::READ, 'custom shipments query');
-            $results = $this->executeLogged(
-                'fetch_shipments',
-                $query,
-                [],
-                fn () => DB::connection($connection)->select($query),
-            );
-        } else {
-            $results = $this->shipmentsTableQuery()->get();
+
+            return $this->executeLogged('fetch_shipments', $query, [], fn (): array => $this->streamToSpool($query, []));
         }
 
-        // Map external fields to internal fields
-        return collect($results)->map(fn ($row): array => $this->mapShipmentRow($row));
+        $builder = $this->shipmentsTableQuery();
+
+        return $this->streamToSpool($builder->toSql(), $builder->getBindings());
+    }
+
+    /**
+     * Execute a read query and write its rows, mapped, to an anonymous temporary file
+     * (private to the process and deleted when closed, or when the process ends).
+     *
+     * MySQL's driver buffers a whole result set into PHP's memory at execute() unless
+     * the handle is switched to unbuffered mode, so it is, for the length of this read
+     * (see {@see fetchBoundedRows()}). The other drivers hand rows over as they are
+     * asked for.
+     *
+     * @param  array<int|string, mixed>  $bindings
+     * @return array{file: resource, ids: list<string>}
+     */
+    private function streamToSpool(string $sql, array $bindings): array
+    {
+        $connection = DB::connection($this->config['connection']);
+        $pdo = $connection->getPdo();
+        $max = (int) config('shipment-import.behavior.max_database_rows');
+
+        $unbuffered = $connection->getDriverName() === 'mysql'
+            && defined('PDO::MYSQL_ATTR_USE_BUFFERED_QUERY');
+
+        if ($unbuffered) {
+            $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, false);
+        }
+
+        $file = tmpfile();
+        $ids = [];
+
+        try {
+            $statement = $pdo->prepare($sql);
+            $connection->bindValues($statement, $connection->prepareBindings($bindings));
+            $statement->execute();
+
+            while (($row = $statement->fetch(\PDO::FETCH_ASSOC)) !== false) {
+                if ($max > 0 && count($ids) >= $max) {
+                    $statement->closeCursor();
+
+                    throw new InvalidArgumentException(sprintf(
+                        'The shipments query returned more than %s rows, so the import stopped before writing anything. '
+                        .'A query with no filter on order status or date returns the whole order history: limit it to open orders.',
+                        number_format($max),
+                    ));
+                }
+
+                $mapped = $this->mapShipmentRow($row);
+                $record = serialize($mapped);
+
+                fwrite($file, pack('N', strlen($record)).$record);
+                $ids[] = $this->sourceRecordIdFor($mapped) ?? '';
+            }
+
+            $statement->closeCursor();
+        } catch (Throwable $e) {
+            fclose($file);
+
+            throw $e;
+        } finally {
+            if ($unbuffered) {
+                $pdo->setAttribute(\PDO::MYSQL_ATTR_USE_BUFFERED_QUERY, true);
+            }
+        }
+
+        return ['file' => $file, 'ids' => $ids];
+    }
+
+    /**
+     * The spooled rows, one at a time, in the order they were read.
+     *
+     * @param  resource  $file
+     * @return \Generator<int, array<string, mixed>>
+     */
+    private function readSpool($file): \Generator
+    {
+        rewind($file);
+
+        while (($header = fread($file, 4)) !== false && strlen($header) === 4) {
+            $length = unpack('N', $header)[1];
+
+            yield unserialize((string) fread($file, $length), ['allowed_classes' => false]);
+        }
+    }
+
+    private function closeSpool(): void
+    {
+        if ($this->spool !== null) {
+            fclose($this->spool['file']);
+            $this->spool = null;
+        }
     }
 
     /**

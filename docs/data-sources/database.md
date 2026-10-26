@@ -191,6 +191,12 @@ The query gets no bound parameters. It should therefore carry its own "not yet i
 predicate — see [`mark_exported_query`](#mark_exported_query) for the usual way to make
 that predicate mean something.
 
+A run reads the query once, to a temporary file, and then imports its rows 250 at a time, so
+memory does not grow with the number of rows. A run takes at most 250,000 rows
+(`SHIPMENT_IMPORT_MAX_DATABASE_ROWS`; `0` removes the limit). A query that returns more
+fails before anything is written, with a message on the Connection: it has almost always
+forgotten its status or date filter and is returning the whole order history.
+
 #### `shipment_items_query`
 
 One `SELECT`, run **once per shipment**, with exactly one parameter available:
@@ -775,6 +781,7 @@ customer order data.
 | *"must be a single SQL statement (remove the extra `;`)"* | Two statements in one field |
 | `SQLSTATE[HY093]: Invalid parameter number` | The query names a parameter that is not supplied — `:cost` in an export query, or a `:name` that is not `:shipment_reference` in an items query |
 | *"Query affected N rows, exceeding the configured limit…"* | `max_affected_rows`. The `WHERE` is not narrowing to one row — check it keys on the order number, not a customer or batch reference. |
+| *"The shipments query returned more than 250,000 rows…"* | The query has no filter on order status or date, so it returns the whole order history. Limit it to open orders. |
 | Same orders imported every run | `mark_exported_query` is off, failing, or does not set the flag the shipments query filters on |
 | Import reports rows but writes no shipments | Rows failing validation. Check the log for *"Validation errors for shipment …"* — usually a missing `address1` or `city` alias. |
 | Shipments import, items do not | The items query returned no `sku`, or `:shipment_reference` did not match the items table's key |
