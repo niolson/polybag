@@ -2,7 +2,7 @@
 
 # Concurrent packers share five php-fpm workers
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -139,3 +139,16 @@ time and fake latency; the 20-worker pool was a temporary compose override.
 - The php-fpm pool size is set on purpose in the image, documented in
   `docs/self-hosting.md`, and holds a stated number of concurrent packers within the
   container's memory.
+
+## Built
+
+- The pool is set in the image: `docker/php-fpm-pool.sh` writes it at container start
+  from `PHP_FPM_MAX_CHILDREN`, default **20**, with spare-server counts that never exceed
+  it. Compose passes the variable from the project's `.env`; changing it takes a
+  recreate of `app`, not a rebuild. A bad value stops the container before it migrates.
+- `docs/self-hosting.md` says what the pool is, what 20 holds (20 people packing at once
+  on two CPUs, measured above) and how to size it against people, memory, CPU and MySQL
+  connections.
+- Option 2 was not pursued. Scans on Pack never wait on a carrier; only shipping does,
+  through Ship's page load and purchase, or Pack's own `ship()` when auto-ship buys.
+  Rate shopping already quotes concurrently, so that time is the carriers' own.

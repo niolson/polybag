@@ -132,9 +132,9 @@ RUN chmod -R o+rX . \
 # entrypoint so they pick up .env values and produce consistent hashes)
 RUN php artisan view:cache
 
-# Copy entrypoint
-COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+# Copy entrypoint and the php-fpm pool sizing it writes at startup
+COPY docker/entrypoint.sh docker/php-fpm-pool.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/php-fpm-pool.sh
 
 EXPOSE 9000
 
