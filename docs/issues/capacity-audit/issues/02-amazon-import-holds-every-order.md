@@ -2,7 +2,7 @@
 
 # The Amazon import holds every order at once
 
-Status: needs-triage
+Status: done
 Category: performance
 Created: 2026-10-24
 
@@ -32,3 +32,63 @@ for that.
 
 - Memory per 1,000 Amazon orders is measured and recorded here.
 - A read of 10,000 orders completes under `SHIPMENT_IMPORT_MEMORY_LIMIT`.
+
+## Measurements
+
+Faked SP-API responses (100 orders to a page, by pagination token), orders of three line
+items each with a recipient, proceeds and fulfillment blocks, about 5 KB of JSON. Run in a
+Pest process with the memory limit lifted so the peaks show; the test process itself holds
+about 80 MB before an import starts, so the import rows below overstate a worker's peak by
+that much against its own baseline of roughly 55 MB. Memory is the growth over the
+baseline.
+
+`AmazonSource::fetchShipments()`:
+
+| Orders | Peak growth | Per 1,000 |
+|---|---|---|
+| 100 | 5.3 MB | 53 MB (includes one-time loading) |
+| 1,000 | 29.8 MB | 29.8 MB |
+| 10,000 | 271.8 MB | 27.2 MB |
+
+About **28 MB per 1,000 orders**: the decoded orders, the mapped rows and `orderCache`
+each hold the same items. 10,000 orders need 272 MB, so a read that size cannot finish
+under `SHIPMENT_IMPORT_MEMORY_LIMIT` (256M) on top of the worker's baseline. Trimming what
+`orderCache` keeps was tried and moved nothing (the items are most of the order); orders
+that Amazon closed are held whole too, but the first measurement had none.
+
+A whole import, `ShipmentImportService` writing the shipments, under the 256M limit:
+
+| Orders offered | Imported this run | Peak (test process) |
+|---|---|---|
+| 1,000 | 1,000 | 111 MB |
+| 5,000 | 5,000 | 221 MB |
+| 3,000, limit 3,000 | 3,000 | 168 MB |
+| 10,000, limit 3,000 | 3,000 | 168 MB |
+
+Live, Amazon's own throttle already bounds a run: `searchOrders` refills one request every
+three minutes with a burst of 20 (see `order-reconciliation/07`), so a run reads about 20
+pages, 2,000 orders, plus one page per three minutes it keeps running. That is why this
+has not failed. It is a property of Amazon's current rate limit, not of this code, and
+nothing here would notice it rising.
+
+## Built
+
+Not the paged-source interface. Amazon's read is not a plain page iterator: it is two
+resumable searches (changes and the daily sweep), each with a stored pagination token,
+a throttled read that stops and records where it got to, a catalog lookup over the whole
+read's ASINs, and shipped and cancelled orders that close Shipments from the same pages.
+Moving that onto `ReadsInPages` would rewrite the resumable read, for a bound Amazon
+already imposes and this change makes explicit. The read already knows how to stop and
+carry on, so it is given a second reason to:
+
+- `SHIPMENT_IMPORT_MAX_AMAZON_ORDERS_PER_RUN` (default 3,000; 0 for none) is the most
+  orders a run reads, open and closed together, counted before the FBA filter, since that
+  is what is held. A search that reaches it stops with its token kept, as when throttled
+  (`continueRead()` returns `limited`), the sweep is left for a later run, and the log says
+  so. The next run reads on from the token, and a read ends as finished, recording how far
+  it read, only when Amazon has no more.
+- 3,000 orders hold about 85 MB, which leaves the worker's 256M limit more than half free.
+  Orders of many more items than three cost more each; lower the limit for such a seller.
+- A search that ends exactly at the limit counts as finished. A historical import
+  (already capped at 1,000 orders) and the sandbox read are unchanged.
+- Not measured against a live seller: no production Amazon account has run this change.

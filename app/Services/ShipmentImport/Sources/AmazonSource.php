@@ -331,14 +331,14 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 continue;
             }
 
-            [$read, $readOrders, $outcome] = $this->continueRead($read, $now);
+            [$read, $readOrders, $outcome] = $this->continueRead($read, $now, $this->ordersPerRunLimit() - count($orders));
 
             foreach ($readOrders as $order) {
                 $orders[(string) ($order['orderId'] ?? '')] ??= $order;
             }
 
-            $throttled = $outcome === 'throttled';
-            $reads[$kind] = $outcome === 'throttled' ? $read : null;
+            $throttled = in_array($outcome, ['throttled', 'limited'], true);
+            $reads[$kind] = $throttled ? $read : null;
 
             if ($outcome !== 'finished') {
                 continue;
@@ -373,6 +373,16 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     }
 
     /**
+     * The most orders one run reads from Amazon, open and closed together.
+     */
+    private function ordersPerRunLimit(): int
+    {
+        $limit = (int) config('shipment-import.behavior.max_amazon_orders_per_run');
+
+        return $limit > 0 ? $limit : PHP_INT_MAX;
+    }
+
+    /**
      * A search not yet sent.
      *
      * @param  array<string, mixed>  $query
@@ -397,14 +407,28 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * throttles. Amazon refuses a token it no longer honors with a 400, and
      * the read is dropped to start over.
      *
+     * Stops early, with the token kept, once it has read `$limit` orders, as it
+     * does when throttled: a run holds every order it reads, so how many one
+     * run takes is what bounds its memory (`capacity-audit/02`).
+     *
      * @param  array<string, mixed>  $read
-     * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>, 2: 'finished'|'throttled'|'dropped'}
+     * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>, 2: 'finished'|'throttled'|'limited'|'dropped'}
      */
-    private function continueRead(array $read, CarbonImmutable $now): array
+    private function continueRead(array $read, CarbonImmutable $now, int $limit): array
     {
         $orders = [];
+        $readCount = 0;
 
         do {
+            if ($readCount >= $limit && $read['token'] !== null) {
+                Log::info('An Amazon order search stopped at this run\'s limit; the next run carries on', [
+                    'data_source_id' => $this->config['_data_source_id'] ?? null,
+                    'orders_read' => $readCount,
+                ]);
+
+                return [$read, $this->withoutFbaOrders($orders), 'limited'];
+            }
+
             $query = $read['query'] + ['maxResultsPerPage' => self::SEARCH_ORDERS_PAGE_SIZE];
 
             if ($read['token'] !== null) {
@@ -431,7 +455,9 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 throw $exception;
             }
 
-            array_push($orders, ...$this->buyerDataFilter()->filter($json['orders'] ?? []));
+            $page = $this->buyerDataFilter()->filter($json['orders'] ?? []);
+            $readCount += count($page);
+            array_push($orders, ...$page);
             $read['token'] = $json['pagination']['nextToken'] ?? null;
             $read['token_at'] = $read['token'] === null ? null : $now->toIso8601String();
         } while ($read['token'] !== null);

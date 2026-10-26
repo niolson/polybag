@@ -51,7 +51,7 @@ As shipped in the `Dockerfile` and `docker-compose.yml`, checked 2026-10-24:
 | # | Workload | Concern | First look |
 |---|---|---|---|
 | [01](issues/01-concurrent-packers-share-five-php-workers.md) | People packing and shipping at once | php-fpm serves 5 requests at a time per instance | Measured; pool now 20 by default, set by `PHP_FPM_MAX_CHILDREN` |
-| [02](issues/02-amazon-import-holds-every-order.md) | Amazon import | Every order and an `orderCache` held at once | Same shape as Shopify; not measured |
+| [02](issues/02-amazon-import-holds-every-order.md) | Amazon import | Every order and an `orderCache` held at once | Measured; a run reads at most 3,000 orders and carries on next run |
 | [03](issues/03-database-import-loads-the-whole-result-set.md) | Database import | `select()` loads the whole result set | Measured; read once to a temporary file and imported 250 rows at a time, with a 250,000-row cap |
 | [04](issues/04-pack-slip-run-renders-in-one-request.md) | Pack slip run, up to 1,000 slips | Every PDF rendered and sent in one web request | Measured; one request per 200-slip job, and the logo declared once per slip view |
 | [05](issues/05-pick-batch-at-its-500-shipment-cap.md) | Pick batch, up to 500 Shipments | Summary PDF rendered in a web request | Measured; 3.5 s and 26 MB at the cap, no change needed |

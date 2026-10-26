@@ -22,6 +22,13 @@ return [
         // A run holds one page of rows plus every row's ID, so this bounds the IDs
         // and catches a query that forgot its status filter. 0 means no limit.
         'max_database_rows' => (int) env('SHIPMENT_IMPORT_MAX_DATABASE_ROWS', 250000),
+
+        // The most orders one run reads from Amazon, open and closed together. A run
+        // holds every order it reads, about 28 KB each for orders of three items, so
+        // this bounds its memory. A read cut short keeps
+        // its pagination token and the next run carries on, as when Amazon throttles it.
+        // 0 means no limit.
+        'max_amazon_orders_per_run' => (int) env('SHIPMENT_IMPORT_MAX_AMAZON_ORDERS_PER_RUN', 3000),
     ],
 
     /*
