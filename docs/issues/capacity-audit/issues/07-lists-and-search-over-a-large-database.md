@@ -68,6 +68,17 @@ because 25,000 matches fill the first page quickly.
 - Dashboard and reports are fine at this size: the dashboard reads `daily_shipping_stats`
   (1,941 rows, rebuilt in 12 s for 800 days).
 
+## Follow-up: Shipment search by prefix
+
+Option 1 below was chosen (2026-10-26). Shipment search, the list's search box and the
+Name column, now matches the start of every searched value (reference, external tracking
+number, name, address, city, email) instead of any part of it, and a migration indexes
+the five columns that were not yet indexed. "Main" no longer finds "123 Main St"; "123"
+does. FULLTEXT was set aside: it matches whole words, which suits addresses badly. The
+long-term answer is a Scout search engine, which this leaves room for. Packages
+(tracking number) and Products (SKU, barcode) already matched by prefix; Product name
+still matches anywhere, since the catalog is small. Not re-measured at 200,000 rows.
+
 ## Options for search, if it needs to scale
 
 1. **Prefix matching for the columns people type exactly** (reference, tracking number,

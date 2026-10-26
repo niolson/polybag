@@ -142,6 +142,18 @@ it('can search products table by name', function (): void {
         ->assertCanNotSeeTableRecords([$noMatch]);
 });
 
+it('matches the start of a Shipment value, not the middle', function (): void {
+    $match = Shipment::factory()->create(['city' => 'Xylophonia', 'email' => 'ada@example.com']);
+
+    Livewire::test(ListShipments::class)
+        ->searchTable('Xylo')
+        ->assertCanSeeTableRecords([$match])
+        ->searchTable('phonia')
+        ->assertCanNotSeeTableRecords([$match])
+        ->searchTable('ada@')
+        ->assertCanSeeTableRecords([$match]);
+});
+
 it('returns empty results for non-matching search', function (): void {
     Shipment::factory()->count(3)->create();
 
