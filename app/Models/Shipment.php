@@ -277,7 +277,7 @@ class Shipment extends Model
     /**
      * @return array<string, mixed>
      */
-    #[SearchUsingPrefix(['shipment_reference', 'external_tracking_number'])]
+    #[SearchUsingPrefix(['shipment_reference', 'external_tracking_number', 'first_name', 'last_name', 'address1', 'city', 'email'])]
     public function toSearchableArray(): array
     {
         return [

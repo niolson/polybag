@@ -390,8 +390,8 @@ class ShipmentResource extends Resource
                     ->label('Name')
                     ->state(fn (Shipment $record): string => trim("{$record->first_name} {$record->last_name}"))
                     ->searchable(query: fn ($query, string $search) => $query
-                        ->where('first_name', 'like', "%{$search}%")
-                        ->orWhere('last_name', 'like', "%{$search}%"))
+                        ->where('first_name', 'like', "{$search}%")
+                        ->orWhere('last_name', 'like', "{$search}%"))
                     ->weight(FontWeight::Medium),
                 Tables\Columns\TextColumn::make('company')
                     ->placeholder('—')

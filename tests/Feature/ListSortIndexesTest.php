@@ -12,3 +12,7 @@ it('indexes the columns the Packages list and the Prepaid Duties report sort by'
     'Packages list' => ['packages', 'created_at'],
     'Prepaid Duties report' => ['package_labels', 'ship_date'],
 ]);
+
+it('indexes the Shipment columns search matches by prefix', function (string $column): void {
+    expect(Schema::hasIndex('shipments', [$column]))->toBeTrue();
+})->with(['first_name', 'last_name', 'address1', 'city', 'email']);
