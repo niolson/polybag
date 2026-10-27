@@ -67,8 +67,8 @@ class ShipmentRowPreparer
 
         $preserveExistingFields = [...$preserveExistingFields, ...$customs['preserve']];
 
-        // Sources that read a per-order shipping reference (e.g. Amazon's
-        // fulfillmentServiceLevel) can supply the source's configured default as
+        // Sources that read a per-order shipping reference (Amazon's
+        // fulfillmentServiceLevel, Shopify's delivery method name) can supply the source's configured default as
         // a fallback for references that have no alias yet. The unmapped
         // reference is still recorded so it surfaces for mapping.
         if ($shippingMethodId === null && filled($data['_shipping_method_fallback'] ?? null)) {

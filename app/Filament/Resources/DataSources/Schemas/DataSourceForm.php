@@ -207,7 +207,7 @@ class DataSourceForm
                         ->options(fn () => ShippingMethod::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
                         ->nullable()
                         ->searchable()
-                        ->helperText('Leave blank to map per-order via channel aliases.')
+                        ->helperText('Used when the shipping option the buyer chose at checkout has no shipping method alias.')
                         ->visible(self::importsOrders(...)),
 
                     LazyOptionsSelect::make('settings.part_number_metafield')
