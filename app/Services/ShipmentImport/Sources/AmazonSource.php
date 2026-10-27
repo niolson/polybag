@@ -6,7 +6,6 @@ use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
-use App\Enums\ShipmentStatus;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
@@ -34,8 +33,6 @@ use Throwable;
 
 class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
 {
-    public const HISTORICAL_IMPORT_MAX_ORDERS = 1000;
-
     /**
      * `fulfillment.fulfilledBy` when Amazon ships the order from its own
      * warehouse (FBA) rather than the seller shipping it (MFN).
@@ -154,28 +151,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         if (empty($this->config['channel_name'])) {
             throw new InvalidArgumentException('Amazon channel name is not configured.');
         }
-
-        if ($this->isHistoricalImport()) {
-            if ($this->readsFromSandbox()) {
-                throw new RuntimeException('Historical Amazon order imports require production mode. Disable sandbox mode in App Settings and try again.');
-            }
-
-            $createdAfter = $this->config['_historical_created_after'] ?? null;
-            $createdBefore = $this->config['_historical_created_before'] ?? null;
-            $maxOrders = (int) ($this->config['_historical_max_orders'] ?? 0);
-
-            if (! is_string($createdAfter) || ! is_string($createdBefore) || strtotime($createdAfter) === false || strtotime($createdBefore) === false) {
-                throw new InvalidArgumentException('Historical Amazon imports require a valid start and end date.');
-            }
-
-            if (strtotime($createdAfter) > strtotime($createdBefore)) {
-                throw new InvalidArgumentException('Historical Amazon import start date must be before the end date.');
-            }
-
-            if ($maxOrders < 1 || $maxOrders > self::HISTORICAL_IMPORT_MAX_ORDERS) {
-                throw new InvalidArgumentException('Historical Amazon imports are limited to 1–'.self::HISTORICAL_IMPORT_MAX_ORDERS.' orders.');
-            }
-        }
     }
 
     public function fetchShipments(): Collection
@@ -204,14 +179,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 'createdAfter' => '2024-12-25T00:00:00Z',
                 'includedData' => 'BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES',
             ], sandbox: true);
-        } elseif ($this->isHistoricalImport()) {
-            $rawOrders = $this->searchOrders([
-                'marketplaceIds' => $marketplaceId,
-                'fulfillmentStatuses' => 'SHIPPED',
-                'createdAfter' => (string) $this->config['_historical_created_after'],
-                'createdBefore' => (string) $this->config['_historical_created_before'],
-                'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES',
-            ], maxOrders: (int) $this->config['_historical_max_orders']);
         } else {
             $rawOrders = $this->searchChangedOrders($marketplaceId);
         }
@@ -219,7 +186,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         // Barcodes and part numbers come from the catalog, not the order, and
         // only for products missing one — a packer scans the barcode, and an EU
         // consumer label is refused without a part number. Every import does
-        // this, not just the historical one: the first live Buy Shipping order
+        // this: the first live Buy Shipping order
         // arrived through the scheduled import with no barcode and had to be
         // packed by hand. Products already complete, or checked recently, are
         // skipped, so a scheduled run over open orders costs a catalog call only
@@ -498,13 +465,12 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * Filtered here rather than in the query: SearchOrders v2026-01-01 was not
      * confirmed to accept a fulfillment-channel parameter, and sending an
      * unrecognized one risks a 400 on every import. Discarding client side
-     * costs a little bandwidth but keeps `maxResultsPerPage` honest, because
-     * the cap counts orders we keep, not orders we fetched.
+     * costs a little bandwidth.
      *
      * @param  array<string, mixed>  $query
      * @return list<array<string, mixed>>
      */
-    private function searchOrders(array $query, bool $sandbox = false, ?int $maxOrders = null): array
+    private function searchOrders(array $query, bool $sandbox = false): array
     {
         $importFbaOrders = (bool) ($this->config['import_fba_orders'] ?? false);
         $skippedFbaOrders = 0;
@@ -515,9 +481,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             $pageQuery = $query;
 
             if (! $sandbox) {
-                $pageQuery['maxResultsPerPage'] = $maxOrders === null
-                    ? self::SEARCH_ORDERS_PAGE_SIZE
-                    : min(self::SEARCH_ORDERS_PAGE_SIZE, $maxOrders - count($rawOrders));
+                $pageQuery['maxResultsPerPage'] = self::SEARCH_ORDERS_PAGE_SIZE;
             }
 
             // Orders API v2026 requires subsequent requests to retain the
@@ -533,12 +497,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             $paginationToken = $sandbox ? null : ($json['pagination']['nextToken'] ?? null);
 
             foreach ($orders as $order) {
-                if ($maxOrders !== null && count($rawOrders) >= $maxOrders) {
-                    $paginationToken = null;
-
-                    break;
-                }
-
                 if (! $importFbaOrders && $this->isFulfilledByAmazon($order)) {
                     $skippedFbaOrders++;
 
@@ -546,10 +504,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 }
 
                 $rawOrders[] = $order;
-            }
-
-            if ($maxOrders !== null && count($rawOrders) >= $maxOrders) {
-                $paginationToken = null;
             }
         } while ($paginationToken !== null);
 
@@ -604,8 +558,8 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * connection has read and where a throttled read stopped. Called only
      * after a complete run, so a failed one reads the same pages again.
      *
-     * A historical or sandbox import searches something else, and neither
-     * closes nor moves anything.
+     * A sandbox import searches something else, and neither closes nor moves
+     * anything.
      *
      * @param  Collection<int, array<string, mixed>>  $shipments
      */
@@ -870,18 +824,8 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         };
         $preserveExistingFields = ['email'];
 
-        if ($this->isHistoricalImport() && ! $recipientAvailable) {
-            $address['addressLine1'] = '[Unavailable from Amazon]';
-            $address['city'] = '[Unavailable]';
-            $preserveExistingFields = array_merge($preserveExistingFields, [
-                'first_name', 'last_name', 'company', 'address1', 'address2', 'city',
-                'state_or_province', 'postal_code', 'country', 'phone', 'phone_e164',
-                'phone_extension',
-            ]);
-        }
-
         // Sum line item values using proceeds breakdowns.
-        $useOrderedQuantity = $this->readsFromSandbox() || $this->isHistoricalImport();
+        $useOrderedQuantity = $this->readsFromSandbox();
         $totalValue = 0;
         foreach ($items as $item) {
             $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
@@ -929,7 +873,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             '_shipping_method_fallback' => $defaultShippingMethod,
             'deliver_by' => Location::localDateFromTimestamp($fulfillment['deliverByWindow']['latestDateTime'] ?? null),
             'ship_by' => Location::localDateFromTimestamp($fulfillment['shipByWindow']['latestDateTime'] ?? null),
-            '_import_status' => $this->isHistoricalImport() ? ShipmentStatus::Shipped->value : ShipmentStatus::Open->value,
             '_preserve_existing_fields' => $preserveExistingFields,
             'metadata' => [
                 'amazon_order_id' => $order['orderId'] ?? null,
@@ -959,7 +902,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     private function mapOrderItemToShipmentItem(array $item): array
     {
         $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
-        $qtyRemaining = ($this->readsFromSandbox() || $this->isHistoricalImport())
+        $qtyRemaining = $this->readsFromSandbox()
             ? $qtyOrdered
             : max(0, $qtyOrdered - (int) ($item['fulfillment']['quantityFulfilled'] ?? 0));
 
@@ -1278,11 +1221,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     private function buyerDataFilter(): AmazonBuyerDataFilter
     {
         return app(AmazonBuyerDataFilter::class);
-    }
-
-    private function isHistoricalImport(): bool
-    {
-        return ($this->config['_historical_import'] ?? false) === true;
     }
 
     /**

@@ -307,26 +307,6 @@ describe('what an import searches for', function (): void {
             ->and($this->dataSource->fresh()->import_reads)->toBeNull();
     });
 
-    it('leaves where it read through alone on a historical import', function (): void {
-        Setting::updateOrCreate(['key' => 'sandbox_mode'], ['value' => '0', 'type' => 'boolean', 'group' => 'general']);
-        app(SettingsService::class)->clearCache();
-        amazonSyncReadThrough($this->dataSource, minutesAgo: 5);
-        $before = $this->dataSource->fresh()->import_updated_through;
-        $shipment = amazonSyncOpenShipment($this->dataSource, 9);
-
-        Saloon::fake([SearchOrders::class => MockResponse::make(['orders' => [amazonSyncOrder(9, 'SHIPPED')]])]);
-
-        ShipmentImportService::forRecord($this->dataSource->fresh(), [
-            '_historical_import' => true,
-            '_historical_created_after' => '2026-01-01T00:00:00Z',
-            '_historical_created_before' => '2026-02-01T00:00:00Z',
-            '_historical_max_orders' => 10,
-        ])->import();
-
-        expect($this->dataSource->fresh()->import_updated_through->equalTo($before))->toBeTrue()
-            ->and(AuditLog::where('auditable_id', $shipment->id)->where('metadata->reason', 'Amazon reported the order shipped')->exists())->toBeFalse();
-    });
-
     it('leaves where it read through alone in sandbox mode', function (): void {
         Setting::updateOrCreate(['key' => 'sandbox_mode'], ['value' => '1', 'type' => 'boolean', 'group' => 'general']);
         app(SettingsService::class)->clearCache();
