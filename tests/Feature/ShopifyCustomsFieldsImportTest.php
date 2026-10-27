@@ -580,10 +580,11 @@ describe('shipping method', function (): void {
             'deliveryMethod' => ['presentedName' => 'Standard', 'maxDeliveryDateTime' => null],
         ]);
 
+        $shipment = Shipment::firstOrFail();
+
         expect($requests[0]['query'])->toContain('presentedName')
-            ->and(Shipment::firstOrFail())
-            ->shipping_method_id->toBe($method->id)
-            ->shipping_method_reference->toBe('Standard');
+            ->and($shipment->shipping_method_id)->toBe($method->id)
+            ->and($shipment->shipping_method_reference)->toBe('Standard');
     });
 
     it('falls back to the connection default and still records the unmapped option', function (): void {
@@ -593,9 +594,10 @@ describe('shipping method', function (): void {
             'deliveryMethod' => ['presentedName' => 'Standard'],
         ]);
 
-        expect(Shipment::firstOrFail())
-            ->shipping_method_id->toBe($default->id)
-            ->shipping_method_reference->toBe('Standard');
+        $shipment = Shipment::firstOrFail();
+
+        expect($shipment->shipping_method_id)->toBe($default->id)
+            ->and($shipment->shipping_method_reference)->toBe('Standard');
     });
 
     it('records the unmapped option with no default configured', function (): void {
@@ -603,9 +605,10 @@ describe('shipping method', function (): void {
             'deliveryMethod' => ['presentedName' => 'Standard'],
         ]);
 
-        expect(Shipment::firstOrFail())
-            ->shipping_method_id->toBeNull()
-            ->shipping_method_reference->toBe('Standard');
+        $shipment = Shipment::firstOrFail();
+
+        expect($shipment->shipping_method_id)->toBeNull()
+            ->and($shipment->shipping_method_reference)->toBe('Standard');
     });
 
     it('uses the connection default when the fulfillment order has no delivery method', function (): void {
