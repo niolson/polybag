@@ -11,6 +11,7 @@ use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
+use App\Models\Setting;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\User;
@@ -188,4 +189,40 @@ it('offers Get Rates Again until the label is bought', function (): void {
         ->set('selectedRateIndex', 0)
         ->call('ship')
         ->assertActionHidden('getRatesAgain');
+});
+
+it('buys nothing while the label printer is reported offline, then buys once it is back', function (): void {
+    $purchases = 0;
+    registerCountingUspsAdapter($purchases);
+    $package = uspsPackage();
+
+    $page = Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->set('selectedRateIndex', 0)
+        ->set('labelPrinterProblem', 'Zebra ZP 450 is offline')
+        ->call('ship')
+        ->assertNotified('Label printer is offline')
+        ->assertNotDispatched('print-label');
+
+    expect($purchases)->toBe(0)
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+
+    $page->set('labelPrinterProblem', null)
+        ->call('ship')
+        ->assertDispatched('print-label');
+
+    expect($purchases)->toBe(1);
+});
+
+it('buys with the label printer offline when printing is suppressed', function (): void {
+    Setting::create(['key' => 'suppress_printing', 'value' => '1', 'type' => 'boolean', 'group' => 'testing']);
+    $purchases = 0;
+    registerCountingUspsAdapter($purchases);
+    $package = uspsPackage();
+
+    Livewire::test(Ship::class, ['package_id' => $package->id])
+        ->set('selectedRateIndex', 0)
+        ->set('labelPrinterProblem', 'Zebra ZP 450 is offline')
+        ->call('ship');
+
+    expect($purchases)->toBe(1);
 });

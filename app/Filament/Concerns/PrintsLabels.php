@@ -15,6 +15,31 @@ use Filament\Notifications\Notification;
 trait PrintsLabels
 {
     /**
+     * What the OS reports wrong with this workstation's label printer, such as
+     * "Zebra ZP 450 is offline", kept current by the page's printer status
+     * listener (QzPrinterStatus.bindLabelPrinter); null when it is fine or does
+     * not report.
+     */
+    public ?string $labelPrinterProblem = null;
+
+    /**
+     * Refuse to buy a label the label printer cannot print. Bought anyway, the
+     * print system would hold it and print it whenever the printer came back,
+     * long after the operator moved on. A printer that reports nothing is never
+     * refused; the print deadline covers it.
+     */
+    protected function refusesForLabelPrinter(): bool
+    {
+        if ($this->labelPrinterProblem === null || app(SettingsService::class)->get('suppress_printing', false)) {
+            return false;
+        }
+
+        $this->notifyError('Label printer is offline', "{$this->labelPrinterProblem}. Reconnect it, then buy the label. No label was bought.");
+
+        return true;
+    }
+
+    /**
      * Reprint a package's stored label.
      *
      * Public because Filament table actions dispatch through the host page, which

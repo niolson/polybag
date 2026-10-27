@@ -10,10 +10,12 @@ class QzSignController extends Controller
      * The complete set of QZ Tray call names this application legitimately signs.
      *
      * This is an exact allow-list — deliberately not prefix-based. It covers only
-     * the printer calls (find/print) and the scale integration's HID device
+     * the printer calls (find/print, plus status listening so a print can tell an
+     * offline printer from a slow one) and the scale integration's HID device
      * lifecycle (list/claim/release/open/close stream). HID data-transfer calls
      * remain excluded here. `print` is further limited to a local, inline job
-     * (isLocalPrintJob()). The one hardware write the app uses is handled as a
+     * (isLocalPrintJob()), and `printers.startListening` to named printers without
+     * spooled job data (isPrinterStatusListener()). The one hardware write the app uses is handled as a
      * parameter-constrained special case in isSignableCall(): the standard Scale
      * Zero feature report for the Mettler Toledo PS60 only. This prevents the
      * endpoint from minting signatures for arbitrary workstation hardware writes.
@@ -24,6 +26,8 @@ class QzSignController extends Controller
     private const ALLOWED_CALLS = [
         'printers.find',
         'print',
+        'printers.getStatus',
+        'printers.stopListening',
         'hid.listDevices',
         'hid.claimDevice',
         'hid.releaseDevice',
@@ -111,6 +115,10 @@ class QzSignController extends Controller
             return $this->isLocalPrintJob($decoded['params'] ?? null);
         }
 
+        if ($call === 'printers.startListening') {
+            return $this->isPrinterStatusListener($decoded['params'] ?? null);
+        }
+
         return in_array($call, self::ALLOWED_CALLS, true);
     }
 
@@ -137,6 +145,33 @@ class QzSignController extends Controller
             }
 
             if (! is_array($item) || ! in_array($item['flavor'] ?? null, ['base64', 'plain'], true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Allow status listening on named printers only. On Windows the `jobData`
+     * option returns the raw spooled content of every job sent to the printer,
+     * including other applications' jobs, so any option beyond the printer
+     * names is refused.
+     */
+    private function isPrinterStatusListener(mixed $params): bool
+    {
+        if (! is_array($params) || array_keys($params) !== ['printerNames']) {
+            return false;
+        }
+
+        $printerNames = $params['printerNames'];
+
+        if (! is_array($printerNames) || $printerNames === [] || ! array_is_list($printerNames)) {
+            return false;
+        }
+
+        foreach ($printerNames as $printerName) {
+            if (! is_string($printerName) || $printerName === '') {
                 return false;
             }
         }

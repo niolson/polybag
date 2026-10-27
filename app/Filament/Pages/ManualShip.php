@@ -220,6 +220,10 @@ class ManualShip extends Page implements HasForms
             }
 
             if ($this->autoShipEnabled) {
+                if ($this->refusesForLabelPrinter()) {
+                    return;
+                }
+
                 $this->autoShip($data);
 
                 return;
