@@ -29,6 +29,7 @@ use App\Enums\ServiceCapability;
 use App\Enums\TaxRegistrationRegime;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierException;
+use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Http\Integrations\Fedex\FedexConnector;
 use App\Http\Integrations\Fedex\FedexRegistrationProxyConnector;
 use App\Http\Integrations\Fedex\Requests\CancelShipment as CancelShipmentRequest;
@@ -391,7 +392,12 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                 'body' => $response->json(),
             ]);
 
-            return collect();
+            // Said beside the rates, so a fixable cause such as a ship-from
+            // location with no phone number is not just FedEx going missing.
+            throw new CarrierRateFetchException(
+                Carrier::FEDEX,
+                reason: 'FedEx could not rate this package: '.FedexErrorMessage::from(is_array($errors) ? $errors : []),
+            );
         }
 
         Log::channel('fedex-validation')->debug('RATE RESPONSE', [
@@ -784,8 +790,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
 
             if (! $response->successful()) {
                 $errors = $responseData['errors'] ?? [];
-                $errorMessage = ! empty($errors) ? ($errors[0]['message'] ?? 'Unknown FedEx error') : 'FedEx API error';
-                $errorMessage = $this->scrubCustomsIds($errorMessage, $request);
+                $errorMessage = $this->scrubCustomsIds(FedexErrorMessage::from(is_array($errors) ? $errors : []), $request);
                 Log::channel('fedex-validation')->error('FedEx createShipment API error', [
                     'status' => $response->status(),
                     'errors' => $this->scrubCustomsIds($errors, $request),

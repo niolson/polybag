@@ -40,6 +40,7 @@ use App\Models\SourceServiceMapping;
 use App\Models\SpecialService;
 use App\Services\Carriers\AmazonBuyShippingAdapter;
 use App\Services\Carriers\CarrierRegistry;
+use App\Services\Carriers\FedexAdapter;
 use App\Services\Carriers\UspsAdapter;
 use App\Services\SettingsService;
 use App\Services\ShippingRateService;
@@ -1869,6 +1870,124 @@ it('parses concurrent rate responses from an async source that is not a carrier'
         ->and($rates->pluck('serviceCode')->all())->each->toBe('ASYNC_PARSED')
         ->and($rates->pluck('carrier')->sort()->values()->all())->toBe(['Amazon', 'USPS'])
         ->and($rates[0]->price)->toBe(12.75);
+});
+
+/**
+ * FedEx's reply to a rate request from a Location with no phone number.
+ *
+ * @return array<string, mixed>
+ */
+function fedexRateNullShipperPhoneReply(): array
+{
+    return ['errors' => [[
+        'code' => 'INVALID.INPUT.EXCEPTION',
+        'message' => "Validation failed for object='rateRequestInputVO'. Error count: 1",
+        'parameterList' => [[
+            'key' => 'NotNull.rateRequestInputVO.requestedShipment.shipper.contact.phoneNumber',
+            'value' => 'phoneNumber cannot be null',
+        ]],
+    ]]];
+}
+
+it('tells the packer why FedEx failed to rate, beside the rates', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        ShippingOptions::class => fakeUspsGroundAdvantageRate(),
+        FedexRates::class => MockResponse::make(fedexRateNullShipperPhoneReply(), 422),
+    ]);
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $shippingMethod->carrierServices()->attach([
+        CarrierService::factory()->fedexGround()->for($this->fedexCarrier)->create()->id,
+        CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create()->id,
+    ]);
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    $package = Package::factory()->for($shipment)->create();
+
+    $service = app(ShippingRateService::class);
+    $rates = $service->getShippingRates($package->id);
+
+    expect($rates->pluck('carrier')->all())->toBe(['USPS'])
+        ->and($service->getExclusions())->toBe([[
+            'carrier' => 'FedEx',
+            'source' => 'FedEx',
+            'reason' => 'FedEx could not rate this package: The ship-from location has no phone number. Add one under Locations.',
+        ]])
+        // Said once, with its reason, rather than also as a seller that answered nothing.
+        ->and($service->getUnratedSources())->toBe([]);
+});
+
+/**
+ * Answers every concurrent send as Saloon does a 4xx: a rejected promise
+ * carrying the reply.
+ */
+class RejectingGuzzleSender extends GuzzleSender
+{
+    /**
+     * @param  array<string, mixed>  $body
+     */
+    public function __construct(private readonly array $body, private readonly int $status = 422)
+    {
+        parent::__construct();
+    }
+
+    public function sendAsync(PendingRequest $pendingRequest): PromiseInterface
+    {
+        $response = Response::fromPsrResponse(
+            new Psr7Response($this->status, ['Content-Type' => 'application/json'], json_encode($this->body)),
+            $pendingRequest,
+            $pendingRequest->createPsrRequest(),
+        );
+
+        return Create::rejectionFor($response->toException());
+    }
+}
+
+it('tells the packer why FedEx failed to rate on the concurrent path', function (): void {
+    // Answered by a rejecting Guzzle sender, which Saloon's faking would bypass.
+    TestCase::allowStraySaloonRequests();
+
+    $registry = app(CarrierRegistry::class);
+
+    // The real FedEx adapter parses the reply; only the send is stubbed.
+    $registry->registerInstance('FedEx', new class extends FedexAdapter
+    {
+        public function prepareRateRequest(RateRequest $request, array $serviceCodes): PreparedRateRequest
+        {
+            return new PreparedRateRequest((new StubRateConnector)->createPendingRequest(new StubRateRequest), 'FedEx');
+        }
+    });
+
+    // A second source, so the service takes the concurrent path.
+    $usps = Mockery::mock(DirectCarrierAdapter::class);
+    $usps->shouldReceive('isConfigured')->andReturnTrue();
+    $usps->shouldReceive('prepareRateRequest')->once()->andReturn(new PreparedRateRequest(
+        (new StubRateConnector)->createPendingRequest(new StubRateRequest),
+        'USPS',
+    ));
+    $usps->shouldReceive('parseRateResponse')->once()->andReturn(collect());
+    $usps->shouldNotReceive('getRates');
+    $registry->registerInstance('USPS', $usps);
+    $registry->registerInstance('UPS', new AsyncOfferSourceStub('UPS', configured: false));
+
+    app()->instance(GuzzleSender::class, new RejectingGuzzleSender(fedexRateNullShipperPhoneReply()));
+
+    $shippingMethod = ShippingMethod::factory()->create();
+    $shippingMethod->carrierServices()->attach([
+        CarrierService::factory()->fedexGround()->for($this->fedexCarrier)->create()->id,
+        CarrierService::factory()->uspsGroundAdvantage()->for($this->uspsCarrier)->create()->id,
+    ]);
+    $shipment = Shipment::factory()->for($shippingMethod)->create(['postal_code' => '90210']);
+    $package = Package::factory()->for($shipment)->create();
+
+    $service = app(ShippingRateService::class);
+    $service->getShippingRates($package->id);
+
+    expect(collect($service->getExclusions())->firstWhere('source', 'FedEx'))->toBe([
+        'carrier' => 'FedEx',
+        'source' => 'FedEx',
+        'reason' => 'FedEx could not rate this package: The ship-from location has no phone number. Add one under Locations.',
+    ]);
 });
 
 /**

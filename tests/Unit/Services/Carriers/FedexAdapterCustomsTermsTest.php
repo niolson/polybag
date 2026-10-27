@@ -520,6 +520,33 @@ it('keeps the tax IDs out of the log when a 5xx echoes them', function (): void 
         ->and($logged)->not->toContain('123456789');
 });
 
+it('scrubs a tax ID FedEx echoes back in a rejected field', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make([
+            'errors' => [[
+                'code' => 'INVALID.INPUT.EXCEPTION',
+                'message' => "Validation failed for object='shipShipmentInputVO'. Error count: 1",
+                'parameterList' => [[
+                    'key' => 'Pattern.shipShipmentInputVO.requestedShipment.recipients[0].tins[0].number',
+                    'value' => '98765432100 is not a valid tax ID',
+                ]],
+            ]],
+        ], 422),
+    ]);
+
+    $response = $this->adapter->createShipment(fedexCustomsShipRequest(
+        fedexCustomsBrazil(),
+        fedexCustomsTerms('BR', DutiesTerms::Ddu),
+        new RecipientTaxId(RecipientTaxIdType::Cpf, '98765432100'),
+        'X20261008123456',
+        '123456789',
+    ));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe('[REDACTED] is not a valid tax ID (recipients[0].tins[0].number).');
+});
+
 it('scrubs whole tokens only, so a number inside a longer identifier survives in a failure message', function (): void {
     Saloon::fake([
         '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),

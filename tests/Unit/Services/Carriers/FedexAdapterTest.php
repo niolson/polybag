@@ -9,6 +9,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\CarrierPackaging;
 use App\Enums\LabelReferenceSource;
 use App\Enums\TrackingStatus;
+use App\Exceptions\Carriers\CarrierRateFetchException;
 use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
@@ -761,6 +762,58 @@ it('returns empty collection when API returns no rates', function (): void {
     $rates = $this->adapter->getRates($request, ['FEDEX_GROUND']);
 
     expect($rates)->toHaveCount(0);
+});
+
+/**
+ * FedEx's reply to a label request from a Location with no phone number.
+ *
+ * @return array<string, mixed>
+ */
+function fedexNullShipperPhoneReply(string $object = 'shipShipmentInputVO'): array
+{
+    return ['errors' => [[
+        'code' => 'INVALID.INPUT.EXCEPTION',
+        'message' => "Validation failed for object='{$object}'. Error count: 1",
+        'parameterList' => [[
+            'key' => "NotNull.{$object}.requestedShipment.shipper.contact.phoneNumber",
+            'value' => 'phoneNumber cannot be null',
+        ]],
+    ]]];
+}
+
+it('says which field FedEx rejected when a label purchase fails', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        CreateShipment::class => MockResponse::make(fedexNullShipperPhoneReply(), 422),
+    ]);
+
+    $response = $this->adapter->createShipment(new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: new AddressData(firstName: 'Jane', lastName: 'Doe', streetAddress: '1 Main St', city: 'Beverly Hills', stateOrProvince: 'CA', postalCode: '90210'),
+        packageData: new PackageData(weight: 2.0, length: 10, width: 8, height: 6),
+        selectedRate: new RateResponse(carrier: 'FedEx', serviceCode: 'FEDEX_GROUND', serviceName: 'FedEx Ground', price: 9.50, metadata: ['serviceType' => 'FEDEX_GROUND']),
+    ));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toBe('The ship-from location has no phone number. Add one under Locations.');
+});
+
+it('throws the field FedEx rejected when a rate request fails', function (): void {
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        Rates::class => MockResponse::make(fedexNullShipperPhoneReply('rateRequestInputVO'), 422),
+    ]);
+
+    $request = new RateRequest(
+        originPostalCode: '98072',
+        destinationPostalCode: '90210',
+        packages: [new PackageData(weight: 5.0, length: 12, width: 10, height: 8)],
+    );
+
+    expect(fn () => $this->adapter->getRates($request, ['FEDEX_GROUND']))->toThrow(
+        CarrierRateFetchException::class,
+        'FedEx could not rate this package: The ship-from location has no phone number. Add one under Locations.',
+    );
 });
 
 it('stands in for international rates the FedEx sandbox cannot quote', function (): void {
