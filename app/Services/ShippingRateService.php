@@ -50,6 +50,8 @@ use Carbon\CarbonImmutable;
 use Closure;
 use GuzzleHttp\Promise\Utils as PromiseUtils;
 use Illuminate\Support\Collection;
+use Saloon\Exceptions\Request\RequestException;
+use Saloon\Http\Response;
 use Saloon\Http\Senders\GuzzleSender;
 
 /**
@@ -956,13 +958,7 @@ class ShippingRateService
                     'error' => $e->getMessage(),
                 ]);
             } catch (CarrierRateFetchException $e) {
-                $loggedException = $e->getPrevious() ?? $e;
-
-                logger()->error("ShippingRateService: {$sourceName} rate fetch failed", [
-                    'carrier' => $sourceName,
-                    'exception' => $loggedException::class,
-                    'error' => $e->getMessage(),
-                ]);
+                $this->recordRateFetchFailure($task, $e);
             } catch (\Exception $e) {
                 logger()->error("ShippingRateService: {$sourceName} prepare error", [
                     'carrier' => $sourceName,
@@ -991,13 +987,7 @@ class ShippingRateService
                 } catch (CarrierUnavailableException $e) {
                     $this->recordUnavailable($meta['task'], $e);
                 } catch (CarrierRateFetchException $e) {
-                    $loggedException = $e->getPrevious() ?? $e;
-
-                    logger()->error("ShippingRateService: {$sourceName} rate fetch failed", [
-                        'carrier' => $sourceName,
-                        'exception' => $loggedException::class,
-                        'error' => $e->getMessage(),
-                    ]);
+                    $this->recordRateFetchFailure($meta['task'], $e);
                 }
             }
 
@@ -1023,10 +1013,19 @@ class ShippingRateService
             $meta = $taskMeta[$key];
             $sourceName = $meta['task']['source'];
 
-            if ($result['state'] === 'fulfilled') {
+            // Saloon rejects an async send that came back 4xx or 5xx, but the
+            // reply is still the carrier's answer: parse it as a synchronous
+            // getRates() would, so its reason reaches the packer.
+            $response = match (true) {
+                $result['state'] === 'fulfilled' => $result['value'],
+                $result['reason'] instanceof RequestException => $result['reason']->getResponse(),
+                default => null,
+            };
+
+            if ($response instanceof Response) {
                 try {
                     $rates = $meta['adapter']->parseRateResponse(
-                        $result['value'],
+                        $response,
                         $meta['rateRequest'],
                         $meta['serviceCodes'],
                     );
@@ -1039,6 +1038,8 @@ class ShippingRateService
                     $ratesByTask[$key] = $rates;
                 } catch (CarrierUnavailableException $e) {
                     $this->recordUnavailable($meta['task'], $e);
+                } catch (CarrierRateFetchException $e) {
+                    $this->recordRateFetchFailure($meta['task'], $e);
                 } catch (\Exception $e) {
                     logger()->error("ShippingRateService: {$sourceName} parse error", [
                         'carrier' => $sourceName,
@@ -1071,6 +1072,26 @@ class ShippingRateService
         logger()->warning("ShippingRateService: {$task['source']} is unavailable", [
             'carrier' => $task['source'],
             'reason' => $e->getMessage(),
+        ]);
+    }
+
+    /**
+     * A source whose rate request failed. The packer is told why beside the
+     * rates, in the carrier's words when the adapter could read them, rather
+     * than the source silently going missing.
+     *
+     * @param  array{key: string, source: string, label: string}  $task
+     */
+    private function recordRateFetchFailure(array $task, CarrierRateFetchException $e): void
+    {
+        $this->exclude($task, $e->getMessage());
+
+        $loggedException = $e->getPrevious() ?? $e;
+
+        logger()->error("ShippingRateService: {$task['source']} rate fetch failed", [
+            'carrier' => $task['source'],
+            'exception' => $loggedException::class,
+            'error' => $e->getMessage(),
         ]);
     }
 
