@@ -10,6 +10,8 @@ use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
+use App\Models\ShippingMethodAlias;
 use App\Services\ClientContext;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -566,5 +568,53 @@ describe('deliver by', function (): void {
 
         importCustomsFieldsFulfillmentOrder($dataSource, customsFieldsFulfillmentOrder() + ['deliveryMethod' => null]);
         expect(Shipment::firstOrFail()->deliver_by)->toBeNull();
+    });
+});
+
+describe('shipping method', function (): void {
+    it('maps the shipping option the buyer chose to a shipping method alias', function (): void {
+        $method = ShippingMethod::factory()->create(['name' => 'Ground']);
+        ShippingMethodAlias::create(['reference' => 'Standard', 'shipping_method_id' => $method->id]);
+
+        $requests = importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => ['presentedName' => 'Standard', 'maxDeliveryDateTime' => null],
+        ]);
+
+        expect($requests[0]['query'])->toContain('presentedName')
+            ->and(Shipment::firstOrFail())
+            ->shipping_method_id->toBe($method->id)
+            ->shipping_method_reference->toBe('Standard');
+    });
+
+    it('falls back to the connection default and still records the unmapped option', function (): void {
+        $default = ShippingMethod::factory()->create(['name' => 'Default Ground']);
+
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(['shipping_method' => (string) $default->id]), customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => ['presentedName' => 'Standard'],
+        ]);
+
+        expect(Shipment::firstOrFail())
+            ->shipping_method_id->toBe($default->id)
+            ->shipping_method_reference->toBe('Standard');
+    });
+
+    it('records the unmapped option with no default configured', function (): void {
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(), customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => ['presentedName' => 'Standard'],
+        ]);
+
+        expect(Shipment::firstOrFail())
+            ->shipping_method_id->toBeNull()
+            ->shipping_method_reference->toBe('Standard');
+    });
+
+    it('uses the connection default when the fulfillment order has no delivery method', function (): void {
+        $default = ShippingMethod::factory()->create(['name' => 'Default Ground']);
+
+        importCustomsFieldsFulfillmentOrder(customsFieldsShopifySource(['shipping_method' => (string) $default->id]), customsFieldsFulfillmentOrder() + [
+            'deliveryMethod' => null,
+        ]);
+
+        expect(Shipment::firstOrFail()->shipping_method_id)->toBe($default->id);
     });
 });

@@ -173,7 +173,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     private const IMPORTED_FULFILLMENT_ORDER_FRAGMENT = <<<'GRAPHQL'
         fragment ImportedFulfillmentOrder on FulfillmentOrder {
           id status fulfillBy
-          deliveryMethod { maxDeliveryDateTime }
+          deliveryMethod { presentedName maxDeliveryDateTime }
           order {
             id name email
             shippingAddress { provinceCode zip }
@@ -1188,6 +1188,9 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $value = $lineItems->sum(fn (array $item): float => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0)
             * (int) ($item['remainingQuantity'] ?? 0));
         $identity = $this->identityFor($fulfillmentOrder);
+        // The shipping option the buyer chose at checkout, as it was shown to them ("Standard").
+        $presentedShippingMethod = data_get($fulfillmentOrder, 'deliveryMethod.presentedName');
+        $defaultShippingMethod = $this->config['shipping_method'] ?? null;
 
         return [
             ...$this->customsFields($order),
@@ -1206,7 +1209,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'email' => $order['email'] ?? null,
             'value' => round($value, 2),
             'channel_id' => $this->config['channel_name'] ?? 'Shopify',
-            'shipping_method_id' => $this->config['shipping_method'] ?? null,
+            'shipping_method_id' => filled($presentedShippingMethod) ? $presentedShippingMethod : $defaultShippingMethod,
+            '_shipping_method_fallback' => $defaultShippingMethod,
             // Copied from the rate the buyer chose: set by carrier-calculated or app rates, null for merchant-defined ones.
             'deliver_by' => Location::localDateFromTimestamp(data_get($fulfillmentOrder, 'deliveryMethod.maxDeliveryDateTime')),
             // Unset unless a merchant or an app set it on the fulfillment order.
