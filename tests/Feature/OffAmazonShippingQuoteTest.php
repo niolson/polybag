@@ -432,7 +432,7 @@ it('records nothing about the connection from a sandbox quote, which answers for
 });
 
 it('still rates an Amazon order on its own connection as AMAZON, whatever is scoped', function (): void {
-    $origin = DataSource::factory()->unassigned()->amazon()->create([
+    $origin = DataSource::factory()->unassigned()->amazon()->sellingPostage()->create([
         'secret_settings' => ['refresh_token' => 'external-refresh-token'],
     ]);
     $package = externalPackage($origin, asksBuyShipping: true);

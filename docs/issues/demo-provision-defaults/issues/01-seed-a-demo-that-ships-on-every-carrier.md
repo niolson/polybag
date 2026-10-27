@@ -101,3 +101,6 @@ alone, as `firstOrCreate` does now.
   Shipping on the connection's own orders is automatable if imports are turned on.
 - Location: Woodinville City Hall, `17301 133rd Ave NE, Woodinville, WA 98072`, phone
   `(425) 555-0100`, `America/Los_Angeles`.
+- **2026-10-27** — The postage setting is now a boolean, `sells_postage` (ADR-0006 decision 6,
+  2026-10-26 amendment). `provisionAmazonShipping()` sets it to `true`, which is what
+  `PackerAndAutomation` became.

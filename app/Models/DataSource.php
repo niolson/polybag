@@ -3,7 +3,6 @@
 namespace App\Models;
 
 use App\Enums\OffAmazonShippingStatus;
-use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\DemoLifetime;
@@ -36,7 +35,7 @@ class DataSource extends Model
         'active',
         'import_enabled',
         'offers_off_amazon_shipping',
-        'postage_setting',
+        'sells_postage',
         'off_amazon_shipping_status',
         'off_amazon_shipping_checked_at',
         'global_export',
@@ -53,7 +52,7 @@ class DataSource extends Model
         'active' => 'boolean',
         'import_enabled' => 'boolean',
         'offers_off_amazon_shipping' => 'boolean',
-        'postage_setting' => PostageSetting::class,
+        'sells_postage' => 'boolean',
         'off_amazon_shipping_status' => OffAmazonShippingStatus::class,
         'off_amazon_shipping_checked_at' => 'datetime',
         'import_updated_through' => 'datetime',
@@ -69,10 +68,6 @@ class DataSource extends Model
 
     protected static function booted(): void
     {
-        static::creating(function (DataSource $source): void {
-            $source->postage_setting ??= PostageSetting::defaultFor($source->source_type);
-        });
-
         static::saved(function (DataSource $source): void {
             if ($source->wasChanged('client_id') && $source->client_id !== null) {
                 $source->dropScopesOutsideClient();
@@ -137,14 +132,26 @@ class DataSource extends Model
     }
 
     /**
-     * This connection's consent to sell channel postage — ADR-0006 decision 6.
+     * This connection's consent to sell channel postage: Shopify's blind
+     * purchase, and Amazon Buy Shipping for its own Amazon orders (ADR-0006
+     * decision 6). A connection that does not sell is not asked. What
+     * automation may buy from one that does is the shipping method's
+     * allowance.
      *
      * Read here rather than off the column, so a driver that sells no postage
-     * and a row that somehow has no value both answer *does not sell*.
+     * always answers no.
      */
-    public function postageSetting(): PostageSetting
+    public function sellsPostage(): bool
     {
-        return $this->postage_setting ?? PostageSetting::DoesNotSell;
+        return self::driverSellsPostage($this->source_type) && $this->sells_postage;
+    }
+
+    /**
+     * Whether connections of this driver can sell channel postage at all.
+     */
+    public static function driverSellsPostage(?string $sourceType): bool
+    {
+        return in_array($sourceType, [ShopifySource::class, AmazonSource::class], true);
     }
 
     public function secret(string $key): mixed

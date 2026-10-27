@@ -79,9 +79,9 @@ Label is bought, by a person or by automation. Human selection does not otherwis
 _Avoid_: Approval, service enabled, service active
 
 **Postage setting**:
-A connection's consent to sell channel postage: *does not sell*, *packer only*, or *packer and
-automation*. *Packer only* keeps its postage off every unattended path, whatever the
-shipping method allows.
+A connection's consent to sell channel postage: *sells postage*, on or off. A connection that
+does not sell is not asked. What automation buys from one that does is the shipping method's
+allowance.
 
 **Label**:
 One purchased instance of *outbound* postage for a Package: its tracking number, cost, and
@@ -208,7 +208,7 @@ Amazon Buy Shipping, Shopify Shipping. Recorded as such, never guessed as DDP or
 > **Domain expert:** "Not automatically. It is an observed service, and a packer can still pick it. A carrier row only appears when someone decides to author one."
 >
 > **Dev:** "Once we map that service, can batch shipping buy it?"
-> **Domain expert:** "If the shipment's shipping method lists the service it is mapped to, yes — the method is what allows unattended spend. A method whose Amazon Buy Shipping row allows *any service* would have bought it unmapped too, unless the connection sells postage to a packer only."
+> **Domain expert:** "If the shipment's shipping method lists the service it is mapped to, yes — the method is what allows unattended spend. A method whose Amazon Buy Shipping row allows *any service* would have bought it unmapped too."
 
 ## Flagged ambiguities
 

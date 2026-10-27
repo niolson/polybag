@@ -10,7 +10,6 @@ use App\Enums\AmazonChannelType;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
@@ -293,6 +292,7 @@ function amazonBuyShippingSource(): DataSource
 {
     return DataSource::factory()->create([
         'source_type' => AmazonSource::class,
+        'sells_postage' => true,
         'name' => 'Amazon Buy Shipping',
         'active' => true,
         'settings' => [
@@ -1696,14 +1696,14 @@ it('refuses an offer quoted before its connection was set not to sell postage', 
 
     $rate = amazonAdapter()->getRates(RateRequest::fromPackage($this->package), [])->first();
 
-    $this->source->update(['postage_setting' => PostageSetting::DoesNotSell]);
+    $this->source->update(['sells_postage' => false]);
 
     $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package->fresh(), new PackageShippingRequest(
         selectedRate: $rate,
     ));
 
     expect($result->success)->toBeFalse()
-        ->and($result->message)->toContain('is set not to sell postage')
+        ->and($result->message)->toContain('does not sell postage')
         ->and($this->package->fresh()->status)->toBe(PackageStatus::Unshipped)
         ->and(ShippingOffer::where('public_id', $rate->offerId)->value('purchase_failed_at'))->not->toBeNull();
 

@@ -573,7 +573,7 @@ describe('quoting', function (): void {
     it('quotes Amazon Buy Shipping with no date', function (): void {
         $method = ShippingMethod::factory()->create();
         ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
-        $origin = DataSource::factory()->amazon()->create(['active' => true]);
+        $origin = DataSource::factory()->amazon()->sellingPostage()->create(['active' => true]);
 
         $requests = [];
         app(CarrierRegistry::class)->registerInstance(AmazonBuyShippingAdapter::SOURCE_NAME, recordingAmazonAdapter($requests));

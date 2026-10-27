@@ -1,7 +1,6 @@
 <?php
 
 use App\Console\Commands\DemoProvision;
-use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -175,7 +174,7 @@ it('lets automation buy on the demo Amazon connection, filed under the Amazon ch
 
     $connection = DataSource::query()->where('source_type', AmazonSource::class)->sole();
 
-    expect($connection->postage_setting)->toBe(PostageSetting::PackerAndAutomation)
+    expect($connection->sells_postage)->toBeTrue()
         ->and($connection->settings['channel_name'])->toBe(Channel::where('name', StoreChannelSeeder::AMAZON)->value('id'));
 });
 

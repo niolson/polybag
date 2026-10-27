@@ -3,7 +3,6 @@
 namespace App\Filament\Pages;
 
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Filament\Concerns\NotifiesUser;
 use App\Models\Carrier;
@@ -155,7 +154,7 @@ class EndOfDay extends Page
             ->where('active', true)
             ->where('source_type', ShopifySource::class)
             ->get()
-            ->filter(fn (DataSource $source): bool => $source->postageSetting() !== PostageSetting::DoesNotSell)
+            ->filter(fn (DataSource $source): bool => $source->sellsPostage())
             ->map(fn (DataSource $source): ?int => $source->shipDateCarrier()?->id)
             ->filter()
             ->all();

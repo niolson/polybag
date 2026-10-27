@@ -3,7 +3,6 @@
 use App\DataTransferObjects\QueryPreviewResult;
 use App\Enums\AmazonMarketplace;
 use App\Enums\AuditAction;
-use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Resources\DataSources\Pages\CreateDataSource;
@@ -105,33 +104,33 @@ it('shows client and global export table columns in multi-client mode', function
         ->assertTableColumnVisible('global_export');
 });
 
-// ── Postage setting (carrier-catalog-reset/10) ───────────────────────────────
+// ── Postage (carrier-catalog-reset/10) ─────────────────────────────────────────
 
-it('offers the postage setting on Shopify and Amazon connections only, with each driver\'s default', function (): void {
+it('offers postage on Shopify and Amazon connections only, off by default', function (): void {
     $this->actingAs($this->admin);
 
     Livewire::test(CreateDataSource::class)
         ->fillForm(['source_type' => ShopifySource::class])
-        ->assertFormFieldVisible('postage_setting')
-        ->assertSchemaStateSet(['postage_setting' => PostageSetting::DoesNotSell])
+        ->assertFormFieldVisible('sells_postage')
+        ->assertSchemaStateSet(['sells_postage' => false])
         ->fillForm(['source_type' => AmazonSource::class])
-        ->assertFormFieldVisible('postage_setting')
-        ->assertSchemaStateSet(['postage_setting' => PostageSetting::PackerOnly])
+        ->assertFormFieldVisible('sells_postage')
+        ->assertSchemaStateSet(['sells_postage' => false])
         ->fillForm(['source_type' => DatabaseSource::class])
-        ->assertFormFieldHidden('postage_setting');
+        ->assertFormFieldHidden('sells_postage');
 });
 
-it('saves a connection\'s postage setting', function (): void {
+it('saves whether a connection sells postage', function (): void {
     $this->actingAs($this->admin);
     $connection = DataSource::factory()->shopify()->importDisabled()->create();
 
     Livewire::test(EditDataSource::class, ['record' => $connection->id])
-        ->assertSchemaStateSet(['postage_setting' => PostageSetting::DoesNotSell])
-        ->fillForm(['postage_setting' => PostageSetting::PackerOnly->value])
+        ->assertSchemaStateSet(['sells_postage' => false])
+        ->fillForm(['sells_postage' => true])
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect($connection->refresh()->postage_setting)->toBe(PostageSetting::PackerOnly);
+    expect($connection->refresh()->sells_postage)->toBeTrue();
 });
 
 // ── Manual import trigger ─────────────────────────────────────────────────────

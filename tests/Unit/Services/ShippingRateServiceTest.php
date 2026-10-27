@@ -1853,7 +1853,7 @@ it('parses concurrent rate responses from an async source that is not a carrier'
     ])->id);
     ShippingMethodPostageSource::factory()->amazon()->for($shippingMethod)->create();
 
-    $amazon = DataSource::factory()->amazon()->create(['active' => true]);
+    $amazon = DataSource::factory()->amazon()->sellingPostage()->create(['active' => true]);
     $shipment = Shipment::factory()->create([
         'shipping_method_id' => $shippingMethod->id,
         'postal_code' => '90210',

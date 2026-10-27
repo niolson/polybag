@@ -16,7 +16,6 @@ use App\Enums\CustomsDocumentDelivery;
 use App\Enums\CustomsTermsOrigin;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Enums\ShippingRuleAction;
@@ -340,7 +339,6 @@ it('does not auto ship an Amazon offer into a destination the source decides ter
         ->and($result->title)->toBe('Source Decides Duties Terms')
         ->and($result->message)->toContain('MockCarrier Ground')
         ->and($result->message)->toContain($name)
-        ->and($result->message)->not->toContain('packer only')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $adapter->shouldNotHaveReceived('createShipment');
@@ -415,7 +413,6 @@ it('holds a Shopify blind purchase into the EU that a rule selects, naming the d
         ->and($result->title)->toBe('Source Decides Duties Terms')
         ->and($result->message)->toContain('Shopify Shipping')
         ->and($result->message)->toContain('Germany')
-        ->and($result->message)->not->toContain('packer only')
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 
     $source->shouldNotHaveReceived('createShipment');
@@ -442,19 +439,7 @@ it('holds the EU Shopify purchase in batch ship, with the destination as the rea
     $item = sdBatchShip($package);
 
     expect($item->status)->toBe(LabelBatchItemStatus::Failed)
-        ->and($item->error_message)->toContain('decides the duties terms')
-        ->and($item->error_message)->not->toContain('packer only');
-});
-
-it('reports the postage setting, not the destination, when the connection already sells to packers only', function (): void {
-    $package = sdShopifyPackage('DE');
-    setPostageSetting($package, PostageSetting::PackerOnly);
-    sdRegisterShopify();
-
-    $result = sdAutoShip($this->user, $package);
-
-    expect($result->requiresAttendedSelection)->toBeTrue()
-        ->and($result->title)->toBe('Connection Sells to Packers Only');
+        ->and($item->error_message)->toContain('decides the duties terms');
 });
 
 it('still buys the Shopify purchase to a domestic destination, by rule and as the sole choice', function (bool $byRule): void {
@@ -541,7 +526,6 @@ it('buys a direct rate on the same EU package while a Shopify blind purchase a r
         'package_id' => $package->id,
         'destination' => 'DE',
         'held_sources' => ['Shopify'],
-        'held_for' => 'source_decided_terms',
     ]]);
 });
 
@@ -637,14 +621,13 @@ it('says which customs setting would let a direct rate be bought, beside a held 
         ->and($result->message)->toContain('Choose EU duties terms');
 });
 
-it('says which customs setting would let a direct rate be bought, beside a packer-only connection', function (): void {
+it('says which customs setting would let a direct rate be bought, beside a held Shopify purchase', function (): void {
     $package = sdShopifyPackage('DE');
-    setPostageSetting($package, PostageSetting::PackerOnly);
     sdRegisterShopify();
 
     $result = sdAutoShip($this->user, $package);
 
-    expect($result->title)->toBe('Connection Sells to Packers Only')
+    expect($result->title)->toBe('Source Decides Duties Terms')
         ->and($result->message)->toContain('Choose EU duties terms');
 });
 

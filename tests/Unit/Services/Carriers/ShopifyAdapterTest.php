@@ -8,7 +8,6 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Enums\VoidReason;
@@ -98,10 +97,10 @@ it('advertises nothing from a connection that does not sell postage', function (
     expect($this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto']))->toBeEmpty();
 });
 
-it('advertises from a packer-only connection', function (): void {
+it('advertises from a connection that sells postage', function (): void {
     seedShopifyCarrierServices();
     $package = shopifyPackage();
-    setPostageSetting($package, PostageSetting::PackerOnly);
+    setSellsPostage($package, true);
 
     expect($this->adapter->blindPurchaseOffers(RateRequest::fromPackage($package), ['auto']))->toHaveCount(1);
 });

@@ -46,10 +46,9 @@ use Illuminate\Support\Str;
  *   and the cost recorded on the package is left null;
  * - no purchased service is reported either, so the package records the service
  *   as `unknown` and keeps what was asked for as a requested preference;
- * - the offer is advertised only by a connection whose postage setting sells,
- *   and automation can select it only when that setting allows automation,
- *   through an explicit shipping rule or as the ShippingMethod's sole eligible
- *   configured choice;
+ * - the offer is advertised only by a connection that sells postage, and
+ *   automation can select it only through an explicit shipping rule or as the
+ *   ShippingMethod's sole eligible configured choice;
  * - only shipments imported from an active Shopify data source are eligible,
  *   since a purchase is keyed to a Shopify fulfillment order.
  *
@@ -174,8 +173,8 @@ class ShopifyAdapter implements BlindPurchaseSource
      * What Shopify will sell for this package, priceless.
      *
      * Five gates, and none of them is an error worth telling a packer about:
-     * the shipment has to have come from a live Shopify data source whose
-     * postage setting sells (ADR-0006 decision 6), with a fulfillment order to
+     * the shipment has to have come from a live Shopify data source that
+     * sells postage (ADR-0006 decision 6), with a fulfillment order to
      * buy against, no label can have been bought against
      * that fulfillment order already, the selection has to be `auto` or a
      * pair the source mapping table maps to a catalog service, and the Package
@@ -211,7 +210,7 @@ class ShopifyAdapter implements BlindPurchaseSource
         $labelService = app(ShopifyShippingLabelService::class);
         $connection = $labelService->dataSourceFor($package);
 
-        if (! $connection || ! $connection->postageSetting()->sells() || ! $labelService->canPurchaseFor($package)) {
+        if (! $connection || ! $connection->sellsPostage() || ! $labelService->canPurchaseFor($package)) {
             return collect();
         }
 

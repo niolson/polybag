@@ -249,7 +249,7 @@ it('asks Amazon Shipping through the scoped connection when the method lists it,
  */
 function amazonOrderPackage(?ShippingMethod $method): Package
 {
-    $origin = DataSource::factory()->amazon()->create(['active' => true]);
+    $origin = DataSource::factory()->amazon()->sellingPostage()->create(['active' => true]);
 
     return Package::factory()
         ->for(Shipment::factory()->create([
@@ -336,7 +336,7 @@ it('applies special-service scoping to direct sources and never to Amazon', func
         ->withArgs(fn (RateRequest $request): bool => $request->hasSpecialService('signature_required'))
         ->andReturn(collect());
 
-    $origin = DataSource::factory()->amazon()->create(['active' => true]);
+    $origin = DataSource::factory()->amazon()->sellingPostage()->create(['active' => true]);
     $service = app(ShippingRateService::class);
     $service->getShippingRates(sourceFirstPackage($this->method, [
         'data_source_id' => $origin->id,

@@ -9,7 +9,6 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CustomsDocumentDelivery;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\ServiceCapability;
 use App\Models\Carrier;
@@ -194,7 +193,7 @@ describe('channel binding', function (): void {
 
     it('offers the bound channel source as a candidate with no carrier of its own', function (): void {
         $source = createShopifyDataSource();
-        $source->update(['postage_setting' => PostageSetting::PackerOnly]);
+        $source->update(['sells_postage' => true]);
 
         $resolution = app(PostageSourceResolver::class)->resolve(packageFrom($source), directMethodFor('USPS'));
         $channel = $resolution->channel();
@@ -383,7 +382,7 @@ describe('accounts on carriers we do not sell directly', function (): void {
         }
 
         $source = createShopifyDataSource();
-        $source->update(['postage_setting' => PostageSetting::PackerOnly]);
+        $source->update(['sells_postage' => true]);
         // The method lists a service of each, so only the direct-integration
         // filter keeps their accounts out.
         $method = directMethodFor(ShopifyAdapter::CARRIER_NAME, PolicyOnlyCarrierAdapter::CARRIER_NAME);
