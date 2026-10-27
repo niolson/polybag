@@ -326,7 +326,7 @@ people packing the app just looks slow.
 The pool defaults to **20 workers**. In our load test that served 20 people packing at
 once on a two-CPU server, about as fast as one, with the container using under 150 MB.
 The image's stock pool of 5 started to fall behind at 10 to 20 packers. The measurements
-are in `docs/issues/capacity-audit/issues/01-concurrent-packers-share-five-php-workers.md`.
+are in `docs/issues/archive/capacity-audit/issues/01-concurrent-packers-share-five-php-workers.md`.
 
 To change it, set `PHP_FPM_MAX_CHILDREN` in the `.env` next to `docker-compose.yml` and
 recreate `app`:
@@ -359,7 +359,7 @@ In our load test, with a carrier answering in one second, a batch of 100 labels 
 4 minutes with one process, 2½ minutes with two and 1½ minutes with four: about 25, 41 and
 67 labels a minute. Every label bought, and the rest of the queue (shipment exports,
 dashboard refreshes, tracking) kept moving while the batch ran. The numbers are in
-`docs/issues/capacity-audit/issues/06-label-batch-throughput-on-one-queue-worker.md`.
+`docs/issues/archive/capacity-audit/issues/06-label-batch-throughput-on-one-queue-worker.md`.
 
 More processes finish a batch sooner, with diminishing returns once MySQL's commits become
 the limit, and only as far as your carriers allow purchases at once. We have tested the

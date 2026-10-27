@@ -11,7 +11,7 @@ Know, with measured numbers, how big each workload can get before it fails, and 
 each limit deliberate: either a cap the UI enforces and explains, or a design whose
 cost does not grow with the workload.
 
-This started from [`import-memory/01`](../archive/import-memory/issues/01-shopify-import-exhausts-the-worker-memory-limit.md).
+This started from [`import-memory/01`](../import-memory/issues/01-shopify-import-exhausts-the-worker-memory-limit.md).
 A Shopify import of about 5,000 open fulfillment orders died on PHP's default 128M
 limit, with no error in the app. Nothing had measured how much memory an import
 needed, and nothing in development could show it: local CLI PHP runs with
@@ -28,7 +28,7 @@ For each workload:
   actually runs with. Record the numbers in the issue file and keep the raw captures
   in `.scratch/capacity-audit/`.
 - **Where it fails, and how.** An exception that reaches the user, a fatal error the
-  app never sees ([`import-memory/02`](../archive/import-memory/issues/02-a-queued-job-that-dies-says-so.md)),
+  app never sees ([`import-memory/02`](../import-memory/issues/02-a-queued-job-that-dies-says-so.md)),
   an HTTP timeout, or requests queuing.
 - **The decision.** Either a cap enforced in the UI with a message, or a change so the
   cost stops growing with the workload, as `import-memory/01`'s two-pass read does.
