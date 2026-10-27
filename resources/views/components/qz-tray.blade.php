@@ -335,9 +335,10 @@
                 return event ? describePrinterProblem(event) : null;
             },
 
-            // Keep a page's `labelPrinterProblem` (PrintsLabels) current, so the
-            // server refuses a purchase the label printer cannot print. Deferred:
-            // it travels with the page's next request rather than making its own.
+            // Keep a page's `labelPrinterProblem` current (declared by the printing
+            // concern Ship and Manual Ship share), so the server refuses a purchase
+            // the label printer cannot print. Deferred: it travels with the page's
+            // next request rather than making its own.
             bindLabelPrinter(wire) {
                 const sync = () => wire.set(
                     'labelPrinterProblem',
