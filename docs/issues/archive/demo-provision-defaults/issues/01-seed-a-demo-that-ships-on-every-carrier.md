@@ -2,7 +2,7 @@
 
 # Seed a demo that rates and ships on every carrier without hand edits
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Created: 2026-10-23
 
@@ -104,3 +104,6 @@ alone, as `firstOrCreate` does now.
 - **2026-10-27** — The postage setting is now a boolean, `sells_postage` (ADR-0006 decision 6,
   2026-10-26 amendment). `provisionAmazonShipping()` sets it to `true`, which is what
   `PackerAndAutomation` became.
+- **2026-10-27** — Done. Shipped in `78776a65`. Checked by hand on a fresh demo tenant:
+  Standard Ground rates from all four carriers, and FedEx and UPS sandbox labels buy
+  without editing the Location.

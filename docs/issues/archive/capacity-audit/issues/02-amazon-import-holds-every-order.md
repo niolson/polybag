@@ -9,7 +9,7 @@ Created: 2026-10-24
 ## Problem
 
 `AmazonSource::fetchShipments()` has the same shape as the Shopify read in
-[`import-memory/01`](../../archive/import-memory/issues/01-shopify-import-exhausts-the-worker-memory-limit.md).
+[`import-memory/01`](../../import-memory/issues/01-shopify-import-exhausts-the-worker-memory-limit.md).
 It pages through orders by `nextToken`, keeps every mapped row, and stores each raw
 order in `orderCache` for `fetchShipmentItems()`. Peak memory grows with the number of
 orders the search returns. Since `order-reconciliation/07` that includes orders closed
