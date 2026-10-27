@@ -4,7 +4,6 @@ use App\Contracts\PackageLabelWorkflow;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\Requests\CancelAmazonShipment;
@@ -173,7 +172,7 @@ it('buys Amazon Shipping for an order from another channel whatever the connecti
     $rate = quoteExternalRate($this->package);
 
     // The setting governs only the connection's own Amazon orders.
-    $this->connection->update(['postage_setting' => PostageSetting::DoesNotSell]);
+    $this->connection->update(['sells_postage' => false]);
 
     $result = app(EloquentPackageShippingWorkflow::class)->ship($this->package, new PackageShippingRequest(
         selectedRate: $rate,

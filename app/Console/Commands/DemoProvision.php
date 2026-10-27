@@ -3,7 +3,6 @@
 namespace App\Console\Commands;
 
 use App\Enums\AppMode;
-use App\Enums\PostageSetting;
 use App\Enums\Role;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -221,11 +220,11 @@ class DemoProvision extends Command
             'global_export' => false,
             // What lets automation buy Amazon Shipping for another channel's
             // order is this flag, the scope, and the method's `direct` row:
-            // those rates are direct, and the postage setting governs only Buy
+            // those rates are direct, and `sells_postage` governs only Buy
             // Shipping for the connection's own Amazon orders. Set so that, if
             // the presenter turns imports on, automation can buy those too.
             'offers_off_amazon_shipping' => true,
-            'postage_setting' => PostageSetting::PackerAndAutomation,
+            'sells_postage' => true,
             'settings' => array_merge($connection->settings ?? [], [
                 // A channel ID, as the connection form stores it.
                 'channel_name' => Channel::query()->where('name', StoreChannelSeeder::AMAZON)->value('id'),

@@ -8,7 +8,6 @@ use App\Enums\AmazonMarketplace;
 use App\Enums\AppMode;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
-use App\Enums\PostageSetting;
 use App\Enums\ScheduleInterval;
 use App\Enums\ShopifyMetafieldOwner;
 use App\Filament\Components\LazyOptionsSelect;
@@ -100,7 +99,6 @@ class DataSourceForm
                         ->options(self::DRIVERS)
                         ->required()
                         ->live()
-                        ->afterStateUpdated(fn (Set $set, ?string $state): mixed => $set('postage_setting', PostageSetting::defaultFor($state)))
                         ->disabled(fn (?DataSource $record) => $record?->exists)
                         ->dehydrated(),
 
@@ -137,15 +135,12 @@ class DataSourceForm
                     ? 'Whether this connection sells Amazon Buy Shipping for its own Amazon orders. Amazon Shipping for orders from other channels is set separately, below.'
                     : 'Whether this connection sells Shopify Shipping for its own orders.')
                 ->schema([
-                    Select::make('postage_setting')
-                        ->label('Postage Setting')
-                        ->options(PostageSetting::class)
-                        ->default(fn (Get $get): ?PostageSetting => PostageSetting::defaultFor($get('source_type')))
-                        ->required()
-                        ->selectablePlaceholder(false)
+                    Toggle::make('sells_postage')
+                        ->label('Sells Postage')
+                        ->default(false)
                         ->helperText(fn (Get $get): string => $get('source_type') === AmazonSource::class
-                            ? 'Packer only shows Amazon\'s offers on the Ship page and keeps them from auto-ship, batch ship and shipping rules, whatever the shipping method allows. Packer and automation lets automation buy the services the shipping method allows. The shipping method still decides whether Amazon is asked.'
-                            : 'Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. Packer only shows it on the Ship page. Packer and automation also lets auto-ship and batch ship buy it, when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
+                            ? 'Buys labels on this Amazon account. When on, Amazon is asked for rates wherever an order\'s shipping method allows Amazon Buy Shipping, and the shipping method decides what auto-ship and batch ship may buy.'
+                            : 'Buys labels on this Shopify account. Shopify Shipping reaches USPS Connect eCommerce rates without an account of our own, but reports no price or service, and no carrier until the label comes back. Its labels cannot be voided from PolyBag. When on, it is offered wherever an order\'s shipping method allows Shopify, and auto-ship and batch ship buy it only when a shipping rule selects it or it is the shipping method\'s sole eligible choice.')
                         ->columnSpanFull(),
 
                     Placeholder::make('demo_development_store')
@@ -156,7 +151,7 @@ class DataSourceForm
                             && $get('source_type') === ShopifySource::class)
                         ->columnSpanFull(),
                 ])
-                ->visible(fn (Get $get): bool => PostageSetting::defaultFor($get('source_type')) !== null),
+                ->visible(fn (Get $get): bool => DataSource::driverSellsPostage($get('source_type'))),
 
             // ── Shopify ────────────────────────────────────────────────────────────
 

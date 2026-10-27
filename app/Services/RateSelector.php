@@ -7,8 +7,6 @@ use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\DeliveryEstimate;
-use App\Enums\PostageSourceKind;
-use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
 use Carbon\Carbon;
@@ -113,11 +111,6 @@ class RateSelector
      * So is a rate naming a catalog service or carrier somebody deactivated,
      * which no allowance releases either.
      *
-     * So is Amazon Buy Shipping for an Amazon order whose connection sells
-     * postage to a packer only (ADR-0006 decision 6). The setting only
-     * narrows: the method cannot release what the connection refuses to
-     * automation.
-     *
      * So is a rate whose source decides the duties terms (Amazon, Shopify),
      * into a destination whose source-decided terms nobody has verified: EU,
      * GB, NO and AU (ADR-0008 decision 5). It is kept for the Ship page, where
@@ -125,7 +118,6 @@ class RateSelector
      *
      * @param  Collection<int, RateResponse>  $rates
      * @param  ShippingMethod  $method  The shipment's shipping method, whose postage-source rows are the allowance. A shipment with none is never rated (`carrier-catalog-reset/16`)
-     * @param  DataSource|null  $channelSource  The package's channel connection, whose postage setting governs the Amazon Buy Shipping it sells for its own orders
      * @param  string|null  $sourceTermsDestination  The destination country when source-decided duties terms are held from automation there, else null
      */
     public function selectForAutomation(
@@ -133,16 +125,13 @@ class RateSelector
         ?Carbon $deadline,
         ShippingMethod $method,
         ?OfferRequirements $requirements = null,
-        ?DataSource $channelSource = null,
         ?string $sourceTermsDestination = null,
     ): UnattendedRateSelection {
         $requirements ??= OfferRequirements::none();
 
         [$contentRestricted, $unrestricted] = $rates->partition(fn (RateResponse $rate): bool => $rate->contentRestricted);
 
-        [$heldBySetting, $unrestricted] = $this->partitionByPostageSetting($unrestricted->values(), $channelSource);
-
-        $inactive = InactiveCatalog::among($unrestricted);
+        $inactive = InactiveCatalog::among($unrestricted->values());
         [$deactivated, $unrestricted] = $unrestricted->partition(fn (RateResponse $rate): bool => $inactive->includes($rate));
 
         // After the inactivity check: the Ship page grays an inactive service
@@ -178,7 +167,6 @@ class RateSelector
             // Not a deactivated rate: the Ship page will not sell it either.
             attendedAlternativeAvailable: $notAllowed->isNotEmpty()
                 || $contentRestricted->isNotEmpty()
-                || $heldBySetting->isNotEmpty()
                 || $heldForSourceTerms->isNotEmpty()
                 || $late->isNotEmpty()
                 || $unprotected->isNotEmpty()
@@ -189,8 +177,6 @@ class RateSelector
             deadlineMissing: $requirements->deadlineRequired && $deadline === null,
             contentRestricted: $contentRestricted->values(),
             deactivated: $deactivated->values(),
-            heldByPostageSetting: $heldBySetting,
-            postageSettingConnection: $heldBySetting->isNotEmpty() ? $channelSource?->name : null,
             heldForSourceTerms: $heldForSourceTerms,
             sourceTermsDestination: $heldForSourceTerms->isNotEmpty() ? $sourceTermsDestination : null,
         );
@@ -216,35 +202,13 @@ class RateSelector
     }
 
     /**
-     * Split off the Amazon Buy Shipping rates for the connection's own orders
-     * that its postage setting keeps from automation.
-     *
-     * Amazon Shipping sold to an order from another channel is a direct rate
-     * (`carrier-catalog-reset/15`), which no postage setting covers, so only
-     * the Buy Shipping kind is held.
-     *
-     * @param  Collection<int, RateResponse>  $rates
-     * @return array{0: Collection<int, RateResponse>, 1: Collection<int, RateResponse>} held, then the rest
-     */
-    private function partitionByPostageSetting(Collection $rates, ?DataSource $channelSource): array
-    {
-        if ($channelSource === null || ! $channelSource->isAmazon() || $channelSource->postageSetting()->allowsAutomation()) {
-            return [collect(), $rates];
-        }
-
-        [$held, $rest] = $rates->partition(fn (RateResponse $rate): bool => $rate->sourceKind() === PostageSourceKind::Amazon);
-
-        return [$held->values(), $rest->values()];
-    }
-
-    /**
      * Split rates into the ones the shipping method allows automation to buy
      * and the ones it does not.
      *
      * One check for every source kind. A rate passes when the method has a
      * postage-source row for its kind, and its service is one the method lists
-     * or that row allows unlisted services. The connection's postage setting,
-     * the other half of the allowance, was applied first. A Shopify blind
+     * or that row allows unlisted services. A connection that does not sell
+     * postage was never asked, so none of its rates arrive here. A Shopify blind
      * purchase is not a rate and never arrives here: the explicit-choice rule
      * governs it (`carrier-catalog-reset/09`).
      *

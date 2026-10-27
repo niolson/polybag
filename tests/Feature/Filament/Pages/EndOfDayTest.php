@@ -1,6 +1,5 @@
 <?php
 
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Filament\Pages\EndOfDay;
@@ -184,11 +183,11 @@ it('shows the carrier a Shopify connection that sells postage dates its labels b
     $usps = Carrier::factory()->create(['name' => 'USPS', 'active' => true]);
     $listed = fn (): array => collect(Livewire::test(EndOfDay::class)->get('carrierSummary'))->pluck('carrier')->all();
     $shopify = createShopifyDataSource();
-    $shopify->update(['postage_setting' => PostageSetting::DoesNotSell]);
+    $shopify->update(['sells_postage' => false]);
 
     expect($listed())->toBe([]);
 
-    $shopify->update(['postage_setting' => PostageSetting::PackerOnly]);
+    $shopify->update(['sells_postage' => true]);
 
     expect($listed())->toBe(['USPS'])
         ->and($shopify->shipDateCarrier()->is($usps))->toBeTrue();

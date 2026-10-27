@@ -3,7 +3,6 @@
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
 use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\Enums\OffAmazonShippingStatus;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
 use App\Models\Carrier;
@@ -147,7 +146,7 @@ describe('resolution', function (): void {
     });
 
     it('never offers a scoped connection to an Amazon order', function (): void {
-        $origin = DataSource::factory()->unassigned()->amazon()->create();
+        $origin = DataSource::factory()->unassigned()->amazon()->sellingPostage()->create();
         $other = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create();
         scopeConnectionTo($other, client: $this->client);
 
@@ -221,7 +220,7 @@ describe('the off-Amazon candidate', function (): void {
         scopeConnectionTo($connection);
 
         $shopify = createShopifyDataSource();
-        $shopify->update(['postage_setting' => PostageSetting::PackerOnly]);
+        $shopify->update(['sells_postage' => true]);
         $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($shopify), amazonShippingMethod());
         $candidate = offAmazonCandidate(offAmazonPackage($shopify));
 
@@ -289,22 +288,19 @@ describe('the shipping method', function (): void {
 
 describe('the postage setting', function (): void {
     it('does not ask a connection that does not sell postage for its own Amazon orders', function (): void {
-        $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::DoesNotSell)->create();
+        $connection = DataSource::factory()->amazon()->sellingPostage(false)->create();
 
         $resolution = app(PostageSourceResolver::class)->resolve(offAmazonPackage($connection), amazonShippingMethod());
 
         expect($resolution->channel())->toBeNull();
     });
 
-    it('does not change what a connection sells to orders from other channels', function (PostageSetting $setting): void {
-        $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->sellingPostage($setting)->create();
+    it('does not change what a connection sells to orders from other channels', function (): void {
+        $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->sellingPostage(false)->create();
         scopeConnectionTo($connection);
 
         expect(offAmazonCandidate(offAmazonPackage())?->postageDataSourceId)->toBe($connection->id);
-    })->with([
-        'does not sell' => PostageSetting::DoesNotSell,
-        'packer only' => PostageSetting::PackerOnly,
-    ]);
+    });
 });
 
 describe('scope rules', function (): void {

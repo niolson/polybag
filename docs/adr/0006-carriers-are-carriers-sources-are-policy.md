@@ -27,6 +27,11 @@ rated and cannot have a Label bought (decision 12). Its allowance is nothing.
 Amended 2026-10-16 (`ui-review/09`): End of Day lists only the carriers this install ships
 with, not every active carrier (decision 1).
 
+Amended 2026-10-26: a connection's postage setting is a yes or no, *sells postage*.
+*Packer only* is removed. The method's allowance already decides what automation buys, so a
+third value only let one connection override the method for the unattended paths, and made
+the same setting appear in two places (decision 6).
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -197,7 +202,7 @@ settings it gains a source policy:
 Automation may buy an offer when all three hold:
 
 - its source may sell for the method;
-- for Shopify and Amazon Buy Shipping, its connection allows automation (decision 6);
+- for Shopify and Amazon Buy Shipping, its connection sells postage (decision 6);
 - its service is on the method, or, for Amazon Buy Shipping, the method allows any
   service.
 
@@ -217,14 +222,22 @@ only `none`. A method is created with a `direct` row. The table has its own Admi
 policy.
 
 **6. A connection's postage setting is the payer's consent to channel postage.** Shopify
-and Amazon connections carry one setting: *does not sell postage*, *packer only*, or
-*packer and automation*.
+and Amazon connections carry one setting, *sells postage*, on or off.
 
 - It governs Shopify's blind purchase and Amazon Buy Shipping for the connection's own
-  orders.
-- It only narrows, and grants nothing.
-- It replaces `clients.blind_purchase_enabled`.
-- Defaults: *does not sell postage* for Shopify, and *packer only* for Amazon.
+  orders. A connection that does not sell is not asked, by a packer or by automation.
+- It only narrows, and grants nothing. What automation buys from a connection that sells
+  is the method's allowance.
+- It replaces `clients.blind_purchase_enabled`. Methods are shared by every client, and the
+  postage is paid on the client's own account, so this is the per-client consent.
+- Default: off, for Shopify and Amazon alike.
+
+*Amended 2026-10-26.* The setting first had three values: *does not sell postage*, *packer
+only*, and *packer and automation*, with Amazon defaulting to *packer only*. *Packer only*
+was removed. It duplicated the method's allowance, which already keeps an unmapped Amazon
+offer from automation under *services on this method*. It also let one connection give
+auto-ship and batch ship a different answer from the method the operator configured.
+Connections migrated from *packer only* or *packer and automation* sell.
 
 Amazon Shipping for other channels is a direct sale. `offers_off_amazon_shipping` and the
 scope decide whether a connection sells it at all, as a carrier account's scopes do. No
@@ -342,7 +355,7 @@ alias.
 |---|---|
 | **Allowance** | What a shipping method lets automation buy: its services, the sources that may sell them, Shopify `auto`, and Amazon Buy Shipping *any service*. With no method, nothing (decision 12) |
 | **Direct sale** | Postage bought from the carrier's own integration: a carrier account for USPS, UPS and FedEx, a scoped Amazon connection for Amazon Shipping |
-| **Postage setting** | A connection's consent to sell channel postage: none, to a packer, or to automation as well. Covers Shopify and Amazon Buy Shipping, not Amazon Shipping |
+| **Postage setting** | A connection's consent to sell channel postage, *sells postage* on or off. Covers Shopify and Amazon Buy Shipping, not Amazon Shipping |
 | **Source mapping** | One row naming a `CarrierService` for a source's own code. Inward for Amazon Buy Shipping, outward for Shopify |
 | **Unmapped service** | An offer carrying no `CarrierService`: Shopify `auto`, or an Amazon identifier nobody has mapped. It still names a carrier, except Shopify `auto` |
 | **Qualifying Package** | A Package whose every item is a product marked as media |

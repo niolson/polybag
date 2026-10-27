@@ -141,12 +141,12 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   Label was bought (`CarrierAccount` or sales-channel `DataSource`). They are independent.
 - A Shopify purchase is a **blind purchase**, not a rate or Offer: price and service are
   unknown at purchase. Automation may buy only under the explicit-choice policy in
-  `UnattendedRateSelector`, with the connection's postage setting permitting automation;
+  `UnattendedRateSelector`, from a connection that sells postage;
   it never ranks a blind purchase against quoted rates.
 - **Observed service**, `CarrierService` normalization, and the shipping method's
   **allowance** are three separate concepts.
 - Every purchase requires a ShippingMethod. A packer may select an Offer outside its
-  allowance; automation must stay within it and the Connection's postage setting.
+  allowance; automation must stay within it. A Connection that does not sell postage is not asked.
 - **Shipment**, **Draft Shipment**, **Package**, **Package Draft**, and **Label** are distinct things.
 - `ship_by` is the date an order must leave the warehouse; `deliver_by` is its delivery
   deadline. Both are calendar dates. Due-to-ship filters use the Location's timezone.
@@ -163,7 +163,7 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
    source instance, environment, and billing identity
 4. **Manual Ship** (`/manual-ship`) — Prepare a Draft Shipment, view rates, then buy a Label
 5. **Batch Ship** — Buy Labels for multiple Packages within each shipping method's allowance,
-   narrowed by the connection's postage setting; blind Shopify purchases require an explicit
+   from connections that sell postage; blind Shopify purchases require an explicit
    rule or sole eligible ShippingMethod selection
 6. **Label Reprint / Void** — Reprint the active Label or void it through the postage source;
    a void retains Label history and returns the Package to unshipped

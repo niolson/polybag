@@ -873,7 +873,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
         $connection = $this->postageSourceResolver->channelSourceFor($package);
 
-        if ($connection && ! $connection->postageSetting()->sells()) {
+        if ($connection && ! $connection->sellsPostage()) {
             logger()->warning('Refused a blind purchase from a connection that does not sell postage', [
                 'package_id' => $package->id,
                 'source' => $requested->source,
@@ -882,8 +882,8 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
 
             return PackageShippingResult::offerUnavailable(
                 'Connection Does Not Sell Postage',
-                "{$requested->sourceLabel} buys postage without reporting a price or a service, and the connection \"{$connection->name}\" is set not to sell postage. "
-                .'Change its postage setting under Integrations → Connections, or choose a rate from a carrier account.',
+                "{$requested->sourceLabel} buys postage without reporting a price or a service, and the connection \"{$connection->name}\" does not sell postage. "
+                .'Turn on Sells Postage for it under Integrations → Connections, or choose a rate from a carrier account.',
             );
         }
 

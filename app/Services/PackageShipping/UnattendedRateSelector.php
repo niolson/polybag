@@ -48,16 +48,15 @@ class UnattendedRateSelector
      * name it, or it may be inferred only when it is the ShippingMethod's sole
      * configured, package-eligible choice.
      *
-     * Either way, channel postage is bought only when its connection's postage
-     * setting allows automation (ADR-0006 decision 6). An offer the setting
-     * holds back is kept in the result, so the refusal can name the setting.
+     * Either way, a connection that does not sell postage was never asked, so
+     * nothing it would sell reaches automation (ADR-0006 decision 6).
      *
      * Postage whose source decides the duties terms — Amazon Buy Shipping,
      * Amazon Shipping on a connection, a Shopify blind purchase — is bought
      * only for a destination outside the EU, GB, NO and AU, until a test
      * purchase shows what the source declares there (ADR-0008 decision 5).
-     * Both paths hold it, and a hold names the destination, not the postage
-     * setting. A person can still buy it from the Ship page.
+     * Both paths hold it, and a hold names the destination. A person can
+     * still buy it from the Ship page.
      *
      * Deliberately not routed through {@see EloquentPackageShippingWorkflow::prepareRates()}. That builds the
      * attended view — where a service outside the allowance is *supposed* to appear, with
@@ -77,48 +76,34 @@ class UnattendedRateSelector
         $ruleResult = $this->ruleEvaluator->evaluate($package->shipment, $package);
         $method = $package->shipment->shippingMethod
             ?? throw new \LogicException('autoShip() refuses a shipment with no shipping method before selecting a rate.');
-        $channel = $this->postageSourceResolver->channelSourceFor($package);
-        $blindAllowed = $channel?->postageSetting()->allowsAutomation() ?? false;
         $sourceTermsDestination = $this->customsTerms->unverifiedSourceTermsDestination($package);
 
-        /** @var Collection<int, BlindPurchaseOffer> $heldBlind */
-        $heldBlind = collect();
         /** @var Collection<int, BlindPurchaseOffer> $heldForSourceTerms */
         $heldForSourceTerms = collect();
-        $finish = function (UnattendedRateSelection $selection) use ($package, $heldBlind, $heldForSourceTerms, $channel, $sourceTermsDestination): UnattendedRateSelection {
-            $heldOffers = $heldBlind->merge($heldForSourceTerms);
-
+        $finish = function (UnattendedRateSelection $selection) use ($package, $heldForSourceTerms, $sourceTermsDestination): UnattendedRateSelection {
             // A blind offer a rule or the sole-choice rule would have bought was
             // held, and rate shopping bought a direct or quoted rate instead:
             // said, so the swap is never silent.
-            if ($selection->rate !== null && $heldOffers->isNotEmpty()) {
+            if ($selection->rate !== null && $heldForSourceTerms->isNotEmpty()) {
                 logger()->info('Replaced a held blind purchase with a quoted purchase', [
                     'package_id' => $package->id,
-                    'destination' => $sourceTermsDestination ?? $package->shipment->country,
-                    'held_sources' => $heldOffers->map(fn (BlindPurchaseOffer $offer): string => $offer->source)->unique()->values()->all(),
-                    'held_for' => $heldForSourceTerms->isNotEmpty() ? 'source_decided_terms' : 'postage_setting',
+                    'destination' => $sourceTermsDestination,
+                    'held_sources' => $heldForSourceTerms->map(fn (BlindPurchaseOffer $offer): string => $offer->source)->unique()->values()->all(),
                 ]);
             }
 
-            return $selection->holdingBlindOffers(
-                $heldBlind,
-                $channel?->name,
-                $heldForSourceTerms,
-                $sourceTermsDestination,
-            );
+            return $selection->holdingBlindOffers($heldForSourceTerms, $sourceTermsDestination);
         };
 
-        // Why a blind offer the rules would buy is held: the connection's
-        // setting first, then the destination. Null when nothing holds it.
-        $holdBlind = function (BlindPurchaseOffer $offer) use ($blindAllowed, $sourceTermsDestination, $heldBlind, $heldForSourceTerms): bool {
-            $held = ! $blindAllowed ? $heldBlind : ($sourceTermsDestination !== null ? $heldForSourceTerms : null);
-
-            if ($held === null) {
+        // A blind offer the rules would buy is held when the destination is
+        // one whose source-decided terms nobody has verified.
+        $holdBlind = function (BlindPurchaseOffer $offer) use ($sourceTermsDestination, $heldForSourceTerms): bool {
+            if ($sourceTermsDestination === null) {
                 return false;
             }
 
-            if (! $held->contains(fn (BlindPurchaseOffer $other): bool => $other->id() === $offer->id())) {
-                $held->push($offer);
+            if (! $heldForSourceTerms->contains(fn (BlindPurchaseOffer $other): bool => $other->id() === $offer->id())) {
+                $heldForSourceTerms->push($offer);
             }
 
             return true;
@@ -134,9 +119,8 @@ class UnattendedRateSelector
                 ->reject($ruleResult->excludesBlindOffer(...))
                 ->first(fn (BlindPurchaseOffer $offer): bool => $offer->id() === $ruleResult->preSelectedBlindPurchaseId);
 
-            // A rule cannot reach what the connection sells to a packer only,
-            // or what a source decides the duties terms of for a destination
-            // nobody has verified. Rate shopping goes on, as it does when the
+            // A rule cannot reach what a source decides the duties terms of
+            // for a destination nobody has verified. Rate shopping goes on, as it does when the
             // offer is gone.
             if ($blindOffer && ! $holdBlind($blindOffer)) {
                 return new UnattendedRateSelection(
@@ -176,7 +160,7 @@ class UnattendedRateSelector
                     ]);
                 }
 
-                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel, $sourceTermsDestination));
+                return $finish($this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $sourceTermsDestination));
             }
 
             logger()->info('A shipping rule names a service no source quoted, or an Exclude rule removed, for this package; rate shopping instead', [
@@ -191,7 +175,7 @@ class UnattendedRateSelector
             $rates = $rates->reject(fn (RateResponse $rate): bool => $ruleResult->excludes($rate));
         }
 
-        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $channel, $sourceTermsDestination);
+        $selection = $this->rateSelector->selectForAutomation($rates, $deadline, $method, $requirements, $sourceTermsDestination);
 
         if ($selection->rate === null) {
             $blindOffer = $this->shippingRateService->soleBlindPurchaseOfferForAutomation(
@@ -221,9 +205,6 @@ class UnattendedRateSelector
             deadlineMissing: $selection->deadlineMissing,
             contentRestricted: $selection->contentRestricted,
             deactivated: $selection->deactivated,
-            heldByPostageSetting: $selection->heldByPostageSetting,
-            blindOffersHeldByPostageSetting: $selection->blindOffersHeldByPostageSetting,
-            postageSettingConnection: $selection->postageSettingConnection,
             heldForSourceTerms: $selection->heldForSourceTerms,
             sourceTermsDestination: $selection->sourceTermsDestination,
         ));
@@ -285,14 +266,6 @@ class UnattendedRateSelector
             ]);
         }
 
-        if ($selection->heldByPostageSettingAnything()) {
-            logger()->info('Held channel postage from automated purchase under the connection\'s postage setting', [
-                'package_id' => $package->id,
-                'connection' => $selection->postageSettingConnection,
-                'held' => $selection->heldByPostageSettingSummary(),
-            ]);
-        }
-
         if ($selection->heldForSourceTermsAnything()) {
             logger()->info('Held source-decided postage from automated purchase into a destination whose duties terms are unverified', [
                 'package_id' => $package->id,
@@ -313,20 +286,8 @@ class UnattendedRateSelector
                 .$this->amazonShippingNote($selection)
                 .$this->contentRestrictionNote($selection)
                 .$this->deactivatedNote($selection)
-                .$this->postageSettingNote($selection)
-                .$this->droppedRatesNote($package)
+                    .$this->droppedRatesNote($package)
                 .'Ship this package from the Ship page, where a person chooses it.',
-            );
-        }
-
-        if (! $selection->notAllowedAnything() && $selection->heldByPostageSettingAnything()) {
-            return PackageShippingResult::attendedSelectionRequired(
-                'Connection Sells to Packers Only',
-                "This package was offered {$selection->heldByPostageSettingSummary()}, but the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only, so automation does not buy it. "
-                .$this->contentRestrictionNote($selection)
-                .$this->deactivatedNote($selection)
-                .$this->droppedRatesNote($package)
-                .'Ship this package from the Ship page, or set the connection\'s postage setting to Packer and automation.',
             );
         }
 
@@ -359,7 +320,6 @@ class UnattendedRateSelector
             .$selection->notAllowedSummary().'. '
             .$this->contentRestrictionNote($selection)
             .$this->deactivatedNote($selection)
-            .$this->postageSettingNote($selection)
             .$this->sourceTermsNote($selection)
             .'Add the service to the shipping method or allow its source any service, or ship this package from the Ship page, where a person chooses the rate.',
         );
@@ -422,19 +382,6 @@ class UnattendedRateSelector
             .', and the service or its carrier is inactive, so nothing can buy it. '
             .'Reactivate it under Carriers or Carrier Services, or give the shipment a shipping method that lists an active service.',
         );
-    }
-
-    /**
-     * A sentence naming what the connection's postage setting held back beside
-     * another refusal, so an operator changing the shipping method does not
-     * expect that to release it. Only the connection's setting would.
-     */
-    private function postageSettingNote(UnattendedRateSelection $selection): string
-    {
-        return $selection->heldByPostageSettingAnything()
-            ? 'Automation also never buys '.$selection->heldByPostageSettingSummary()
-                .", because the connection \"{$selection->postageSettingConnection}\" sells postage to a packer only. "
-            : '';
     }
 
     /**
@@ -544,7 +491,6 @@ class UnattendedRateSelector
             "{$method} requires a rate that {$missing}, and {$scope} "
             .$this->contentRestrictionNote($selection)
             .$this->deactivatedNote($selection)
-            .$this->postageSettingNote($selection)
             .$this->sourceTermsNote($selection)
             .'Ship it from the Ship page, where a person chooses the rate, or change the requirement on the shipping method.',
         );

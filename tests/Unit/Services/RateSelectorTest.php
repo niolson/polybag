@@ -6,12 +6,10 @@ use App\DataTransferObjects\Shipping\OfferRequirements;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\UnattendedRateSelection;
 use App\Enums\DeliveryEstimate;
-use App\Enums\PostageSetting;
 use App\Enums\PostageSourceKind;
 use App\Enums\UnlistedServices;
 use App\Models\Carrier;
 use App\Models\CarrierService;
-use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
@@ -491,67 +489,6 @@ it('buys the same thing in sandbox and in production', function (bool $sandbox):
     expect($selection->rate->price)->toBe(4.00)
         ->and($selection->notAllowed)->toHaveCount(1);
 })->with(['sandbox' => [true], 'production' => [false]]);
-
-it('holds a packer-only connection\'s Amazon order offers, even under any service', function (): void {
-    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
-    $method = methodAllowing([$ground], UnlistedServices::Any);
-    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create(['name' => 'Amazon US']);
-
-    $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
-        null,
-        $method,
-        channelSource: $connection,
-    );
-
-    expect($selection->rate?->price)->toBe(9.00)
-        ->and($selection->notAllowed)->toBeEmpty()
-        ->and($selection->heldByPostageSetting)->toHaveCount(1)
-        ->and($selection->heldByPostageSettingSummary())->toBe('USPS Ground Advantage')
-        ->and($selection->postageSettingConnection)->toBe('Amazon US')
-        ->and($selection->attendedAlternativeAvailable)->toBeTrue();
-});
-
-it('leaves a packer-and-automation connection\'s offers to the method', function (): void {
-    $ground = CarrierService::factory()->uspsGroundAdvantage()->create();
-    $method = methodAllowing([$ground], UnlistedServices::None);
-    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerAndAutomation)->create();
-
-    $selection = app(RateSelector::class)->selectForAutomation(
-        collect([makeDiscoveredRate(4.00, carrierServiceId: $ground->id), makeDirectRate(9.00, $ground)]),
-        null,
-        $method,
-        channelSource: $connection,
-    );
-
-    expect($selection->rate?->price)->toBe(4.00)
-        ->and($selection->heldByPostageSettingAnything())->toBeFalse();
-});
-
-it('never holds Amazon Shipping sold to an order from another channel', function (): void {
-    $amazonGround = CarrierService::factory()->create(['service_code' => 'std-us-swa-mfn', 'name' => 'Amazon Shipping Ground']);
-    $method = methodAllowing([$amazonGround]);
-    $connection = DataSource::factory()->amazon()->sellingPostage(PostageSetting::PackerOnly)->create();
-
-    // A direct rate (`carrier-catalog-reset/15`): no observed service.
-    $external = new RateResponse(
-        carrier: 'Amazon Shipping',
-        serviceCode: 'std-us-swa-mfn',
-        serviceName: 'Ground',
-        price: 4.00,
-        carrierServiceId: $amazonGround->id,
-    );
-
-    $selection = app(RateSelector::class)->selectForAutomation(
-        collect([$external]),
-        null,
-        $method,
-        channelSource: $connection,
-    );
-
-    expect($selection->rate?->price)->toBe(4.00)
-        ->and($selection->heldByPostageSettingAnything())->toBeFalse();
-});
 
 it('reads the method\'s rows once, not once per rate', function (): void {
     $ground = CarrierService::factory()->uspsGroundAdvantage()->create();

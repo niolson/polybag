@@ -282,8 +282,8 @@ service catalog is discovered from live rate responses rather than maintained as
 list. A packer may select any offered service. Automation buys only what the shipping
 method allows: add an **Amazon** row under the method's **Postage Sources**, then either
 map discovered services to catalog services the method lists, under **Integrations → Map
-Amazon Services**, or allow the row any service. The Connection's postage setting must
-also permit automation.
+Amazon Services**, or allow the row any service. The Connection must also have **Sells
+Postage** turned on.
 
 That is the on-Amazon (`channelType: AMAZON`) workflow. The same Connection can also sell
 Amazon Shipping to Shipments from Shopify, database imports, Manual Ship, and other

@@ -10,7 +10,6 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
-use App\Enums\PostageSetting;
 use App\Enums\UnlistedServices;
 use App\Filament\Pages\Ship;
 use App\Jobs\GenerateLabelJob;
@@ -421,18 +420,17 @@ it('grays out an offer for a deactivated service on the Ship page and will not s
 
 /*
 |--------------------------------------------------------------------------
-| carrier-catalog-reset/10 — the connection's postage setting
+| carrier-catalog-reset/10 — a connection that sells postage
 |--------------------------------------------------------------------------
 |
-| An Amazon connection set to *packer only* keeps its Amazon orders' offers
-| from automation whatever the method allows. *Packer and automation* leaves
-| the decision to the method.
+| A connection that sells postage leaves what automation buys from it to the
+| shipping method.
 |
 */
 
-function orderFromAmazonConnection(Package $package, PostageSetting $setting): DataSource
+function orderFromAmazonConnection(Package $package): DataSource
 {
-    $connection = DataSource::factory()->amazon()->sellingPostage($setting)->create(['name' => 'Amazon US']);
+    $connection = DataSource::factory()->amazon()->sellingPostage()->create(['name' => 'Amazon US']);
     $package->shipment->update(['data_source_id' => $connection->id]);
 
     // An Amazon order must have a due-by date to be checked for lateness,
@@ -442,29 +440,10 @@ function orderFromAmazonConnection(Package $package, PostageSetting $setting): D
     return $connection;
 }
 
-it('shows a packer-only connection\'s offer and refuses it unattended under any service, naming the setting', function (): void {
-    $this->actingAs($user = User::factory()->create());
-    $package = packageForDiscoveredQuote(UnlistedServices::Any);
-    orderFromAmazonConnection($package, PostageSetting::PackerOnly);
-    registerQuotingAdapter([discoveredRate(4.00)]);
-
-    $options = app(PackageShippingWorkflow::class)->prepareRates($package->fresh());
-
-    $result = autoShipAs($user, $package->fresh());
-
-    expect($options->rateOptions)->toHaveCount(1)
-        ->and($result->success)->toBeFalse()
-        ->and($result->requiresAttendedSelection)->toBeTrue()
-        ->and($result->title)->toBe('Connection Sells to Packers Only')
-        ->and($result->message)->toContain('MockCarrier Ground')
-        ->and($result->message)->toContain('"Amazon US"')
-        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
-});
-
-it('leaves a packer-and-automation connection\'s offer to the method', function (): void {
+it('leaves a selling connection\'s offer to the method', function (): void {
     $this->actingAs($user = User::factory()->create());
     $package = packageForDiscoveredQuote();
-    orderFromAmazonConnection($package, PostageSetting::PackerAndAutomation);
+    orderFromAmazonConnection($package);
     registerQuotingAdapter([discoveredRate(4.00)]);
 
     $result = autoShipAs($user, $package->fresh());
@@ -473,10 +452,10 @@ it('leaves a packer-and-automation connection\'s offer to the method', function 
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
-it('auto ships a packer-and-automation connection\'s offer the method allows', function (): void {
+it('auto ships a selling connection\'s offer the method allows', function (): void {
     $this->actingAs($user = User::factory()->create());
     $package = packageForDiscoveredQuote();
-    orderFromAmazonConnection($package, PostageSetting::PackerAndAutomation);
+    orderFromAmazonConnection($package);
     registerQuotingAdapter([discoveredRate(4.00, carrierServiceId: listedServiceId())]);
 
     $result = autoShipAs($user, $package->fresh());
@@ -485,15 +464,16 @@ it('auto ships a packer-and-automation connection\'s offer the method allows', f
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
-it('records the postage setting refusal on a batch ship item', function (): void {
+it('auto ships a selling connection\'s offer under any service', function (): void {
+    $this->actingAs($user = User::factory()->create());
     $package = packageForDiscoveredQuote(UnlistedServices::Any);
-    orderFromAmazonConnection($package, PostageSetting::PackerOnly);
+    orderFromAmazonConnection($package);
     registerQuotingAdapter([discoveredRate(4.00)]);
 
-    $item = batchShipPackage($package);
+    $result = autoShipAs($user, $package->fresh());
 
-    expect($item->status)->toBe(LabelBatchItemStatus::Failed)
-        ->and($item->error_message)->toContain('sells postage to a packer only');
+    expect($result->success)->toBeTrue()
+        ->and($package->fresh()->status)->toBe(PackageStatus::Shipped);
 });
 
 /*

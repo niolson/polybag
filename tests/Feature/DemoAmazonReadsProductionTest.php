@@ -66,6 +66,7 @@ beforeEach(function (): void {
 
     $this->amazon = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
+        'sells_postage' => true,
         'name' => 'Prospect Amazon',
         'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER'],
         'secret_settings' => [
@@ -470,6 +471,7 @@ it('discovers the seller\'s marketplaces from production in demo', function (): 
     $this->app['env'] = 'demo';
     $connected = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
+        'sells_postage' => true,
         'settings' => [],
         'secret_settings' => ['client_id' => 'demo-client-id', 'client_secret' => 'demo-client-secret', 'refresh_token' => 'demo-refresh-token'],
     ]);

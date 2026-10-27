@@ -394,8 +394,8 @@ class AmazonBuyShippingService
      * ID it returned — the recovery for a confirmed sale whose Label was never
      * saved (`postage-source-split/16`).
      *
-     * Nothing is bought, so neither the offer's purchase tokens nor the
-     * connection's postage setting matter: the shipment exists and is paid
+     * Nothing is bought, so neither the offer's purchase tokens nor whether
+     * the connection sells postage matter: the shipment exists and is paid
      * for. Only the connection that sold it can be asked for its documents.
      * An Amazon order's own postage takes no `format` or `dpi` — Amazon applies
      * the purchase's — so the DPI recorded is this workstation's, the best
@@ -458,12 +458,12 @@ class AmazonBuyShippingService
      * recording A as its provenance. Amazon would refuse, but a refusal that
      * only happens because Amazon happened to check is not the guarantee.
      *
-     * The connection's postage setting is checked again too, for an Amazon
-     * order's own postage: an offer quoted before an admin set the connection
-     * not to sell postage must not stay spendable (ADR-0006 decision 6). An
+     * Whether the connection sells postage is checked again too, for an Amazon
+     * order's own postage: an offer quoted before an admin turned the
+     * connection's postage off must not stay spendable (ADR-0006 decision 6). An
      * Amazon order is only ever quoted on its own connection, so it is always
      * that postage. Amazon Shipping for an order from another channel is not
-     * governed by the setting and is not checked.
+     * governed by it and is not checked.
      *
      * @throws AmazonLabelPurchaseException which resolves the offer: nothing was bought
      */
@@ -480,10 +480,10 @@ class AmazonBuyShippingService
             );
         }
 
-        if (! $source->postageSetting()->sells() && $this->postageSourceResolver->isAmazonOrder($package)) {
+        if (! $source->sellsPostage() && $this->postageSourceResolver->isAmazonOrder($package)) {
             throw new AmazonLabelPurchaseException(
-                "The connection \"{$source->name}\" is set not to sell postage, so this rate cannot be bought. "
-                .'Change its postage setting under Integrations → Connections, or choose another rate.'
+                "The connection \"{$source->name}\" does not sell postage, so this rate cannot be bought. "
+                .'Turn on Sells Postage for it under Integrations → Connections, or choose another rate.'
             );
         }
 

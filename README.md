@@ -173,8 +173,8 @@ the application database.
 | Database, Redis, mail, SSO, Google validation, Gotenberg | `.env` |
 
 Connections have separate switches for being active and importing orders. A Connection
-can sell postage or receive tracking without importing. Its postage setting controls
-whether it sells to packers, automation, or neither.
+can sell postage or receive tracking without importing. Its **Sells Postage** switch decides
+whether Shopify or Amazon postage is bought on its account at all.
 
 Amazon-specific screens appear when an Amazon Connection is active or **Amazon features**
 is enabled in App Settings. Enable that setting manually for Amazon orders imported from
@@ -270,8 +270,8 @@ state.
 A packer may buy any Offer shown on the Ship page. Auto-ship, batch shipping, and shipping
 rules buy only within the shipping method's **allowance**: the postage sources the method
 permits, and the services it lists. For Amazon Buy Shipping, an administrator can widen
-this to any service Amazon offers. A Connection's **postage setting** (*does not sell
-postage*, *packer only*, or *packer and automation*) can narrow the allowance further. A
+this to any service Amazon offers. A Connection that does not **sell postage** is
+never asked, by a packer or by automation. A
 Shipment needs a shipping method before any Label is bought.
 
 Amazon's Shipping v2 API distinguishes Amazon orders (`channelType: AMAZON`) from orders
