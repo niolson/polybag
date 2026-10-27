@@ -159,9 +159,8 @@ it('disables the run import action for inactive sources', function (): void {
         ->assertActionDisabled('run_import');
 });
 
-it('queues a bounded historical Amazon import from the edit page', function (): void {
+it('offers no historical import on an Amazon connection', function (): void {
     config(['app.env' => 'local']);
-    Queue::fake();
     $this->actingAs($this->admin);
 
     $source = DataSource::factory()->create([
@@ -171,101 +170,7 @@ it('queues a bounded historical Amazon import from the edit page', function (): 
     ]);
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertActionVisible('import_historical_amazon_orders')
-        ->callAction('import_historical_amazon_orders', data: [
-            'created_after' => '2025-12-01',
-            'created_before' => '2025-12-08',
-            'max_orders' => 1000,
-        ])
-        ->assertNotified('Historical Amazon import queued');
-
-    Queue::assertPushed(RunDataSourceImportJob::class, function (RunDataSourceImportJob $job) use ($source): bool {
-        expect($job->dataSourceId)->toBe($source->id)
-            ->and($job->sourceOverrides)->toBe([
-                '_historical_import' => true,
-                '_historical_created_after' => '2025-12-01T00:00:00+00:00',
-                '_historical_created_before' => '2025-12-08T23:59:59+00:00',
-                '_historical_max_orders' => 1000,
-            ]);
-
-        return true;
-    });
-});
-
-it('queues a historical Amazon import across a date range longer than thirty one days', function (): void {
-    config(['app.env' => 'local']);
-    Queue::fake();
-    $this->actingAs($this->admin);
-
-    $source = DataSource::factory()->create([
-        'source_type' => AmazonSource::class,
-        'active' => true,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
-    ]);
-
-    Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->callAction('import_historical_amazon_orders', data: [
-            'created_after' => '2025-01-01',
-            'created_before' => '2025-12-01',
-            'max_orders' => 1000,
-        ])
-        ->assertNotified('Historical Amazon import queued');
-
-    Queue::assertPushed(RunDataSourceImportJob::class, function (RunDataSourceImportJob $job): bool {
-        return $job->sourceOverrides['_historical_created_after'] === '2025-01-01T00:00:00+00:00'
-            && $job->sourceOverrides['_historical_created_before'] === '2025-12-01T23:59:59+00:00'
-            && $job->sourceOverrides['_historical_max_orders'] === 1000;
-    });
-});
-
-it('shows an inline error when the historical Amazon end date precedes the start date', function (): void {
-    config(['app.env' => 'local']);
-    Queue::fake();
-    $this->actingAs($this->admin);
-
-    $source = DataSource::factory()->create([
-        'source_type' => AmazonSource::class,
-        'active' => true,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
-    ]);
-
-    Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->callAction('import_historical_amazon_orders', data: [
-            'created_after' => '2025-12-01',
-            'created_before' => '2025-01-01',
-            'max_orders' => 1000,
-        ])
-        ->assertHasActionErrors(['created_before']);
-
-    Queue::assertNothingPushed();
-});
-
-it('disables historical Amazon imports while sandbox mode is enabled', function (): void {
-    config(['app.env' => 'local']);
-    app(SettingsService::class)->set('sandbox_mode', true);
-    $this->actingAs($this->admin);
-
-    $source = DataSource::factory()->create([
-        'source_type' => AmazonSource::class,
-        'active' => true,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
-    ]);
-
-    Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertActionDisabled('import_historical_amazon_orders');
-});
-
-it('hides historical Amazon imports outside the local environment', function (): void {
-    config(['app.env' => 'production']);
-    $this->actingAs($this->admin);
-
-    $source = DataSource::factory()->create([
-        'source_type' => AmazonSource::class,
-        'active' => true,
-    ]);
-
-    Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertActionHidden('import_historical_amazon_orders');
+        ->assertActionDoesNotExist('import_historical_amazon_orders');
 });
 
 it('dispatches an import job from the table row action', function (): void {

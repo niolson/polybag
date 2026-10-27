@@ -33,7 +33,6 @@ use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Sleep;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -1157,88 +1156,6 @@ it('imports multiple pages of amazon orders', function (): void {
         ->and($secondQuery['maxResultsPerPage'])->toBe(100);
 });
 
-it('imports a bounded historical shipped-order sample with full quantities', function (): void {
-    $channel = tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
-
-    $orders = collect(range(1, 4))->map(function (int $number): array {
-        $order = sampleAmazonOrder("111-0000000-000000{$number}");
-        $order['createdTime'] = '2025-12-01T12:00:00Z';
-        $order['salesChannel'] = 'Amazon.com';
-        $order['fulfillment'] = [
-            'fulfillmentStatus' => 'SHIPPED',
-            'fulfilledBy' => 'MERCHANT',
-            'fulfillmentServiceLevel' => 'EXPEDITED',
-        ];
-        $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
-        $order['orderItems'][0]['fulfillment']['quantityFulfilled'] = 3;
-        $order['orderItems'][1]['fulfillment']['quantityFulfilled'] = 1;
-
-        return $order;
-    })->all();
-
-    Saloon::fake([
-        SearchOrders::class => amazonOrdersResponse($orders),
-        SearchCatalogItems::class => amazonCatalogResponse([
-            [
-                'asin' => 'B000TEST01',
-                'identifiers' => [
-                    [
-                        'marketplaceId' => 'ATVPDKIKX0DER',
-                        'identifiers' => [
-                            ['identifierType' => 'EAN', 'identifier' => '0012345678905'],
-                            ['identifierType' => 'GTIN', 'identifier' => '00012345678905'],
-                            ['identifierType' => 'UPC', 'identifier' => '012345678905'],
-                        ],
-                    ],
-                ],
-            ],
-        ]),
-    ]);
-
-    $result = ShipmentImportService::forRecord($this->dataSource, [
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 2,
-    ])->import();
-
-    expect($result->shipmentsCreated)->toBe(2)
-        ->and($result->itemsCreated)->toBe(4)
-        ->and(Shipment::count())->toBe(2);
-
-    $shipment = Shipment::where('shipment_reference', '111-0000000-0000001')->firstOrFail();
-
-    expect($shipment->status)->toBe(ShipmentStatus::Shipped)
-        ->and($shipment->shipmentItems)->toHaveCount(2)
-        ->and($shipment->shipmentItems->sum('quantity'))->toBe(4)
-        ->and($shipment->metadata['amazon_order_status'])->toBe('SHIPPED')
-        ->and($shipment->metadata['amazon_created_time'])->toBe('2025-12-01T12:00:00Z')
-        ->and($shipment->metadata['amazon_sales_channel'])->toBe('Amazon.com')
-        ->and($shipment->metadata['amazon_fulfilled_by'])->toBe('MERCHANT')
-        ->and($shipment->metadata['amazon_fulfillment_service_level'])->toBe('EXPEDITED')
-        ->and($shipment->metadata['amazon_asins'])->toBe(['B000TEST01'])
-        ->and($shipment->metadata['amazon_recipient_available'])->toBeTrue();
-
-    $product = Product::where('sku', 'SKU-100')->firstOrFail();
-
-    expect($product->barcode)->toBe('012345678905');
-
-    Saloon::assertSent(function ($request): bool {
-        if (! $request instanceof SearchOrders) {
-            return false;
-        }
-
-        $query = $request->query()->all();
-
-        return $query['fulfillmentStatuses'] === 'SHIPPED'
-            && $query['createdAfter'] === '2025-12-01T00:00:00Z'
-            && $query['createdBefore'] === '2025-12-08T23:59:59Z'
-            && $query['maxResultsPerPage'] === 2
-            && str_contains($query['includedData'], 'PACKAGES')
-            && ! str_contains($query['includedData'], 'BUYER');
-    });
-});
-
 it('fills a new product\'s barcode from the catalog on a regular import', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
 
@@ -1354,12 +1271,7 @@ it('does not replace a manually assigned product barcode during catalog enrichme
         ]]),
     ]);
 
-    ShipmentImportService::forRecord($this->dataSource, [
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1,
-    ])->import();
+    ShipmentImportService::forRecord($this->dataSource)->import();
 
     expect(Product::where('sku', 'SKU-100')->firstOrFail()->barcode)->toBe('MANUAL-BARCODE');
 });
@@ -1628,146 +1540,6 @@ it('does not ask the catalog about an item with no SKU', function (): void {
     Saloon::assertNotSent(SearchCatalogItems::class);
 });
 
-it('imports up to one thousand historical orders in pages of one hundred', function (): void {
-    $responses = collect(range(0, 9))->map(function (int $page): MockResponse {
-        $orders = collect(range(1, 100))->map(fn (int $number): array => [
-            'orderId' => sprintf('111-%07d-%07d', $page, $number),
-            'fulfillment' => ['fulfillmentStatus' => 'SHIPPED'],
-            'orderItems' => [],
-        ])->all();
-
-        return amazonOrdersResponse($orders, $page < 9 ? 'page-'.($page + 2) : null);
-    })->all();
-
-    $mockClient = Saloon::fake($responses);
-
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1000,
-    ]);
-
-    expect($source->fetchShipments())->toHaveCount(1000);
-
-    $searchRequests = collect($mockClient->getRecordedResponses())
-        ->map(fn ($response) => $response->getPendingRequest()->getRequest())
-        ->filter(fn ($request): bool => $request instanceof SearchOrders)
-        ->values();
-
-    expect($searchRequests)->toHaveCount(10)
-        ->and($searchRequests->every(
-            fn (SearchOrders $request): bool => $request->query()->all()['maxResultsPerPage'] === 100
-                && $request->query()->all()['fulfillmentStatuses'] === 'SHIPPED'
-                && $request->query()->all()['createdAfter'] === '2025-12-01T00:00:00Z'
-                && $request->query()->all()['createdBefore'] === '2025-12-08T23:59:59Z'
-        ))->toBeTrue();
-});
-
-it('rejects historical Amazon imports over one thousand orders', function (): void {
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1001,
-    ]);
-
-    expect(fn () => $source->validateConfiguration())
-        ->toThrow(InvalidArgumentException::class, '1–1000 orders');
-});
-
-it('retains an old shipped order when Amazon no longer returns its recipient address', function (): void {
-    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
-
-    $order = sampleAmazonOrder();
-    $order['fulfillment']['fulfillmentStatus'] = 'SHIPPED';
-    $order['recipient'] = [];
-    $order['orderItems'][0]['fulfillment']['quantityFulfilled'] = 3;
-    $order['orderItems'][1]['fulfillment']['quantityFulfilled'] = 1;
-
-    Saloon::fake([
-        SearchOrders::class => amazonOrdersResponse([$order]),
-        SearchCatalogItems::class => amazonCatalogResponse(),
-    ]);
-
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1,
-    ]);
-
-    $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
-    $shipment = Shipment::firstOrFail();
-
-    expect($result->shipmentsCreated)->toBe(1)
-        ->and($shipment->address1)->toBe('[Unavailable from Amazon]')
-        ->and($shipment->city)->toBe('[Unavailable]')
-        ->and($shipment->metadata['amazon_recipient_available'])->toBeFalse();
-});
-
-it('preserves existing recipient data while marking a historical Amazon order shipped', function (): void {
-    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
-
-    Shipment::factory()->create([
-        'client_id' => $this->dataSource->client_id,
-        'data_source_id' => $this->dataSource->id,
-        'source_record_id' => '111-2222222-3333333',
-        'shipment_reference' => '111-2222222-3333333',
-        'status' => ShipmentStatus::Open,
-        'first_name' => 'Original',
-        'last_name' => 'Recipient',
-        'address1' => '123 Existing St',
-        'city' => 'Portland',
-        'state_or_province' => 'OR',
-        'postal_code' => '97201',
-        'country' => 'US',
-        'email' => 'preserve@example.com',
-        'residential' => false,
-    ]);
-
-    $order = sampleAmazonOrder();
-    $order['fulfillment']['fulfillmentStatus'] = 'SHIPPED';
-    $order['recipient'] = [];
-
-    Saloon::fake([
-        SearchOrders::class => amazonOrdersResponse([$order]),
-        SearchCatalogItems::class => amazonCatalogResponse(),
-    ]);
-
-    $result = ShipmentImportService::forRecord($this->dataSource, [
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1,
-    ])->import();
-
-    $shipment = Shipment::where('source_record_id', '111-2222222-3333333')->firstOrFail();
-
-    expect($result->shipmentsUpdated)->toBe(1)
-        ->and($shipment->status)->toBe(ShipmentStatus::Shipped)
-        ->and($shipment->first_name)->toBe('Original')
-        ->and($shipment->address1)->toBe('123 Existing St')
-        ->and($shipment->city)->toBe('Portland')
-        ->and($shipment->email)->toBe('preserve@example.com')
-        ->and($shipment->residential)->toBeFalse();
-});
-
 it('preserves an existing buyer email when Amazon omits buyer data', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
 
@@ -1788,35 +1560,6 @@ it('preserves an existing buyer email when Amazon omits buyer data', function ()
 
     expect(Shipment::where('source_record_id', '111-2222222-3333333')->value('email'))
         ->toBe('preserve@example.com');
-});
-
-it('does not log historical Amazon response payloads', function (): void {
-    $order = sampleAmazonOrder();
-    $order['orderItems'][0]['product']['asin'] = 'B000TEST01';
-
-    Saloon::fake([
-        SearchOrders::class => amazonOrdersResponse([$order]),
-        SearchCatalogItems::class => amazonCatalogResponse(),
-    ]);
-
-    $log = Log::spy();
-
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_data_source_id' => $this->dataSource->id,
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1,
-    ]);
-
-    expect($source->fetchShipments())->toHaveCount(1);
-
-    $log->shouldNotHaveReceived('info');
 });
 
 it('batches Amazon catalog lookups into at most twenty ASINs', function (): void {
@@ -1844,10 +1587,6 @@ it('batches Amazon catalog lookups into at most twenty ASINs', function (): void
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
         'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 100,
     ]);
 
     expect($source->fetchShipments())->toHaveCount(1);
@@ -1890,10 +1629,6 @@ it('continues an Amazon order import when the catalog lookup fails', function ()
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
         'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 100,
     ]);
 
     $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
@@ -1937,10 +1672,6 @@ it('backs off and recovers when Amazon rate limits a catalog lookup', function (
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
         'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 100,
     ]);
 
     $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
@@ -1954,42 +1685,6 @@ it('backs off and recovers when Amazon rate limits a catalog lookup', function (
         Sleep::for(1)->second(),
         Sleep::for(2)->seconds(),
     ]);
-});
-
-it('accepts a historical Amazon import date range longer than thirty one days', function (): void {
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-01-01T00:00:00Z',
-        '_historical_created_before' => '2025-03-01T00:00:00Z',
-        '_historical_max_orders' => 11,
-    ]);
-
-    expect(fn () => $source->validateConfiguration())
-        ->not->toThrow(InvalidArgumentException::class);
-});
-
-it('rejects historical production-order imports while sandbox mode is enabled', function (): void {
-    app(SettingsService::class)->set('sandbox_mode', true);
-
-    $source = new AmazonSource([
-        'channel_name' => 'Amazon',
-        'client_id' => 'test-client-id',
-        'client_secret' => 'test-client-secret',
-        'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 1,
-    ]);
-
-    expect(fn () => $source->validateConfiguration())
-        ->toThrow(RuntimeException::class, 'Disable sandbox mode');
 });
 
 it('validates amazon configuration requires credentials', function (): void {
@@ -2309,43 +2004,6 @@ it('imports Amazon-fulfilled orders when the source opts in, and marks them', fu
 
     expect($shipment->metadata['amazon_fulfilled_by'])->toBe('AMAZON')
         ->and($shipment->isAmazonFulfilled())->toBeTrue();
-});
-
-it('counts only imported orders against the historical max, not discarded FBA ones', function (): void {
-    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
-
-    // Two FBA orders sit in front of the merchant-fulfilled ones. If the cap
-    // counted fetched rather than kept orders it would fill up on the FBA pair
-    // and import almost nothing.
-    $orders = [];
-
-    foreach (['111-0000000-0000001', '111-0000000-0000002'] as $orderId) {
-        $order = sampleAmazonOrder($orderId);
-        $order['fulfillment']['fulfilledBy'] = 'AMAZON';
-        $orders[] = $order;
-    }
-
-    $orders[] = sampleAmazonOrder('111-0000000-0000003');
-    $orders[] = sampleAmazonOrder('111-0000000-0000004');
-    // A third merchant-fulfilled order, past the cap, so the cap is still
-    // proven to apply rather than the assertion just counting the non-FBA ones.
-    $orders[] = sampleAmazonOrder('111-0000000-0000005');
-
-    Saloon::fake([
-        SearchOrders::class => amazonOrdersResponse($orders),
-        SearchCatalogItems::class => amazonCatalogResponse([]),
-    ]);
-
-    $result = ShipmentImportService::forRecord($this->dataSource, [
-        '_historical_import' => true,
-        '_historical_created_after' => '2025-12-01T00:00:00Z',
-        '_historical_created_before' => '2025-12-08T23:59:59Z',
-        '_historical_max_orders' => 2,
-    ])->import();
-
-    expect($result->shipmentsCreated)->toBe(2)
-        ->and(Shipment::pluck('shipment_reference')->sort()->values()->all())
-        ->toBe(['111-0000000-0000003', '111-0000000-0000004']);
 });
 
 /**

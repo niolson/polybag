@@ -438,35 +438,6 @@ it('imports the seller\'s open orders from production in demo, as real orders', 
         && str_starts_with($response->getPendingRequest()->getUrl(), DEMO_AMAZON_PRODUCTION_HOST.'/'));
 });
 
-it('allows a historical import in demo', function (): void {
-    $this->app['env'] = 'demo';
-
-    $source = new AmazonSource([
-        ...$this->amazon->settings,
-        ...$this->amazon->secret_settings,
-        '_data_source_id' => $this->amazon->id,
-        '_historical_import' => true,
-        '_historical_created_after' => '2026-09-01T00:00:00Z',
-        '_historical_created_before' => '2026-09-30T23:59:59Z',
-        '_historical_max_orders' => 10,
-    ]);
-
-    $source->validateConfiguration();
-})->throwsNoExceptions();
-
-it('still refuses a historical import in dev while sandbox mode is on', function (): void {
-    app(SettingsService::class)->set('sandbox_mode', true);
-
-    (new AmazonSource([
-        ...$this->amazon->settings,
-        ...$this->amazon->secret_settings,
-        '_historical_import' => true,
-        '_historical_created_after' => '2026-09-01T00:00:00Z',
-        '_historical_created_before' => '2026-09-30T23:59:59Z',
-        '_historical_max_orders' => 10,
-    ]))->validateConfiguration();
-})->throws(RuntimeException::class, 'Historical Amazon order imports require production mode');
-
 it('discovers the seller\'s marketplaces from production in demo', function (): void {
     $this->app['env'] = 'demo';
     $connected = DataSource::factory()->create([
@@ -555,32 +526,6 @@ it('logs no buyer data while importing in demo, even from a row that fails', fun
 
     foreach (demoAmazonBuyerData() as $buyerData) {
         expect($everything)->not->toContain($buyerData);
-    }
-});
-
-it('withholds the address of a historical import in demo', function (): void {
-    $this->app['env'] = 'demo';
-    Saloon::fake([
-        SearchOrders::class => MockResponse::make(['orders' => [demoAmazonOrder()]]),
-        SearchCatalogItems::class => MockResponse::make(['numberOfResults' => 0, 'items' => []]),
-    ]);
-
-    $source = new AmazonSource([
-        ...$this->amazon->settings,
-        ...$this->amazon->secret_settings,
-        '_data_source_id' => $this->amazon->id,
-        '_historical_import' => true,
-        '_historical_created_after' => '2026-09-01T00:00:00Z',
-        '_historical_created_before' => '2026-09-30T23:59:59Z',
-        '_historical_max_orders' => 10,
-    ]);
-
-    $rows = json_encode($source->fetchShipments()->all());
-
-    expect($rows)->toContain('Lemont')->toContain('60439');
-
-    foreach (demoAmazonBuyerData() as $buyerData) {
-        expect($rows)->not->toContain($buyerData);
     }
 });
 

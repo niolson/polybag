@@ -15,11 +15,8 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use App\Services\ShopifyLocationSynchronizer;
-use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
-use Filament\Forms\Components\DatePicker;
-use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Filament\Support\Exceptions\Halt;
@@ -86,59 +83,6 @@ class EditDataSource extends EditRecord
                         ->info()
                         ->title('Import queued')
                         ->body("You'll be notified when \"{$this->record->name}\" finishes importing.")
-                        ->send();
-                }),
-
-            Action::make('import_historical_amazon_orders')
-                ->authorize('update')
-                ->label('Import Historical Orders')
-                ->icon('heroicon-o-clock')
-                ->color('gray')
-                ->visible(fn (): bool => config('app.env') === 'local'
-                    && $this->dataSource()->source_type === AmazonSource::class
-                    && $this->dataSource()->import_enabled)
-                ->disabled(fn (): bool => ! $this->dataSource()->active || $this->amazonMarketplaceIsMissing() || app(AmazonSpApiEnvironment::class)->readsFromSandbox())
-                ->tooltip(fn (): ?string => app(AmazonSpApiEnvironment::class)->readsFromSandbox() ? 'Disable sandbox mode in App Settings to import real Amazon orders.' : null)
-                ->modalHeading('Import historical shipped Amazon orders')
-                ->modalDescription('Imports up to 1,000 shipped orders as historical shipped shipments. Large imports use multiple Amazon API pages and may take several minutes. This does not confirm anything back to Amazon or affect scheduled import settings.')
-                ->schema([
-                    DatePicker::make('created_after')
-                        ->label('Orders created on or after')
-                        ->default(now()->subMonths(9)->toDateString())
-                        ->required(),
-                    DatePicker::make('created_before')
-                        ->label('Orders created on or before')
-                        ->default(now()->subMonths(8)->toDateString())
-                        ->afterOrEqual('created_after')
-                        ->required(),
-                    TextInput::make('max_orders')
-                        ->label('Maximum orders')
-                        ->numeric()
-                        ->integer()
-                        ->default(5)
-                        ->minValue(1)
-                        ->maxValue(AmazonSource::HISTORICAL_IMPORT_MAX_ORDERS)
-                        ->required(),
-                ])
-                ->action(function (array $data): void {
-                    $createdAfter = Carbon::parse($data['created_after'])->startOfDay();
-                    $createdBefore = Carbon::parse($data['created_before'])->endOfDay();
-
-                    RunDataSourceImportJob::dispatch(
-                        $this->dataSource()->id,
-                        auth()->id(),
-                        [
-                            '_historical_import' => true,
-                            '_historical_created_after' => $createdAfter->utc()->toIso8601String(),
-                            '_historical_created_before' => $createdBefore->utc()->toIso8601String(),
-                            '_historical_max_orders' => (int) $data['max_orders'],
-                        ],
-                    );
-
-                    Notification::make()
-                        ->info()
-                        ->title('Historical Amazon import queued')
-                        ->body('Up to '.(int) $data['max_orders'].' shipped orders will be imported. You will receive a notification when it finishes.')
                         ->send();
                 }),
 
