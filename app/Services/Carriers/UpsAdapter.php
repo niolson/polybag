@@ -48,6 +48,7 @@ use App\Services\Carriers\Concerns\HasDefaultServiceCapabilities;
 use App\Services\Carriers\Concerns\IdentifiesCatalogServices;
 use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
+use App\Services\SettingsService;
 use App\Support\LabelText;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
@@ -945,8 +946,18 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         throw new UnreadablePurchaseResponseException(Carrier::UPS, $this->scrubCustomsIds($reason, $request), $trackingNumber, $previous);
     }
 
+    /**
+     * The UPS sandbox (CIE) refuses to void the labels it sells — every
+     * tracking number it issues comes back invalid on VoidShipment — so in
+     * sandbox mode the void is simulated rather than sent. A sandbox label
+     * carries no postage, so there is nothing at UPS to undo.
+     */
     public function cancelShipment(string $trackingNumber, Package $package): CancelResponse
     {
+        if (app(SettingsService::class)->isSandboxMode()) {
+            return CancelResponse::success('UPS sandbox labels cannot be voided at UPS; the void was simulated.');
+        }
+
         try {
             // The account that bought the label — see labelAccount().
             $connector = $this->resolveConnector($this->labelAccount($package));

@@ -34,6 +34,7 @@ use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\UpsAdapter;
 use App\Services\Customs\CustomsTermsSnapshot;
+use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Log;
 use Monolog\Handler\TestHandler;
@@ -2226,6 +2227,39 @@ it('does not read a UPS 2xx it cannot read as a void', function (MockResponse $r
     'not JSON' => fn (): MockResponse => MockResponse::make('<html>gateway</html>', 200),
     'JSON that is not an object' => fn (): MockResponse => MockResponse::make('true', 200),
 ]);
+
+it('simulates the void in sandbox mode without asking UPS', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', true);
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        VoidShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '190117', 'message' => 'Invalid tracking number']]]], 400),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
+    ]);
+
+    $response = $this->adapter->cancelShipment('1Z999AA10123456784', $package);
+
+    expect($response->success)->toBeTrue()
+        ->and($response->message)->toContain('simulated');
+    Saloon::assertNotSent(VoidShipment::class);
+});
+
+it('sends the void to UPS outside sandbox mode', function (): void {
+    app(SettingsService::class)->set('sandbox_mode', false);
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        VoidShipment::class => MockResponse::make(['response' => ['errors' => [['code' => '190117', 'message' => 'Invalid tracking number']]]], 400),
+    ]);
+
+    $package = Package::factory()->shipped()->for(Shipment::factory())->create([
+        'carrier' => 'UPS', 'carrier_account_id' => CarrierAccount::query()->value('id'), 'tracking_number' => '1Z999AA10123456784',
+    ]);
+
+    expect($this->adapter->cancelShipment('1Z999AA10123456784', $package)->success)->toBeFalse();
+    Saloon::assertSent(VoidShipment::class);
+});
 
 /*
 |--------------------------------------------------------------------------
