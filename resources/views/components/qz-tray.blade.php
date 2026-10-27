@@ -121,6 +121,8 @@
 
                 document.dispatchEvent(new CustomEvent('qz-tray:connected'));
 
+                await watchPrinterStatus();
+
                 if (!PrinterSettings.hasLabelPrinter()) {
                     // Always warn if no printer configured
                     showStatus('No label printer is selected for this computer.', 'warning', 'Choose printer');
@@ -187,6 +189,228 @@
             });
         }
 
+        // Printer status as the OS reports it through QZ: by printer name, every
+        // status the printer currently has. A driver that reports status (Zebra's
+        // does) says OFFLINE the moment the printer is switched off or unplugged,
+        // and OK when it is back. A printer that never reports stays unknown, and
+        // the print deadline below still covers it.
+        const printerStatus = new Map();
+        const printerProblemWaiters = new Set();
+        const BLOCKING_SEVERITIES = ['ERROR', 'FATAL'];
+
+        const isPrinterProblem = (event) => BLOCKING_SEVERITIES.includes(event?.severity);
+
+        const printerStatusWord = (event) => (event.statusText || 'error').toLowerCase().replace(/_/g, ' ');
+
+        const describePrinterProblem = (event) => `${event.printerName} is ${printerStatusWord(event)}`;
+
+        // The status that stops a printer printing, or undefined.
+        const blockingStatus = (printer) => (printerStatus.get(printer) ?? []).find(isPrinterProblem);
+
+        // Start listening to this workstation's printers. Best-effort: a QZ that
+        // will not report status must not stop printing, it only loses the early
+        // warning.
+        async function watchPrinterStatus() {
+            const printers = [...new Set([
+                PrinterSettings.imageLabelPrinter(),
+                PrinterSettings.rawLabelPrinter(),
+                PrinterSettings.documentPrinter(),
+            ].filter(Boolean))];
+
+            if (printers.length === 0) {
+                return;
+            }
+
+            qz.printers.setPrinterCallbacks(onPrinterStatus);
+
+            try {
+                await qz.printers.startListening(printers);
+                // Current status arrives through the callback, not as a result,
+                // and is applied as a batch. Wait for it, so a print right after a
+                // reconnect is checked against it.
+                await qz.printers.getStatus();
+                await new Promise((resolve) => setTimeout(resolve, STATUS_BATCH_MS + 50));
+            } catch (error) {
+                console.warn('Printer status is not available:', error);
+            }
+        }
+
+        function onPrinterStatus(event) {
+            if (event?.eventType !== 'PRINTER' || !event.printerName) {
+                return;
+            }
+
+            // Kept in the console: which statuses a given driver reports is the
+            // first question when a printer's state is not being noticed.
+            console.info('Printer status:', event.printerName, event.statusText, event.severity, event.statusCode);
+
+            const batch = statusBatches.get(event.printerName) ?? [];
+
+            if (batch.length === 0) {
+                setTimeout(() => applyStatusBatch(event.printerName), STATUS_BATCH_MS);
+            }
+
+            statusBatches.set(event.printerName, [...batch, event]);
+        }
+
+        // QZ reports a printer with several statuses at once (OFFLINE and
+        // TONER_LOW) as one event per status, sent together, and sends the full
+        // set again on every change. So the events arriving together are one
+        // snapshot of the printer and replace what it had: a later status cannot
+        // clear an OFFLINE sent alongside it, and a snapshot without OFFLINE does.
+        const STATUS_BATCH_MS = 100;
+        const statusBatches = new Map();
+
+        function applyStatusBatch(printer) {
+            const batch = statusBatches.get(printer) ?? [];
+            statusBatches.delete(printer);
+
+            const wasProblem = blockingStatus(printer) !== undefined;
+            printerStatus.set(printer, batch.filter((event) => event.statusText !== 'OK'));
+            const problem = blockingStatus(printer);
+
+            if (problem) {
+                for (const waiter of printerProblemWaiters) {
+                    waiter(problem);
+                }
+            }
+
+            // Said when it happens, not only when a print fails, so the operator
+            // knows before buying a label that cannot print.
+            if ((problem !== undefined) !== wasProblem) {
+                announcePrinterChange(printer);
+            }
+
+            document.dispatchEvent(new CustomEvent('qz-printer-status', { detail: { printerName: printer } }));
+        }
+
+        // Two Windows queues on one physical printer (an image and a raw queue on
+        // the same Zebra) report in the same instant. Gather the changes for a
+        // moment so the banner names them together instead of showing whichever
+        // came last.
+        const changedPrinters = new Set();
+        let announceTimer = null;
+
+        function announcePrinterChange(printerName) {
+            changedPrinters.add(printerName);
+            clearTimeout(announceTimer);
+            announceTimer = setTimeout(flushPrinterChanges, 300);
+        }
+
+        function joinNames(names) {
+            return names.length <= 1
+                ? names.join('')
+                : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+        }
+
+        function flushPrinterChanges() {
+            const names = [...changedPrinters];
+            changedPrinters.clear();
+
+            const problems = names.map(blockingStatus).filter(Boolean);
+            const recovered = names.filter((name) => !blockingStatus(name));
+
+            if (problems.length > 0) {
+                const statuses = [...new Set(problems.map(printerStatusWord))];
+                const what = statuses.length === 1
+                    ? `${joinNames(problems.map((event) => event.printerName))} ${problems.length === 1 ? 'is' : 'are'} ${statuses[0]}`
+                    : problems.map(describePrinterProblem).join('; ');
+
+                showStatus(`${what}. Nothing will print until ${problems.length === 1 ? 'it is' : 'they are'} back.`, 'warning', null, false);
+
+                return;
+            }
+
+            if (recovered.length > 0) {
+                showStatus(`${joinNames(recovered)} ${recovered.length === 1 ? 'is' : 'are'} back online. Anything that did not print can be reprinted now.`, 'success', null, false);
+            }
+        }
+
+        // For pages that should not start work a printer cannot finish, such as
+        // Pack buying a label: the problem the printer reports, or null.
+        window.QzPrinterStatus = {
+            problem(printer) {
+                const event = printer ? blockingStatus(printer) : undefined;
+
+                return event ? describePrinterProblem(event) : null;
+            },
+
+            // Keep a page's `labelPrinterProblem` (PrintsLabels) current, so the
+            // server refuses a purchase the label printer cannot print. Deferred:
+            // it travels with the page's next request rather than making its own.
+            bindLabelPrinter(wire) {
+                const sync = () => wire.set(
+                    'labelPrinterProblem',
+                    this.problem(PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat())),
+                    false,
+                );
+
+                sync();
+                document.addEventListener('qz-printer-status', sync);
+            },
+        };
+
+        // Refuse a print to a printer the OS already reports offline or in error,
+        // rather than handing QZ a job it will hold.
+        function assertPrinterReady(printer) {
+            const event = blockingStatus(printer);
+
+            if (event) {
+                throw new Error(describePrinterProblem(event));
+            }
+        }
+
+        // Rejects as soon as `printer` reports a problem while a job is waiting.
+        // That job was already handed over, so it may still come out later.
+        function printerProblem(printer) {
+            let waiter;
+
+            const promise = new Promise((_, reject) => {
+                waiter = (event) => {
+                    if (event.printerName === printer) {
+                        reject(new Error(`${describePrinterProblem(event)}. If it prints once the printer is back, do not print it again`));
+                    }
+                };
+                printerProblemWaiters.add(waiter);
+            });
+
+            return { promise, stop: () => printerProblemWaiters.delete(waiter) };
+        }
+
+        // How long to wait for QZ to report a job sent. A printer that is switched
+        // off or unplugged can leave qz.print pending forever, neither resolving
+        // nor rejecting, so without a deadline the page would sit on "Printing..."
+        // with no error. Documents are larger PDFs and get longer.
+        const LABEL_PRINT_TIMEOUT_MS = 15000;
+        const DOCUMENT_PRINT_TIMEOUT_MS = 60000;
+
+        // qz.print, refused up front if the printer is reported offline, and
+        // abandoned if it goes offline mid-job or the deadline passes. An abandoned
+        // job may still be held by the print system and come out once the printer
+        // is back, which the message says so the operator checks before reprinting.
+        // `printer` is the name the config was created for, passed rather than read
+        // back from the config, which holds it as `{ name }`.
+        async function printWithTimeout(printer, config, data, timeoutMs) {
+            assertPrinterReady(printer);
+
+            let timer;
+
+            const deadline = new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(
+                    `the printer did not respond within ${timeoutMs / 1000} seconds. It may be off or disconnected. If it prints once the printer is back, do not print it again`
+                )), timeoutMs);
+            });
+
+            const problem = printerProblem(printer);
+
+            try {
+                return await Promise.race([qz.print(config, data), deadline, problem.promise]);
+            } finally {
+                clearTimeout(timer);
+                problem.stop();
+            }
+        }
+
         // Send pack slips to the image label printer. They are laid out on 4x6
         // label stock, so the document printer's letter page would only scale
         // them up. Throws on any failure; resolves once QZ reports the job sent.
@@ -204,12 +428,12 @@
                 await initQZTray(true);
             }
 
-            await qz.print(labelStockConfig(printer), [{
+            await printWithTimeout(printer, labelStockConfig(printer), [{
                 type: 'pixel',
                 format: 'pdf',
                 flavor: 'base64',
                 data: base64Data
-            }]);
+            }], DOCUMENT_PRINT_TIMEOUT_MS);
         }
 
         // Print label via QZ Tray.
@@ -250,7 +474,7 @@
                 if (format === 'zpl') {
                     const config = qz.configs.create(printer);
                     const data = [atob(base64Data)];
-                    await qz.print(config, data);
+                    await printWithTimeout(printer, config, data, LABEL_PRINT_TIMEOUT_MS);
                     hideStatus();
                     return;
                 }
@@ -278,7 +502,7 @@
                     options: orientation === 'landscape' ? { rotation: 90 } : {}
                 }];
 
-                await qz.print(config, data);
+                await printWithTimeout(printer, config, data, LABEL_PRINT_TIMEOUT_MS);
                 // Success is shown via Filament notification, no need for banner
                 hideStatus();
             } catch (error) {
@@ -324,7 +548,7 @@
                     data: base64Data
                 }];
 
-                await qz.print(config, data);
+                await printWithTimeout(printer, config, data, DOCUMENT_PRINT_TIMEOUT_MS);
                 hideStatus();
 
                 return true;
@@ -531,6 +755,19 @@
             }
         }
 
+        // The banner sits at the top of the page, often scrolled out of view by
+        // the time a label is bought, and the purchase itself raises a success
+        // toast. A failed label print gets a toast of its own that stays until
+        // dismissed, carrying the banner's explanation.
+        function notifyLabelNotPrinted() {
+            new FilamentNotification()
+                .title('Label did not print')
+                .body(statusText.textContent)
+                .danger()
+                .persistent()
+                .send();
+        }
+
         // Listen for print events from Livewire
         document.addEventListener('livewire:init', () => {
             Livewire.on('print-label', async (event) => {
@@ -543,6 +780,7 @@
                     if (event.orientation === 'report') {
                         // A label on 8.5x11 stock, which is the report printer's path already.
                         if (!await printReport(event.label, event.format || 'pdf')) {
+                            notifyLabelNotPrinted();
                             return;
                         }
                     } else {
@@ -555,6 +793,7 @@
                 } catch (error) {
                     // printLabel/printReport already showed the error banner. Stay on the
                     // page so the operator sees it instead of following redirectTo.
+                    notifyLabelNotPrinted();
                     return;
                 }
 

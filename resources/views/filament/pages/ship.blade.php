@@ -11,6 +11,8 @@
                     $wire.set('labelFormat', PrinterSettings.labelFormat());
                     $wire.set('labelDpi', PrinterSettings.labelDpi());
                     $wire.set('hasReportPrinter', PrinterSettings.hasDocumentPrinter());
+
+                    window.QzPrinterStatus.bindLabelPrinter($wire);
                 },
 
                 handleGlobalKey(e) {

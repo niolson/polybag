@@ -414,6 +414,23 @@
 
             async shipPackage() {
                 if (this.isShipping || !this.isReadyToShip()) return;
+
+                // Auto Ship buys and prints in one go. A label printer the OS
+                // already reports offline would leave a bought label unprinted.
+                const printerProblem = this.autoShipEnabled && !@js((bool) app(\App\Services\SettingsService::class)->get('suppress_printing', false))
+                    ? window.QzPrinterStatus?.problem(PrinterSettings.labelPrinterFor(this.labelFormat))
+                    : null;
+
+                if (printerProblem) {
+                    new FilamentNotification()
+                        .title('Label printer is offline')
+                        .body(`${printerProblem}. Reconnect it before shipping; no label was bought.`)
+                        .danger()
+                        .send();
+
+                    return;
+                }
+
                 // Ship saves the same state itself; a save landing after it could
                 // only reach a package that has since been bought.
                 clearTimeout(this.saveTimer);

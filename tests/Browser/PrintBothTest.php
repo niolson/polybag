@@ -44,12 +44,14 @@ function visitWithRecordingQz(PickBatch $batch, bool $failDocumentPrinter): mixe
         window.printedTo = [];
         window.qz = window.qz || {};
         qz.websocket = { isActive: () => true };
-        qz.configs = { create: (printer) => ({ printer }) };
+        // As a QZ Config holds it: setPrinter() wraps a name as { name }.
+        qz.configs = { create: (printer) => ({ getPrinter: () => ({ name: printer }) }) };
         qz.print = async (config) => {
-            if ('.($failDocumentPrinter ? 'true' : 'false')." && config.printer === 'Office Laser') {
+            const printer = config.getPrinter().name;
+            if ('.($failDocumentPrinter ? 'true' : 'false')." && printer === 'Office Laser') {
                 throw new Error('Office Laser is offline');
             }
-            window.printedTo.push(config.printer);
+            window.printedTo.push(printer);
         };
         true;
     ");

@@ -732,7 +732,7 @@ class Ship extends Page
             return;
         }
 
-        if ($this->refusesPurchase()) {
+        if ($this->refusesForLabelPrinter() || $this->refusesPurchase()) {
             return;
         }
 

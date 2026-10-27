@@ -127,6 +127,22 @@ it('rejects a print job sent anywhere but a named local printer, or with fetched
     'no params' => [[]],
 ]);
 
+it('rejects printer status listening that asks for spooled job data or names no printer', function (array $params): void {
+    $this->actingAs(User::factory()->create());
+
+    $this->postJson('/qz/sign', qzSignRequest('printers.startListening', $params))
+        ->assertStatus(422)
+        ->assertJson(['error' => 'Unsupported signing request']);
+})->with([
+    'job data' => [['printerNames' => ['Zebra'], 'jobData' => true]],
+    'job data size' => [['printerNames' => ['Zebra'], 'maxJobData' => 1024]],
+    'job data flavor' => [['printerNames' => ['Zebra'], 'flavor' => 'base64']],
+    'every printer' => [['printerNames' => [null]]],
+    'printer names as a string' => [['printerNames' => 'Zebra']],
+    'no printer names' => [['printerNames' => []]],
+    'no params' => [[]],
+]);
+
 it('returns 422 for missing request or payload parameter', function (): void {
     $this->actingAs(User::factory()->create());
 
@@ -234,6 +250,9 @@ it('signs allow-listed calls, including the hid.* scale integration family', fun
         'options' => new stdClass,
         'data' => ['^XA^FDhello^FS^XZ'],
     ]],
+    'printers.startListening' => ['printers.startListening', ['printerNames' => ['Zebra GX420d']]],
+    'printers.getStatus' => 'printers.getStatus',
+    'printers.stopListening' => 'printers.stopListening',
     'hid.listDevices' => 'hid.listDevices',
     'hid.claimDevice' => 'hid.claimDevice',
     'hid.releaseDevice' => 'hid.releaseDevice',

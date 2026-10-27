@@ -137,6 +137,42 @@ it('uses the account auto-ship setting and redirects attended-only options to th
     expect(session('ship_return_url'))->toBe('/manual-ship');
 });
 
+it('auto ships nothing while the label printer is reported offline', function (): void {
+    auth()->user()->update(['auto_ship_enabled' => true]);
+
+    Channel::factory()->create(['name' => 'Manual']);
+    $box = BoxSize::factory()->create();
+
+    $workflow = Mockery::mock(PackageShippingWorkflow::class);
+    $workflow->shouldNotReceive('autoShip');
+    app()->instance(PackageShippingWorkflow::class, $workflow);
+
+    Livewire::test(ManualShip::class)
+        ->set('labelPrinterProblem', 'Zebra ZP 450 is offline')
+        ->fillForm([
+            'shipment_reference' => 'MAN-OFFLINE-1',
+            'first_name' => 'Sam',
+            'last_name' => 'Lee',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
+            'box_size_id' => $box->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship')
+        ->assertNotified('Label printer is offline')
+        ->assertNoRedirect();
+
+    // Refused before anything was made, so the form can simply be submitted again.
+    expect(Shipment::where('shipment_reference', 'MAN-OFFLINE-1')->exists())->toBeFalse();
+});
+
 it('sends an unanswered purchase to its ship page rather than back to the form', function (): void {
     // project-review/01: resubmitting the form would create a new package and
     // buy again. The package's own Ship page asks the carrier first.
