@@ -43,6 +43,8 @@ final readonly class ProductCatalogSyncRun
         public array $unreadParts = [],
         /** How many parts were passed over in all. */
         public int $unreadCount = 0,
+        /** Why, as the source put it. */
+        public ?string $unreadReason = null,
     ) {}
 
     /** How many unread parts a run names; the rest are counted. */
@@ -75,6 +77,7 @@ final readonly class ProductCatalogSyncRun
             resumedFromPage: $this->pages + 1,
             unreadParts: $this->unreadParts,
             unreadCount: $this->unreadCount,
+            unreadReason: $this->unreadReason,
         );
     }
 
@@ -95,8 +98,9 @@ final readonly class ProductCatalogSyncRun
      * page starts, and any part of the catalog the read passed over.
      *
      * @param  list<string>  $unreadParts
+     * @param  ?string  $unreadReason  why the source could not read them
      */
-    public function withPage(int $created, int $updated, int $unchanged, ?string $nextCursor, array $unreadParts = []): self
+    public function withPage(int $created, int $updated, int $unchanged, ?string $nextCursor, array $unreadParts = [], ?string $unreadReason = null): self
     {
         return $this->copy([
             'progressAt' => CarbonImmutable::now(),
@@ -107,6 +111,7 @@ final readonly class ProductCatalogSyncRun
             'cursor' => $nextCursor,
             'unreadParts' => array_slice([...$this->unreadParts, ...$unreadParts], 0, self::MAX_UNREAD_PARTS),
             'unreadCount' => $this->unreadCount + count($unreadParts),
+            'unreadReason' => $this->unreadReason ?? $unreadReason,
         ]);
     }
 
@@ -126,7 +131,7 @@ final readonly class ProductCatalogSyncRun
         return $this->finish(
             ProductCatalogSyncStatus::Incomplete,
             implode('; ', $this->unreadParts).($more > 0 ? "; and {$more} more" : ''),
-            'Amazon returns at most 1,000 listings for one search, and more than that were created within one second, so some listings created then were not read.',
+            $this->unreadReason ?? 'Part of the catalog could not be read.',
         );
     }
 
@@ -195,6 +200,7 @@ final readonly class ProductCatalogSyncRun
             'resumed_from_page' => $this->resumedFromPage,
             'unread_parts' => $this->unreadParts,
             'unread_count' => $this->unreadCount,
+            'unread_reason' => $this->unreadReason,
         ];
     }
 
@@ -228,6 +234,7 @@ final readonly class ProductCatalogSyncRun
             resumedFromPage: isset($data['resumed_from_page']) ? (int) $data['resumed_from_page'] : null,
             unreadParts: is_array($data['unread_parts'] ?? null) ? array_values(array_filter($data['unread_parts'], is_string(...))) : [],
             unreadCount: (int) ($data['unread_count'] ?? 0),
+            unreadReason: isset($data['unread_reason']) ? (string) $data['unread_reason'] : null,
         );
     }
 
@@ -253,6 +260,7 @@ final readonly class ProductCatalogSyncRun
             'resumedFromPage' => $this->resumedFromPage,
             'unreadParts' => $this->unreadParts,
             'unreadCount' => $this->unreadCount,
+            'unreadReason' => $this->unreadReason,
             ...$changes,
         ]);
     }

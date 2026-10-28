@@ -97,7 +97,21 @@ class AmazonCatalogIdentifiers
      */
     public function fetch(Collection $asins): array
     {
+        return $this->fetchReportingFailures($asins)[0];
+    }
+
+    /**
+     * {@see fetch()}, and the ASINs of each chunk that failed, with the HTTP
+     * status Amazon answered, or null when no answer came (a connection or
+     * token failure). Failures are logged as {@see fetch()} logs them.
+     *
+     * @param  Collection<int, string>  $asins
+     * @return array{0: array<string, array{barcode: string|null, part_number: string|null}>, 1: array<string, int|null>}
+     */
+    public function fetchReportingFailures(Collection $asins): array
+    {
         $identifiers = [];
+        $failures = [];
 
         foreach ($asins->chunk(self::CHUNK_SIZE) as $asinChunk) {
             try {
@@ -111,6 +125,7 @@ class AmazonCatalogIdentifiers
 
                 if ($response->failed()) {
                     $this->logFailure($asinChunk->count(), 'Amazon returned HTTP '.$response->status().'.');
+                    $failures = array_replace($failures, $asinChunk->mapWithKeys(fn (string $asin): array => [$asin => $response->status()])->all());
 
                     continue;
                 }
@@ -143,10 +158,11 @@ class AmazonCatalogIdentifiers
                 $identifiers = array_replace($identifiers, $chunkIdentifiers);
             } catch (Throwable $exception) {
                 $this->logFailure($asinChunk->count(), $exception->getMessage());
+                $failures = array_replace($failures, $asinChunk->mapWithKeys(fn (string $asin): array => [$asin => null])->all());
             }
         }
 
-        return $identifiers;
+        return [$identifiers, $failures];
     }
 
     /**

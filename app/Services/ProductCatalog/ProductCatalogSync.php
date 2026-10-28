@@ -192,7 +192,7 @@ class ProductCatalogSync
             $run = $this->runs->update(
                 $dataSource,
                 $runId,
-                fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor, $page->unreadParts),
+                fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor, $page->unreadParts, $page->unreadReason),
             ) ?? throw new ProductCatalogSyncSuperseded;
 
             Log::info('Saved a page of a product catalog', [

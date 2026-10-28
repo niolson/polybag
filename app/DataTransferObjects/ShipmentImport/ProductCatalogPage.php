@@ -18,10 +18,12 @@ final readonly class ProductCatalogPage
     /**
      * @param  Collection<int, array<string, mixed>>  $items
      * @param  list<string>  $unreadParts  what the read passed over before this page, each named for the run status
+     * @param  ?string  $unreadReason  why the source could not read them, in its own words
      */
     public function __construct(
         public Collection $items,
         public ?string $nextCursor,
         public array $unreadParts = [],
+        public ?string $unreadReason = null,
     ) {}
 }

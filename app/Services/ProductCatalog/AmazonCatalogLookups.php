@@ -3,6 +3,7 @@
 namespace App\Services\ProductCatalog;
 
 use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
+use App\Enums\AmazonCatalogLookupOutcome;
 use App\Jobs\LookUpAmazonCatalogIdentifiersJob;
 use App\Models\AmazonCatalogLookup;
 use App\Models\DataSource;
@@ -12,7 +13,7 @@ use App\Services\ShipmentImport\AmazonCatalogIdentifiers;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Collection;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -26,16 +27,17 @@ use Illuminate\Support\Facades\DB;
  * {@see LookUpAmazonCatalogIdentifiersJob} works through the rows in short
  * slices, asking only about ASINs that
  * {@see AmazonCatalogIdentifiers::asinsNeedingLookup()} says need it, and
- * deletes each row once its ASIN is answered, fails, or needs nothing. A row
- * is the only record of work left, so a second look-up of the connection
- * finds only what the first has not done, and the job's overlap lock keeps
- * two from asking about the same rows at once.
+ * deletes each row once its ASIN is answered, refused, or needs nothing. A
+ * row Amazon could not answer for stays, and the job tries again later. A
+ * row is the only record of work left, so a second look-up of the connection
+ * finds only what the first has not done; the job is unique per connection,
+ * and its overlap lock keeps two from asking about the same rows at once.
  *
  * The catalog is Amazon's shared record, not the seller's data, so its
  * barcode and part number only fill blanks
  * ({@see AmazonCatalogIdentifiers::FILL_ONLY_FIELDS}). The look-up stamp
  * `identifiers_checked_at` always moves forward on an answer. A failed
- * request is logged and leaves the stamp alone, so the next sync asks again.
+ * request is logged and leaves the stamp alone.
  */
 class AmazonCatalogLookups
 {
@@ -64,11 +66,15 @@ class AmazonCatalogLookups
     }
 
     /**
-     * Look up recorded ASINs until the slice's time is up or none are left.
+     * Look up recorded ASINs until the slice's time is up, none are left, or
+     * Amazon cannot answer.
      *
-     * @return bool whether rows are left for another slice
+     * A chunk Amazon refused with a 4xx (other than a 429) is not asked
+     * again: the request was the problem, and the next sync records its SKUs
+     * anew. A chunk it could not answer keeps its rows and stops the slice,
+     * so an outage costs one failed request a slice rather than the queue.
      */
-    public function runSlice(DataSource $dataSource, AmazonCatalogIdentifiers $catalog): bool
+    public function runSlice(DataSource $dataSource, AmazonCatalogIdentifiers $catalog): AmazonCatalogLookupOutcome
     {
         $sliceEndsAt = CarbonImmutable::now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS);
         $clientId = $dataSource->client_id ?? app(ClientContext::class)->default()->id;
@@ -77,37 +83,57 @@ class AmazonCatalogLookups
             $asins = $this->pending($dataSource)->select('asin')->distinct()->orderBy('asin')->limit(self::BATCH_SIZE)->pluck('asin');
 
             if ($asins->isEmpty()) {
-                return false;
+                return AmazonCatalogLookupOutcome::Finished;
             }
+
+            // The rows read, deleted by ID: a sync recording a new SKU under one
+            // of these ASINs meanwhile adds a row this slice never saw.
+            $rows = $this->pending($dataSource)->whereIn('asin', $asins)->get(['id', 'sku', 'asin']);
 
             /** @var array<string, list<string>> $skusByAsin */
             $skusByAsin = [];
 
-            foreach ($this->pending($dataSource)->whereIn('asin', $asins)->get(['sku', 'asin']) as $row) {
+            foreach ($rows as $row) {
                 $skusByAsin[$row->asin][] = $row->sku;
             }
 
             $needing = AmazonCatalogIdentifiers::asinsNeedingLookup($skusByAsin, $clientId);
-            $this->forget($dataSource, $asins->diff($needing));
+            $this->forget($rows->whereNotIn('asin', $needing));
 
             foreach ($needing->chunk(AmazonCatalogIdentifiers::CHUNK_SIZE) as $chunk) {
                 $checkedAt = CarbonImmutable::now()->toDateTimeString();
-                $answers = $catalog->fetch($chunk->values());
+                [$answers, $failures] = $catalog->fetchReportingFailures($chunk->values());
+                $unanswered = array_keys(array_filter($failures, fn (?int $status): bool => ! self::isRefusal($status)));
+                $done = $rows->whereIn('asin', $chunk)->whereNotIn('asin', $unanswered);
 
-                $productIds = DB::transaction(function () use ($dataSource, $clientId, $chunk, $answers, $skusByAsin, $checkedAt): array {
+                $productIds = DB::transaction(function () use ($dataSource, $clientId, $answers, $skusByAsin, $checkedAt, $done): array {
                     $productIds = Product::withoutSyncingToSearch(fn (): array => $this->write($dataSource, $clientId, $answers, $skusByAsin, $checkedAt));
-                    $this->forget($dataSource, $chunk);
+                    $this->forget($done);
 
                     return $productIds;
-                });
+                }, attempts: 3);
 
                 ProductCatalogSync::queueIndexing($productIds);
 
+                if ($unanswered !== []) {
+                    return AmazonCatalogLookupOutcome::Interrupted;
+                }
+
                 if (CarbonImmutable::now()->greaterThanOrEqualTo($sliceEndsAt)) {
-                    return $this->pending($dataSource)->exists();
+                    return $this->pending($dataSource)->exists() ? AmazonCatalogLookupOutcome::More : AmazonCatalogLookupOutcome::Finished;
                 }
             }
         }
+    }
+
+    /**
+     * Whether Amazon refused the request itself, so asking again would not
+     * help: a 4xx other than a 429. A 429 it kept sending, a 5xx, and no
+     * answer at all may pass.
+     */
+    private static function isRefusal(?int $status): bool
+    {
+        return $status !== null && $status >= 400 && $status < 500 && $status !== 429;
     }
 
     /**
@@ -151,12 +177,12 @@ class AmazonCatalogLookups
     }
 
     /**
-     * @param  Collection<int, string>  $asins
+     * @param  Collection<int, AmazonCatalogLookup>  $rows
      */
-    private function forget(DataSource $dataSource, Collection $asins): void
+    private function forget(Collection $rows): void
     {
-        if ($asins->isNotEmpty()) {
-            $this->pending($dataSource)->whereIn('asin', $asins->values())->delete();
+        if ($rows->isNotEmpty()) {
+            AmazonCatalogLookup::query()->whereKey($rows->modelKeys())->delete();
         }
     }
 

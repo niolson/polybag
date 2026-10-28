@@ -50,6 +50,9 @@ class AmazonListingCatalog
      */
     private const EXPIRED_PAGE_TOKEN = "Expired 'pageToken' provided.";
 
+    /** Why a window named unread could not be read, for the run status. */
+    public const UNREAD_REASON = 'Amazon returns at most 1,000 listings for one search, and more than that were created within one second, so some listings created then were not read.';
+
     /** Before any third-party listing on Amazon. */
     private const EARLIEST = '1999-01-01T00:00:00Z';
 
@@ -73,7 +76,7 @@ class AmazonListingCatalog
      *
      * @return Generator<int, ProductCatalogPage>
      *
-     * @throws CatalogReadMustStartOver when Amazon refuses a search: its window or page token came from the cursor, so the next sync starts over. An expired page token instead reads its window again, once.
+     * @throws CatalogReadMustStartOver when Amazon refuses a search: its window or page token came from the cursor, so the next sync starts over. An expired page token instead carries on from where the window had reached.
      */
     public function pages(?string $cursor): Generator
     {
@@ -85,7 +88,7 @@ class AmazonListingCatalog
             $json = $this->search($position);
 
             if ($json === null) {
-                $position = $this->restartWindowAfterExpiredToken($position);
+                $position = $this->carryOnAfterExpiredToken($position);
 
                 continue;
             }
@@ -101,17 +104,22 @@ class AmazonListingCatalog
                     continue;
                 }
 
-                $unreadParts[] = self::describeWindow($position->from(), $position->to());
+                // A window read again after an expired token was named the first time.
+                if (! $position->restarted) {
+                    $unreadParts[] = self::describeWindow($position->from(), $position->to());
+                }
             }
 
             [$items, $tailSecond, $tailSkus] = $this->itemsFrom($listings, $position);
             $fetched = $position->fetched + count($listings);
             $nextToken = $json['pagination']['nextToken'] ?? null;
-            // With no total to split by, a window read to the cap carries on
-            // from the last second it reached.
-            $atUncountedCap = $total === null && $fetched >= self::MAX_RESULTS_PER_SEARCH;
+            // Amazon returns no more than the cap for a search, so a window is
+            // never paged past it. With no total to split by, a window read
+            // to the cap carries on from the last second it reached.
+            $atCap = $fetched >= self::MAX_RESULTS_PER_SEARCH;
+            $atUncountedCap = $total === null && $atCap;
 
-            if (is_string($nextToken) && $nextToken !== '' && ! $atUncountedCap) {
+            if (is_string($nextToken) && $nextToken !== '' && ! $atCap) {
                 $position = $position->nextPage($nextToken, $fetched, $tailSecond, $tailSkus);
             } elseif ($atUncountedCap && $tailSecond !== null && $tailSecond > $position->from()) {
                 $position = $position->startWindowAt($tailSecond, $tailSkus);
@@ -126,7 +134,7 @@ class AmazonListingCatalog
                 $position = $position->nextWindow($tailSecond, $tailSkus);
             }
 
-            yield new ProductCatalogPage($items, $position?->toString(), $unreadParts);
+            yield new ProductCatalogPage($items, $position?->toString(), $unreadParts, $unreadParts === [] ? null : self::UNREAD_REASON);
 
             if ($position === null) {
                 return;
@@ -168,25 +176,34 @@ class AmazonListingCatalog
     }
 
     /**
-     * The window in hand again from its first page, after Amazon called its
-     * page token expired: a slice can wait hours behind order imports, longer
-     * than a token lives (between 15 minutes and 6 days, `product-catalog-sync/04`).
-     * Only that window is read again, not the run.
+     * Where to carry on after Amazon called the window's page token expired:
+     * a slice can wait hours behind order imports, longer than a token lives
+     * (between 15 minutes and 6 days, `product-catalog-sync/04`).
      *
-     * Listings the window already wrote come back and are written again.
-     * They already have Products, so `productIdFor()` reports them unchanged
-     * (or updated), never created: the run's created count holds each SKU
-     * once, while its unchanged count includes the re-read. The skip list
-     * from the previous window is kept; the tail is rebuilt by the re-read.
+     * The read carries on from the latest second the window reached, as a
+     * window read to the cap without a total does, skipping the SKUs it
+     * already returned from that second. Nothing is written twice, and every
+     * expiry moves the read forward, so it cannot loop. Only when the window
+     * has returned nothing past its first second is it read again from its
+     * start; the listings it wrote come back as unchanged, never created.
      *
-     * @throws CatalogReadMustStartOver when the window was already restarted and a token expired again
+     * @throws CatalogReadMustStartOver when a token expires again with no progress since the window was read again from its start
      */
-    private function restartWindowAfterExpiredToken(AmazonListingsCursor $position): AmazonListingsCursor
+    private function carryOnAfterExpiredToken(AmazonListingsCursor $position): AmazonListingsCursor
     {
         $window = self::describeWindow($position->from(), $position->to());
 
+        if ($position->tailSecond !== null && $position->tailSecond > $position->from()) {
+            Log::info('An Amazon listings page token expired; carrying on from the last second read', [
+                'window' => $window,
+                'from' => gmdate('Y-m-d H:i:s', $position->tailSecond),
+            ]);
+
+            return $position->startWindowAt($position->tailSecond, $position->tailSkus);
+        }
+
         if ($position->restarted) {
-            throw new CatalogReadMustStartOver("Amazon's page token for {$window} expired again after the window was read from its start. The next sync starts from the beginning.");
+            throw new CatalogReadMustStartOver("Amazon's page token for {$window} expired again before the read got past its first second. The next sync starts from the beginning.");
         }
 
         Log::info('An Amazon listings page token expired; reading its window again from the start', [

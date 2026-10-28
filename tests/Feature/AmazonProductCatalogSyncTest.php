@@ -17,6 +17,7 @@ use App\Services\ProductCatalog\AmazonListingCatalog;
 use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\ProductCatalog\ProductCatalogSyncRuns;
 use App\Services\ProductCatalog\ProductCatalogSyncTiming;
+use App\Services\SettingsService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -129,6 +130,7 @@ function amazonCatalogListings(int $count, string $from = '2026-01-01T00:00:00Z'
  * @param  array<string, array<string, mixed>>  $catalog  catalog items by ASIN
  * @param  list<array<string, mixed>>  $catalogRequests
  * @param  (Closure(string): bool)|null  $tokenExpired  whether a page token has expired, asked each time one is used
+ * @param  int  $cap  how many listings a search pages to, which Amazon keeps at 1,000
  */
 function fakeAmazonCatalog(
     array $listings,
@@ -139,11 +141,12 @@ function fakeAmazonCatalog(
     array $catalog = [],
     array &$catalogRequests = [],
     ?Closure $tokenExpired = null,
+    int $cap = AmazonListingCatalog::MAX_RESULTS_PER_SEARCH,
 ): void {
     usort($listings, fn (array $a, array $b): int => strcmp($a['summaries'][0]['createdDate'], $b['summaries'][0]['createdDate']));
 
     Saloon::fake([
-        SearchListingsItems::class => function (PendingRequest $pendingRequest) use ($listings, &$requests, $reportsTotal, $totalFor, $beforeAnswer, $tokenExpired): MockResponse {
+        SearchListingsItems::class => function (PendingRequest $pendingRequest) use ($listings, &$requests, $reportsTotal, $totalFor, $beforeAnswer, $tokenExpired, $cap): MockResponse {
             $query = $pendingRequest->query()->all();
             $requests[] = $query;
 
@@ -174,7 +177,7 @@ function fakeAmazonCatalog(
                 $offset = (int) $matches[1];
             }
 
-            $reachable = min(count($window), AmazonListingCatalog::MAX_RESULTS_PER_SEARCH);
+            $reachable = min(count($window), $cap);
             $body = ['items' => array_slice($window, $offset, min(20, max(0, $reachable - $offset)))];
             $total = $totalFor !== null ? $totalFor($query['createdAfter'], $query['createdBefore']) : null;
 
@@ -240,7 +243,11 @@ function amazonCatalogRun(DataSource $dataSource): ProductCatalogSyncRun
     return $dataSource->fresh()->productCatalogSyncRun();
 }
 
-/** Work the catalog look-up's slices in this process. */
+/**
+ * Work the catalog look-up's slices in this process. Each `Queue::fake()`
+ * releases the unique locks of the jobs the last one held, as a worker does
+ * when it starts one.
+ */
 function amazonLookUpCatalog(DataSource $dataSource): void
 {
     do {
@@ -414,21 +421,22 @@ describe('listings', function (): void {
             ->and(collect($requests)->pluck('pageToken')->all())->toBe(['not-a-token']);
     });
 
-    it('reads a window again from its start when its page token expired between slices, counting each SKU created once', function (): void {
+    it('carries on from the last second read when a page token expired between slices', function (): void {
         $dataSource = amazonCatalogConnection();
         $requests = [];
+        $listings = amazonCatalogListings(60);
         $expiredOnce = false;
 
-        fakeAmazonCatalog(amazonCatalogListings(25), $requests,
-            // The first page is the last of its slice.
+        fakeAmazonCatalog($listings, $requests,
+            // The second page is the last of its slice.
             beforeAnswer: function (array $query): void {
-                if (! isset($query['pageToken']) && count(Product::all()) === 0) {
+                if (($query['pageToken'] ?? null) === 'synthetic-token-20' && Product::count() === 20) {
                     Carbon::setTestNow(now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS + 1));
                 }
             },
             // By the next slice, the token has expired.
             tokenExpired: function (string $token) use (&$expiredOnce): bool {
-                if ($expiredOnce) {
+                if ($expiredOnce || $token !== 'synthetic-token-40') {
                     return false;
                 }
 
@@ -438,31 +446,98 @@ describe('listings', function (): void {
         $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
 
         expect(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toBeTrue()
-            ->and(amazonCatalogRun($dataSource)->created)->toBe(20)
+            ->and(amazonCatalogRun($dataSource)->created)->toBe(40)
             ->and(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toBeFalse();
 
         $finished = amazonCatalogRun($dataSource);
+        $fortieth = substr($listings[39]['summaries'][0]['createdDate'], 0, 19).'Z';
 
         expect($finished->status)->toBe(ProductCatalogSyncStatus::Complete)
-            ->and($finished->created)->toBe(25)
-            ->and($finished->unchanged)->toBe(20)
-            ->and(Product::count())->toBe(25)
+            ->and($finished->created)->toBe(60)
+            ->and($finished->updated + $finished->unchanged)->toBe(0)
+            ->and(Product::count())->toBe(60)
+            // It picks up at the fortieth listing's second, not the window's start.
+            ->and(collect($requests)->map(fn (array $query): array => [$query['createdAfter'], $query['pageToken'] ?? null])->all())->toBe([
+                ['1999-01-01T00:00:00Z', null],
+                ['1999-01-01T00:00:00Z', 'synthetic-token-20'],
+                ['1999-01-01T00:00:00Z', 'synthetic-token-40'],
+                [$fortieth, null],
+                [$fortieth, 'synthetic-token-20'],
+            ]);
+    });
+
+    it('completes after two expired tokens in a window, each after progress', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $calls = 0;
+
+        fakeAmazonCatalog(amazonCatalogListings(60), tokenExpired: function (string $token) use (&$calls): bool {
+            $calls++;
+
+            return in_array($calls, [1, 3], true);
+        });
+
+        amazonSyncCatalog($dataSource);
+
+        $run = amazonCatalogRun($dataSource);
+
+        expect($calls)->toBeGreaterThanOrEqual(3)
+            ->and($run->status)->toBe(ProductCatalogSyncStatus::Complete)
+            ->and($run->created)->toBe(60)
+            ->and($run->updated + $run->unchanged)->toBe(0);
+    });
+
+    it('reads a window again from its start when an expired token left it at its first second, counting each SKU created once', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $requests = [];
+        // Every listing in the window's first second, so there is no later second to carry on from.
+        $listings = array_map(fn (int $index): array => amazonCatalogListing("SYN-FIRST-{$index}", sprintf('1999-01-01T00:00:00.%03dZ', $index)), range(1, 25));
+        $expiredOnce = false;
+
+        fakeAmazonCatalog($listings, $requests, tokenExpired: function () use (&$expiredOnce): bool {
+            if ($expiredOnce) {
+                return false;
+            }
+
+            return $expiredOnce = true;
+        });
+
+        amazonSyncCatalog($dataSource);
+
+        $run = amazonCatalogRun($dataSource);
+
+        expect($run->status)->toBe(ProductCatalogSyncStatus::Complete)
+            ->and($run->created)->toBe(25)
+            ->and($run->unchanged)->toBe(20)
             ->and(collect($requests)->pluck('pageToken')->all())->toBe([null, 'synthetic-token-20', null, 'synthetic-token-20']);
     });
 
-    it('fails the run, to start over, when a token of a window already read again expires too', function (): void {
+    it('fails the run, to start over, when a token expires again with no progress since the window was read again', function (): void {
         $dataSource = amazonCatalogConnection();
         $requests = [];
-        fakeAmazonCatalog(amazonCatalogListings(25), $requests, tokenExpired: fn (string $token): bool => true);
+        $listings = array_map(fn (int $index): array => amazonCatalogListing("SYN-FIRST-{$index}", sprintf('1999-01-01T00:00:00.%03dZ', $index)), range(1, 25));
+        fakeAmazonCatalog($listings, $requests, tokenExpired: fn (string $token): bool => true);
 
         expect(fn (): string => amazonSyncCatalog($dataSource))
-            ->toThrow(RuntimeException::class, "Amazon's page token for listings created 1999-01-01 00:00:00 to 2026-10-28 00:00:00 UTC expired again after the window was read from its start. The next sync starts from the beginning.");
+            ->toThrow(RuntimeException::class, "Amazon's page token for listings created 1999-01-01 00:00:00 to 2026-10-28 00:00:00 UTC expired again before the read got past its first second. The next sync starts from the beginning.");
 
         $failed = amazonCatalogRun($dataSource);
 
         expect($failed->status)->toBe(ProductCatalogSyncStatus::Failed)
             ->and($failed->startOver)->toBeTrue()
             ->and(collect($requests)->pluck('pageToken')->all())->toBe([null, 'synthetic-token-20', null, 'synthetic-token-20']);
+    });
+
+    it('leaves no look-up rows for a page rolled back because a new sync replaced the run', function (): void {
+        $dataSource = amazonCatalogConnection();
+        fakeAmazonCatalog(amazonCatalogListings(5), beforeAnswer: function () use ($dataSource): void {
+            $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start('a-newer-run'));
+        });
+
+        $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
+
+        expect(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toBeFalse()
+            ->and(Product::count())->toBe(0)
+            ->and(AmazonCatalogLookup::count())->toBe(0);
     });
 });
 
@@ -597,6 +672,58 @@ describe('date windows', function (): void {
                 [$lastSecond, '2026-10-28T00:00:00Z'],
             ]);
     });
+
+    it('never pages a counted window past 1,000, and names an unread second once when a token expiry reads it again', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $requests = [];
+        $burst = array_map(
+            fn (int $index): array => amazonCatalogListing("SYN-BURST-{$index}", sprintf('2026-03-01T12:00:00.%03dZ', 1 + $index % 999)),
+            range(1, 1001),
+        );
+        $expiredOnce = false;
+
+        // This fake would page on past 1,000; one token in the second expires once.
+        fakeAmazonCatalog([...$burst, amazonCatalogListing('SYN-AFTER', '2026-03-02T00:00:00.000Z')], $requests, cap: 2000,
+            tokenExpired: function (string $token) use (&$expiredOnce): bool {
+                if ($expiredOnce || $token !== 'synthetic-token-500') {
+                    return false;
+                }
+
+                return $expiredOnce = true;
+            });
+
+        amazonSyncCatalog($dataSource);
+
+        $run = amazonCatalogRun($dataSource);
+
+        expect($run->status)->toBe(ProductCatalogSyncStatus::Incomplete)
+            ->and($run->unreadCount)->toBe(1)
+            ->and($run->stoppedAt)->toBe('listings created 2026-03-01 12:00:00 to 2026-03-01 12:00:01 UTC')
+            ->and($run->error)->toBe(AmazonListingCatalog::UNREAD_REASON)
+            ->and(collect($requests)->pluck('pageToken')->filter()->contains('synthetic-token-1000'))->toBeFalse()
+            ->and(Product::where('sku', 'like', 'SYN-BURST-%')->count())->toBe(1000)
+            ->and($run->created)->toBe(1001);
+    });
+
+    it('names a second unread when Amazon gives no total and all 1,000 fetched fall in the window\'s first second', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $burst = array_map(
+            fn (int $index): array => amazonCatalogListing("SYN-BURST-{$index}", sprintf('2026-03-01T12:00:00.%03dZ', 1 + $index % 999)),
+            range(1, 1001),
+        );
+
+        fakeAmazonCatalog([...$burst, amazonCatalogListing('SYN-AFTER', '2026-03-02T00:00:00.000Z')], reportsTotal: false);
+
+        amazonSyncCatalog($dataSource);
+
+        $run = amazonCatalogRun($dataSource);
+
+        expect($run->status)->toBe(ProductCatalogSyncStatus::Incomplete)
+            ->and($run->unreadCount)->toBe(1)
+            ->and($run->stoppedAt)->toBe('listings created 2026-03-01 12:00:00 to 2026-03-01 12:00:01 UTC')
+            ->and(Product::where('sku', 'SYN-AFTER')->exists())->toBeTrue()
+            ->and($run->created)->toBe(1001);
+    });
 });
 
 describe('the catalog look-up', function (): void {
@@ -696,7 +823,7 @@ describe('the catalog look-up', function (): void {
             ->and($product->manufacturer_part_number)->toBe('SYN-PN-KEPT');
     });
 
-    it('logs a failed look-up and leaves the stamp, and the run, as they were', function (): void {
+    it('logs a look-up Amazon refused, drops its rows, and leaves the stamp and the run as they were', function (): void {
         $dataSource = amazonCatalogConnection();
         $checkedAt = now()->subDays(40)->startOfSecond();
         Product::factory()->create(['client_id' => $dataSource->client->id, 'sku' => 'SYN-FAILS', 'barcode' => null, 'identifiers_checked_at' => $checkedAt]);
@@ -715,7 +842,9 @@ describe('the catalog look-up', function (): void {
         amazonLookUpCatalog($dataSource);
 
         expect(Product::where('sku', 'SYN-FAILS')->sole()->identifiers_checked_at->toDateTimeString())->toBe($checkedAt->toDateTimeString())
-            ->and(amazonCatalogRun($dataSource)->toArray())->toBe($run->toArray());
+            ->and(amazonCatalogRun($dataSource)->toArray())->toBe($run->toArray())
+            // Amazon refused the request itself: asking again would not help.
+            ->and(AmazonCatalogLookup::count())->toBe(0);
     });
 
     it('does not repeat work a second look-up of the connection finds done', function (): void {
@@ -760,6 +889,68 @@ describe('the catalog look-up', function (): void {
             ->and(AmazonCatalogLookup::count())->toBe(0);
     });
 
+    it('keeps the rows and tries again in a minute when Amazon cannot answer', function (int $status): void {
+        $dataSource = amazonCatalogConnection();
+        fakeAmazonCatalog(amazonCatalogListings(30));
+        amazonSyncCatalog($dataSource);
+        $catalogRequests = 0;
+
+        Saloon::fake([SearchCatalogItems::class => function () use (&$catalogRequests, $status): MockResponse {
+            $catalogRequests++;
+
+            return MockResponse::make(['errors' => [['code' => 'InternalFailure']]], $status);
+        }]);
+
+        $queue = Queue::fake([MakeSearchable::class, LookUpAmazonCatalogIdentifiersJob::class]);
+        app()->call([new LookUpAmazonCatalogIdentifiersJob($dataSource->id), 'handle']);
+
+        // One chunk asked, five times as a 429 is retried, then the slice stopped.
+        expect($catalogRequests)->toBe($status === 429 ? 5 : 1)
+            ->and(AmazonCatalogLookup::count())->toBe(30)
+            ->and(Product::whereNotNull('identifiers_checked_at')->count())->toBe(0);
+
+        $queue->assertPushed(LookUpAmazonCatalogIdentifiersJob::class, fn (LookUpAmazonCatalogIdentifiersJob $job): bool => $job->dataSourceId === $dataSource->id
+            && $job->failedSlices === 1
+            && $job->delay === LookUpAmazonCatalogIdentifiersJob::RETRY_DELAY_SECONDS);
+    })->with(['a server error' => 503, 'throttling Amazon kept up' => 429]);
+
+    it('stops trying after too many slices Amazon could not answer, keeping the rows for the next sync', function (): void {
+        $dataSource = amazonCatalogConnection();
+        fakeAmazonCatalog([amazonCatalogListing('SYN-WAITS', '2026-01-01T00:00:00.000Z')]);
+        amazonSyncCatalog($dataSource);
+        Saloon::fake([SearchCatalogItems::class => MockResponse::make([], 500)]);
+
+        $queue = Queue::fake([MakeSearchable::class, LookUpAmazonCatalogIdentifiersJob::class]);
+        app()->call([new LookUpAmazonCatalogIdentifiersJob($dataSource->id, LookUpAmazonCatalogIdentifiersJob::MAX_FAILED_SLICES - 1), 'handle']);
+
+        $queue->assertNotPushed(LookUpAmazonCatalogIdentifiersJob::class);
+        expect(AmazonCatalogLookup::count())->toBe(1);
+    });
+
+    it('keeps one look-up chain per connection', function (): void {
+        $queue = Queue::fake([LookUpAmazonCatalogIdentifiersJob::class]);
+
+        LookUpAmazonCatalogIdentifiersJob::dispatch(42);
+        LookUpAmazonCatalogIdentifiersJob::dispatch(42);
+        LookUpAmazonCatalogIdentifiersJob::dispatch(43);
+
+        $queue->assertPushed(LookUpAmazonCatalogIdentifiersJob::class, 2);
+        expect((new LookUpAmazonCatalogIdentifiersJob(42))->uniqueId())->toBe('42')
+            ->and((new LookUpAmazonCatalogIdentifiersJob(42))->uniqueFor)->toBe(ProductCatalogSyncTiming::STALE_AFTER_SECONDS);
+    });
+
+    it('does not ask Amazon in sandbox mode', function (): void {
+        $dataSource = amazonCatalogConnection();
+        AmazonCatalogLookup::factory()->create(['data_source_id' => $dataSource->id]);
+        app(SettingsService::class)->set('sandbox_mode', true);
+        Saloon::fake([SearchCatalogItems::class => MockResponse::make([], 200)]);
+
+        app()->call([new LookUpAmazonCatalogIdentifiersJob($dataSource->id), 'handle']);
+
+        Saloon::assertNothingSent();
+        expect(AmazonCatalogLookup::count())->toBe(1);
+    });
+
     it('takes a lock of its own, and fits a slice', function (): void {
         $this->freezeTime();
         $job = new LookUpAmazonCatalogIdentifiersJob(42);
@@ -799,6 +990,18 @@ describe('the action', function (): void {
         Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
             ->assertActionHidden('sync_product_catalog')
             ->assertSee('Connect this Amazon account through OAuth');
+    });
+
+    it('is not shown in sandbox mode, which says the sync needs live listings', function (): void {
+        $dataSource = amazonCatalogConnection();
+        app(SettingsService::class)->set('sandbox_mode', true);
+
+        expect($dataSource->syncsProductCatalog())->toBeFalse()
+            ->and(app(ProductCatalogSync::class)->start($dataSource))->toBeNull();
+
+        Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
+            ->assertActionHidden('sync_product_catalog')
+            ->assertSee('needs Sandbox Mode (Dev Settings) off');
     });
 
     it('is not shown before a marketplace is chosen', function (): void {

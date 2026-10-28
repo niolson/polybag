@@ -6,6 +6,8 @@ use App\Contracts\SyncsProductCatalog;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
+use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
+use App\Http\Integrations\Amazon\Requests\SearchListingsItems;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\DemoLifetime;
 use App\Services\ProductCatalog\ProductCatalogSyncRuns;
@@ -123,7 +125,8 @@ class DataSource extends Model
     /**
      * What this connection lacks to read its catalog, whether or not it is
      * active, or null. An Amazon listing search is by seller ID, which only
-     * an OAuth connection records (`product-catalog-sync/04`).
+     * an OAuth connection records, and reads production listings
+     * (`product-catalog-sync/04`).
      */
     public function productCatalogSetupMissing(): ?string
     {
@@ -136,6 +139,9 @@ class DataSource extends Model
         return match (true) {
             ($settings['auth_mode'] ?? null) !== 'authorization_code' || blank($settings['amazon_selling_partner_id'] ?? null) => 'Connect this Amazon account through OAuth (Connect Amazon) to sync its product catalog: listing search needs the seller ID that OAuth records, and a connection with its own credentials has none.',
             blank($settings['marketplace_id'] ?? null) => 'Choose an Amazon marketplace to sync this connection\'s product catalog.',
+            // The sandbox holds no seller's listings, and answers a listing search
+            // with an error that says nothing about why.
+            app(AmazonSpApiEnvironment::class)->usesSandbox(SearchListingsItems::class) => 'The Amazon product catalog sync reads the seller\'s live listings, so it needs Sandbox Mode (Dev Settings) off.',
             default => null,
         };
     }
