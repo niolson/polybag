@@ -11,6 +11,7 @@ use App\Models\Shipment;
 use App\Services\AmazonMarketplaceDiscoveryService;
 use App\Services\OAuthService;
 use App\Services\PostageSources\OffAmazonShippingCheck;
+use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -56,6 +57,22 @@ class EditDataSource extends EditRecord
 
             $message->send();
         }
+
+        // Offered once, after a new connection is connected; never started on its own.
+        if (session('offer_product_catalog_sync') === $this->dataSource()->id
+            && $this->dataSource()->productCatalogSyncRun() === null
+            && self::canSyncProductCatalog($this->dataSource())) {
+            $this->defaultAction = 'sync_product_catalog';
+        }
+    }
+
+    /**
+     * Whether the Sync Product Catalog action is offered: an active connection
+     * that can list a catalog, while imports may write Products.
+     */
+    public static function canSyncProductCatalog(DataSource $dataSource): bool
+    {
+        return $dataSource->syncsProductCatalog() && ProductCatalogSync::writesProducts();
     }
 
     protected function getHeaderActions(): array
@@ -83,6 +100,49 @@ class EditDataSource extends EditRecord
                         ->info()
                         ->title('Import queued')
                         ->body("You'll be notified when \"{$this->record->name}\" finishes importing.")
+                        ->send();
+                }),
+
+            Action::make('sync_product_catalog')
+                ->authorize('update')
+                ->label('Sync Product Catalog')
+                ->icon('heroicon-o-cube')
+                ->color('gray')
+                ->visible(fn (): bool => self::canSyncProductCatalog($this->dataSource()))
+                ->disabled(fn (): bool => (bool) $this->dataSource()->productCatalogSyncRun()?->isRunning())
+                ->tooltip(fn (): ?string => $this->dataSource()->productCatalogSyncRun()?->isRunning()
+                    ? 'A catalog sync of this connection is running.'
+                    : null)
+                ->requiresConfirmation()
+                ->modalHeading('Sync product catalog?')
+                ->modalDescription('Add every variant of this store\'s active products to Products, and update the ones already there, in the background. The store\'s weight, barcodes, part number and customs fields replace PolyBag\'s; a field blank in the store leaves PolyBag\'s value, and a Product keeps the name it has. Listed Products are marked active. Nothing is deleted, and nothing is written to the store.')
+                ->modalSubmitActionLabel('Sync')
+                ->action(function (): void {
+                    $dataSource = $this->dataSource();
+                    $run = app(ProductCatalogSync::class)->start($dataSource, auth()->id());
+
+                    // Disable the button and show the run at once, rather than when the queue reaches it.
+                    $dataSource->refresh();
+
+                    if ($run === null) {
+                        // Something may have changed since the page was drawn.
+                        [$title, $body] = match (true) {
+                            ! ProductCatalogSync::writesProducts() => ['Catalog sync is off', 'Imports are now set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS).'],
+                            ! $dataSource->syncsProductCatalog() => ['This connection cannot sync its catalog', 'It is inactive. Activate it to sync its product catalog.'],
+                            default => ['A catalog sync is already running', 'The last run is shown under Product Catalog on this connection.'],
+                        };
+
+                        Notification::make()->warning()->title($title)->body($body)->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->info()
+                        ->title('Catalog sync queued')
+                        ->body($run->resumedFromPage !== null
+                            ? "It carries on from page {$run->resumedFromPage}, where the last sync stopped. Its progress is shown under Product Catalog on this connection."
+                            : 'Its progress is shown under Product Catalog on this connection. Order imports keep running between its steps.')
                         ->send();
                 }),
 

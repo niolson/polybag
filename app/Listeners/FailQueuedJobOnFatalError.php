@@ -131,7 +131,11 @@ class FailQueuedJobOnFatalError
         }
     }
 
-    private function rollBackOpenTransactions(): void
+    /**
+     * Roll back every open transaction, on every connection, so what a
+     * failure handler writes next is committed rather than lost with them.
+     */
+    public function rollBackOpenTransactions(): void
     {
         foreach (DB::getConnections() as $connection) {
             if ($connection->transactionLevel() > 0) {

@@ -1,6 +1,6 @@
 # Sync a Shopify product catalog
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -25,21 +25,31 @@ why, when `shipment-import.behavior.auto_update_products` is off. After a new Sh
 connection finishes OAuth, the Connection offers the sync once; it never starts on its
 own.
 
-**The job.** `SyncProductCatalogJob`, on the `imports` connection and queue, configured like
-`RunDataSourceImportJob`, which has already met the same problem:
+**The job, in short slices.** `SyncProductCatalogJob`, on the `imports` connection and
+queue. The on-prem stack runs one `imports` worker, and a sync of a large catalog would
+hold up every connection's order imports for as long as it ran; order volumes are bursty.
+So each job writes about a minute of pages and then queues the next slice at the back of
+the queue, and order imports queued meanwhile run in between.
 
-- `$timeout = 1800` and `$failOnTimeout = true`. A job's own timeout overrides the
-  worker's 60-second default, and the `imports` connection's `retry_after` (1860) is
-  already longer than it.
-- `WithoutOverlapping("product-catalog-sync:{dataSourceId}")->releaseAfter(60)->expireAfter($this->timeout + 60)`.
-  Without `expireAfter`, a worker killed mid-run leaves a Redis lock with no expiry, and
-  no later sync for that connection ever runs.
-- `$tries = 60` (so waiting behind the lock is not a failure) and `$maxExceptions = 1` (so
-  a real error is not retried: a sync is idempotent, but a second attempt hides the first
-  one's error and burns API quota).
-- `failed()` records the run as `failed` with the exception, so a timeout or crash never
-  leaves the Connection showing *running*. A run still marked running after its lock has
-  expired is shown as *interrupted*, and a new sync may start.
+- **The run is the state.** Each page commits with the run's counts, page number and the
+  cursor the next page starts from. The next slice carries the run ID and resumes there.
+  A cursor Shopify no longer accepts fails the run with a reason; it never starts over.
+- **The run is the guard.** A sync starts only when no run is running, or the running one
+  has stalled, checked and recorded under a lock on the connection's row. A job writes
+  only to its own run, while it is running. A per-job lock
+  (`product-catalog-sync:{dataSourceId}`) still keeps two slices apart, but it is free
+  between slices, so it cannot stop a second sync.
+- **Timeouts fit a slice; waiting is generous.** `$timeout = 420` (the minute, a page
+  throttled every time Shopify allows, and the requests), `$failOnTimeout = true`,
+  `$maxExceptions = 1` (a real error is not retried: a second attempt hides the first
+  one's error and burns API quota). A slice may wait six hours to run (`retryUntil()`),
+  and a run counts as stalled after six hours with no page saved.
+- **Resume.** A sync started after one that failed or stalled partway carries on from its
+  cursor and counts, and the Connection says it resumed. A cursor Shopify refused, or a
+  token without `read_products`, starts the next sync from the first page.
+- `failed()` rolls back open transactions, then records its own run as `failed` at the
+  next page, keeping the counts, so a timeout or crash never leaves the Connection
+  showing *running*. A stalled run is shown as *interrupted*, and a new sync may start.
 
 It asks the source for its catalog in pages and sends each item through `productIdFor()`
 for the connection's client.
@@ -63,8 +73,8 @@ from the variant itself move into one method both paths call: `barcode`, `gtin`,
 | `name` | Line item `productTitle` | Product title, plus the variant title unless it is `Default Title` |
 | `weight` | Fulfillment-order line item `weight` | `inventoryItem.measurement.weight` |
 
-Both weights go through `ShopifySource::poundsFrom()`. Because the sync only fills blanks,
-a Product first created by an order keeps the order's name. One first created by the
+Both weights go through `ShopifySource::poundsFrom()`. Because the sync writes a name only
+where there is none, a Product first created by an order keeps the order's name. One first created by the
 sync keeps the variant-qualified name until an order import or a manual edit replaces it:
 order imports are not fill-only, so the next order for that variant renames it to the
 line's `productTitle`.
@@ -76,8 +86,15 @@ is on no Package, so it never appears there. Add a second filter, **Incomplete C
 Data**, over every Product: no weight, no country of origin, or no HS code. `05`'s bulk
 action uses this one.
 
-**Fill only.** Every Product data field is sent as `_fill_only`. `identifiers_checked_at`
-is not a data field and is never fill-only.
+**Overwrite, except the name.** The store's non-blank values overwrite PolyBag's, as an
+order import's do: PolyBag is not the source of truth for product data, and a
+correction belongs in Shopify or the ERP. A blank at the store leaves PolyBag's value,
+and so does a weight of 0, which Shopify reports for a variant with no weight entered.
+`name` alone is sent as `_fill_only`: an order import names a Product by its line's
+`productTitle`, and if the sync overwrote it with "Product - Variant", the name would
+flip on every import and sync, each counting it as an update. `identifiers_checked_at`
+is not a data field and is never fill-only. *(Decided 2026-10-28; this first said every
+data field was fill-only.)*
 
 **Indexing.** Save inside `Product::withoutSyncingToSearch()`. After each page commits,
 queue `searchable()` for that page's Products on the `low` queue.
@@ -89,26 +106,91 @@ run reports what it saved. The Connection shows the last run.
 
 ## Acceptance criteria
 
-- [ ] A two-page fake `productVariants` response creates a Product per variant in the
+- [x] A two-page fake `productVariants` response creates a Product per variant in the
       connection's client, with weight in pounds, barcode, GTIN, part number, HS code and
       origin
-- [ ] A SKU-less variant synced first and then seen on an order ends up as one Product
-- [ ] Variants of archived and draft products are not synced
-- [ ] A Product with a hand-entered weight, name or HS code keeps it
-- [ ] An order import still maps a line item exactly as before, including name from
+- [x] A SKU-less variant synced first and then seen on an order ends up as one Product
+- [x] Variants of archived and draft products are not synced
+- [x] A Product's weight, barcodes, part number and customs fields take the store's
+      non-blank values; a blank (or a weight of 0) at the store leaves PolyBag's value; a
+      Product with a name keeps it
+- [x] An order import still maps a line item exactly as before, including name from
       `productTitle` and weight from the line item (existing Shopify import tests pass
       unchanged)
-- [ ] The sync names a multi-variant Product "Product - Variant" and a single-variant one by
+- [x] The sync names a multi-variant Product "Product - Variant" and a single-variant one by
       the product title alone, and takes weight from `inventoryItem.measurement`
-- [ ] *Incomplete Customs Data* lists a synced Product that is on no Package and lacks an
+- [x] *Incomplete Customs Data* lists a synced Product that is on no Package and lacks an
       HS code; *Missing Customs Data* does not
-- [ ] After a run is killed (simulated timeout), the run is recorded `failed`, and once the
-      lock expires a new sync for that connection runs
-- [ ] A failure on page two leaves page one's Products saved and queued for indexing, and
+- [x] After a slice is killed (simulated timeout), the run is recorded `failed` at its page
+      with the counts so far, and once the run is stale a new sync for that connection runs
+- [x] A sync spans several slices, each resuming from the saved cursor, and an order
+      import queued mid-run is processed between them
+- [x] A failure on page two leaves page one's Products saved and queued for indexing, and
       the run recorded as failed with page one's counts
-- [ ] A second sync for the same connection does not run while one is running
-- [ ] With `auto_update_products` off, the action is hidden and says why
-- [ ] The action is not shown to a Manager, or on an inactive or non-Shopify connection
-- [ ] Fixtures use synthetic SKUs, variant IDs and store names
+- [x] A second sync for the same connection does not run while one is running
+- [x] With `auto_update_products` off, the action is hidden and says why
+- [x] The action is not shown to a Manager, or on an inactive or non-Shopify connection
+- [x] Fixtures use synthetic SKUs, variant IDs and store names
 
 ## Comments
+
+**Done 2026-10-28.** `ProductCatalogSync::start()` claims a run and queues the first
+`SyncProductCatalogJob`; each job runs `runSlice()` over pages from any source implementing
+`SyncsProductCatalog`, writing each through `productIdFor()` and advancing the run in the
+same transaction, then queues Scout's `MakeSearchable` for the page on `low`.
+`ShopifySource::variantFields()` is the one mapping both paths call; the order line item
+keeps its own name, weight and key order. The run is a JSON column,
+`data_sources.product_catalog_sync`, read through `ProductCatalogSyncRun` and written
+through `ProductCatalogSyncRuns`, and shown under *Product Catalog* on the Connection.
+
+- **Slices** (revised after review, the user's call): one 30-minute job held the single
+  `imports` worker. A slice takes pages for 60 seconds, then hands on. The job's timeout
+  is 420: the minute, plus a page started at second 59 and throttled nine times (up to
+  270 seconds), plus 90 seconds for the requests; under `retry_after` 1,860. The timings
+  live in `ProductCatalogSyncTiming`.
+- **Waiting and stalls** (second review): the scheduler queues an import for every
+  connection on every tick, so in a sale a slice can wait behind several half-hour
+  imports. A first cut gave it 2,160 seconds, which would have failed healthy runs. Both
+  `retryUntil()` and the stall limit are now six hours: what keeps syncs apart is the run
+  ID under the row lock, not the timing, and a killed worker's slice is handed out again
+  after `retry_after` anyway, so the limit only waits for a job lost outright.
+- **Resume** (second review): a new sync carries on from a failed or interrupted run's
+  cursor, pages and counts as a new run (`resumed_from_page`), unless it failed with
+  `CatalogReadMustStartOver`: a cursor Shopify refused (`Malformed cursor` or `Invalid
+  cursor for current pagination sort.`, matched exactly) or a missing `read_products`.
+- **Guard:** the run, not `ShouldBeUnique`. A unique lock held while a slice runs would
+  drop the continuation it queues. Starting checks and writes the run under a row lock, so
+  two tabs or a double click queue one sync, and the action refreshes the record so the
+  button disables at once. A late slice of a run a new sync replaced rolls its page back
+  and stops. If queueing the first slice throws, the run is failed with the reason and
+  the error rethrown; the job is queued after commit. Two starts from separate processes
+  were checked by hand on MySQL 8.4 (2026-10-28): the second waited on the row lock until
+  the first committed, then found its run and started none. No automated test covers it.
+- **Lock order:** a sync page locks Product rows, then the connection's row; an order
+  import the reverse. With more than one import worker they can deadlock, so a page is
+  written with `DB::transaction(..., attempts: 3)`; it is idempotent.
+- **Overwrite rule** (the user's call): the store's non-blank values overwrite PolyBag's;
+  only the name is fill-only. See *Overwrite, except the name*.
+- **`active`:** left as `productIdFor()` has it, so a sync reactivates a listed Product
+  someone deactivated. The confirmation says listed Products are marked active.
+- A catalog read needs only the shop domain and credentials, and `read_products`, checked
+  before the first page: a token without it fails the run with *Reconnect Shopify with
+  the read_products scope…*. A connection that imports nothing, and has no channel, can
+  still sync.
+- A name over 255 characters ("Product - Variant" can be) is cut to the column. A store
+  weight that rounds to 0.00 lb is treated as no weight.
+- With `auto_update_products` off, the action is hidden, nothing starts, and a run in
+  progress fails with the reason. If it turns off, or the connection is deactivated, after
+  the page was drawn, the action says which rather than "already running".
+- The offer after OAuth is a flashed `offer_product_catalog_sync` that opens the action's
+  confirmation as the page's default action, only if the connection has never synced.
+- `Incomplete` is reserved for `04`; nothing records it yet.
+
+Query cost on the development store at 2026-10, saved under `.scratch/product-catalog-sync/`:
+250 to a page requests 90 points, and 101 with a part-number metafield on either owner.
+`product_status:active` returned only active products: 100 variants, with 87 archived
+excluded. The store has no draft products. A bad cursor is answered `Malformed cursor` or
+`Invalid cursor for current pagination sort.` The Shopify AI Toolkit's validator rejects
+`ProductVariant.barcodes` at 2026-10, but the live API accepts it, as the order import
+already relies on. The store's product titles already name the variant, so the
+"Product - Variant" rule gives names like "Sheet Set - Terracotta - Terracotta" there.

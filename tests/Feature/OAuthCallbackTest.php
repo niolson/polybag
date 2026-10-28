@@ -2,6 +2,7 @@
 
 use App\Enums\Role;
 use App\Http\Integrations\Amazon\Requests\GetMarketplaceParticipations;
+use App\Jobs\SyncProductCatalogJob;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
 use App\Models\Location;
@@ -9,6 +10,7 @@ use App\Models\User;
 use App\Services\OAuthService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Testing\TestResponse;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
@@ -67,6 +69,15 @@ it('stores tokens on a data source on valid receive with transfer code', functio
     expect($this->dataSource->secret('oauth_access_token'))->toBe('shpat_live_token')
         ->and($this->dataSource->settings['auth_mode'])->toBe('authorization_code')
         ->and($this->dataSource->settings['oauth_connected_at'])->not->toBeNull();
+});
+
+it('offers a catalog sync once a store is connected, without starting one', function (): void {
+    Queue::fake();
+
+    $response = receiveShopifyConnect($this, [['id' => 'gid://shopify/Location/1', 'name' => 'Main']]);
+
+    $response->assertSessionHas('offer_product_catalog_sync', $this->dataSource->id);
+    Queue::assertNotPushed(SyncProductCatalogJob::class);
 });
 
 it('maps a store with one location to the only PolyBag location on connect', function (): void {

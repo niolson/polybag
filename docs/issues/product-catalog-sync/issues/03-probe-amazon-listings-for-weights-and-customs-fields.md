@@ -124,7 +124,9 @@ codes. That is noted for `05`.
 - Listing weights carry two decimals (25,650), one (2,008) or none (94).
 
 *Cost.* Listings plus catalog for this account took about 28 minutes run back to back.
-That is close to the 30-minute job timeout `04` inherits from `02`.
+When this was written `02`'s job had a 30-minute timeout; `02` now runs a sync as
+one-minute slices with no limit on the whole run, so the time matters for how long the
+sync shares the `imports` worker, not for a timeout.
 
 Result for `04`: date windows, split from `numberOfResults`; no report path; ceiling
 150 lb; no customs fields; catalog step in its own job. The PRD and `04` are updated.

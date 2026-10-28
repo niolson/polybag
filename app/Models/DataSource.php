@@ -2,10 +2,13 @@
 
 namespace App\Models;
 
+use App\Contracts\SyncsProductCatalog;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\DemoLifetime;
+use App\Services\ProductCatalog\ProductCatalogSyncRuns;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\DataSourceFactory;
@@ -60,6 +63,7 @@ class DataSource extends Model
         'import_reads' => 'array',
         'import_account_key' => 'string',
         'locations_remapped_at' => 'datetime',
+        'product_catalog_sync' => 'array',
         'global_export' => 'boolean',
         'schedule_interval' => ScheduleInterval::class,
         'settings' => 'array',
@@ -102,6 +106,45 @@ class DataSource extends Model
             ->where('source_type', AmazonSource::class)
             ->where('active', true)
             ->exists();
+    }
+
+    /**
+     * Whether this connection's product catalog can be synced
+     * (`product-catalog-sync/02`): an active connection whose driver reads a
+     * catalog. Import need not be on.
+     */
+    public function syncsProductCatalog(): bool
+    {
+        return $this->active && self::driverSyncsProductCatalog($this->source_type);
+    }
+
+    /**
+     * Whether connections of this driver can list a product catalog.
+     */
+    public static function driverSyncsProductCatalog(?string $sourceType): bool
+    {
+        return $sourceType !== null && is_subclass_of($sourceType, SyncsProductCatalog::class);
+    }
+
+    /** The last product catalog sync, or null when none has run. */
+    public function productCatalogSyncRun(): ?ProductCatalogSyncRun
+    {
+        $stored = $this->product_catalog_sync;
+
+        return is_array($stored) ? ProductCatalogSyncRun::fromArray($stored) : null;
+    }
+
+    /**
+     * Store the last product catalog sync. Only this column is written, so a
+     * sync never saves over settings someone changed meanwhile, and it is
+     * written whatever this instance last read. {@see ProductCatalogSyncRuns}
+     * decides whether a job may write it.
+     */
+    public function recordProductCatalogSyncRun(ProductCatalogSyncRun $run): void
+    {
+        static::query()->whereKey($this->id)->update(['product_catalog_sync' => json_encode($run->toArray())]);
+
+        $this->forceFill(['product_catalog_sync' => $run->toArray()])->syncOriginalAttribute('product_catalog_sync');
     }
 
     public function importsOrders(): bool

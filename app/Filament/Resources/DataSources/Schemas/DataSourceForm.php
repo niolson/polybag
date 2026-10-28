@@ -22,6 +22,7 @@ use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Services\CredentialFieldVisibility;
 use App\Services\OAuthService;
+use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportConnectionConfig;
@@ -321,6 +322,16 @@ class DataSourceForm
                 ->visible(fn (Get $get, ?DataSource $record): bool => $get('source_type') === ShopifySource::class
                     && (bool) $record?->exists
                     && self::importsOrders($get)),
+
+            Section::make('Product Catalog')
+                ->schema([
+                    Placeholder::make('product_catalog_sync')
+                        ->label('Last Sync')
+                        ->content(fn (DataSource $record): string => self::describeProductCatalogSync($record))
+                        ->columnSpanFull(),
+                ])
+                ->visible(fn (?DataSource $record): bool => (bool) $record?->exists
+                    && DataSource::driverSyncsProductCatalog($record->source_type)),
 
             // ── Amazon ─────────────────────────────────────────────────────────────
 
@@ -1359,5 +1370,55 @@ class DataSourceForm
         }
 
         return $options;
+    }
+
+    /**
+     * The connection's last product catalog sync, or why it cannot run
+     * (`product-catalog-sync/02`).
+     */
+    public static function describeProductCatalogSync(DataSource $record): string
+    {
+        if (! ProductCatalogSync::writesProducts()) {
+            return 'Catalog sync is off: imports are set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS), so Products are kept outside PolyBag.';
+        }
+
+        $unavailable = $record->active ? null : 'Activate this connection to sync its product catalog. ';
+        $run = $record->productCatalogSyncRun();
+
+        if ($run === null) {
+            return $unavailable ?? 'Not synced yet. Use “Sync Product Catalog” above to add this store\'s products to Products.';
+        }
+
+        $timezone = Location::timezone();
+        $parts = [
+            $run->label(),
+            ...($run->resumedFromPage !== null ? ["resumed at page {$run->resumedFromPage}"] : []),
+            'started '.$run->startedAt->setTimezone($timezone)->format('M j, Y g:i A'),
+        ];
+
+        if ($run->finishedAt !== null) {
+            $parts[] = 'finished '.$run->finishedAt->setTimezone($timezone)->format('M j, Y g:i A');
+        }
+
+        $pages = $run->pages === 1 ? '1 page' : "{$run->pages} pages";
+        $summary = implode(', ', $parts).". {$pages}: {$run->created} created, {$run->updated} updated, {$run->unchanged} unchanged.";
+
+        if ($run->stoppedAt !== null) {
+            $summary .= " Stopped at {$run->stoppedAt}.";
+        }
+
+        if ($run->error !== null) {
+            $summary .= " {$run->error}";
+        }
+
+        if ($run->canResume() && ! $run->isInterrupted()) {
+            $summary .= ' The next sync carries on from page '.($run->pages + 1).'.';
+        }
+
+        if ($run->isInterrupted()) {
+            $summary .= ' The sync stopped without finishing. Products it saved are kept; a new sync carries on from where it stopped.';
+        }
+
+        return ($unavailable ?? '').$summary;
     }
 }

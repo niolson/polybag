@@ -7,12 +7,15 @@ use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ReadsInPages;
 use App\Contracts\ReconcilesSupersededRecords;
+use App\Contracts\SyncsProductCatalog;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\DutiesTerms;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\ShopifyMetafieldOwner;
+use App\Exceptions\CatalogReadMustStartOver;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
@@ -36,7 +39,7 @@ use Illuminate\Support\Sleep;
 use InvalidArgumentException;
 use RuntimeException;
 
-class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReadsInPages, ReconcilesSupersededRecords
+class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, ReadsInPages, ReconcilesSupersededRecords, SyncsProductCatalog
 {
     private const ACCESS_SCOPES_QUERY = <<<'GRAPHQL'
         query AccessScopes {
@@ -381,6 +384,38 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         }
         GRAPHQL;
 
+    /**
+     * The variants of active products, for a product catalog sync
+     * (`product-catalog-sync/02`), with the variant fields an order import
+     * reads ({@see variantFields()}). 250 to a page requests 90 points, and
+     * 101 with a part-number metafield on either owner, on the development
+     * store (2026-10-28); a page of 100 variants cost 30 and 34. Far under the
+     * 1,000-point limit, so the page size is Shopify's most.
+     *
+     * `product_status:active` leaves out draft and archived products; the
+     * product's `status` is read too, and anything else is skipped.
+     */
+    private const PRODUCT_VARIANTS_QUERY = <<<'GRAPHQL'
+        query CatalogVariants($cursor: String{{partNumberVariables}}) {
+          productVariants(first: 250, after: $cursor, query: "product_status:active") {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id sku title
+              product { title status }
+              barcodes(first: 5) { nodes { type value } }
+              inventoryItem {
+                harmonizedSystemCode countryCodeOfOrigin
+                measurement { weight { unit value } }
+              }
+              {{partNumberSelection}}
+            }
+          }
+        }
+        GRAPHQL;
+
+    /** A variant title Shopify gives a product with no options. */
+    private const DEFAULT_VARIANT_TITLE = 'Default Title';
+
     private const FULFILLMENT_MUTATION = <<<'GRAPHQL'
         mutation CreateFulfillment($fulfillment: FulfillmentInput!) {
           fulfillmentCreate(fulfillment: $fulfillment) {
@@ -408,6 +443,20 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
     public function validateConfiguration(): void
     {
+        $this->validateStoreAccess();
+
+        if (empty($this->config['channel_name'])) {
+            throw new InvalidArgumentException('Shopify channel name is not configured.');
+        }
+    }
+
+    /**
+     * What any read of the store needs: where it is, and credentials for it.
+     * A catalog sync needs no more, so a connection that imports no orders,
+     * and has no channel, can still sync its catalog.
+     */
+    private function validateStoreAccess(): void
+    {
         if (empty($this->config['shop_domain'] ?? null)) {
             throw new InvalidArgumentException('Shopify shop domain is not configured for this source.');
         }
@@ -418,10 +467,6 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
         if (! $hasOwnToken && ! $hasOwnCredentials) {
             throw new InvalidArgumentException('Shopify API credentials are not configured for this source.');
-        }
-
-        if (empty($this->config['channel_name'])) {
-            throw new InvalidArgumentException('Shopify channel name is not configured.');
         }
     }
 
@@ -1324,8 +1369,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $weightLbs = self::poundsFrom($item['weight'] ?? null);
 
         $variant = $item['variant'] ?? [];
-        $barcodes = data_get($variant, 'barcodes.nodes');
-        $barcodes = is_array($barcodes) ? $barcodes : [];
+        $fields = $this->variantFields(is_array($variant) ? $variant : []);
 
         return [
             // The same rule the goods fingerprint uses, so a fingerprint taken
@@ -1334,12 +1378,140 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'name' => $item['productTitle'] ?? null,
             'quantity' => (int) ($item['remainingQuantity'] ?? 0),
             'value' => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0),
+            'barcode' => $fields['barcode'],
+            'gtin' => $fields['gtin'],
+            'weight' => $weightLbs,
+            'manufacturer_part_number' => $fields['manufacturer_part_number'],
+            'hs_tariff_number' => $fields['hs_tariff_number'],
+            'country_of_origin' => $fields['country_of_origin'],
+        ];
+    }
+
+    /**
+     * The Product fields read from a variant itself, the same whether an
+     * order import or a catalog sync read it. Name and weight are not among
+     * them: an order import takes them from its line item.
+     *
+     * @param  array<string, mixed>  $variant
+     * @return array{barcode: ?string, gtin: ?string, manufacturer_part_number: ?string, hs_tariff_number: ?string, country_of_origin: ?string}
+     */
+    private function variantFields(array $variant): array
+    {
+        $barcodes = data_get($variant, 'barcodes.nodes');
+        $barcodes = is_array($barcodes) ? $barcodes : [];
+
+        return [
             'barcode' => self::scanBarcodeFrom($barcodes),
             'gtin' => self::gtinFrom($barcodes),
-            'weight' => $weightLbs,
             'manufacturer_part_number' => self::typedPartNumberFrom($barcodes) ?? $this->partNumberFrom($variant),
             'hs_tariff_number' => self::filledText(data_get($variant, 'inventoryItem.harmonizedSystemCode')),
             'country_of_origin' => self::filledText(data_get($variant, 'inventoryItem.countryCodeOfOrigin')),
+        ];
+    }
+
+    /**
+     * Every variant of the store's active products, a page at a time, from
+     * the start or from a cursor an earlier page gave
+     * (`product-catalog-sync/02`).
+     *
+     * @return Generator<int, ProductCatalogPage>
+     *
+     * @throws CatalogReadMustStartOver when the token lacks `read_products`, or Shopify no longer accepts `$cursor`
+     */
+    public function fetchProductCatalogPages(?string $cursor = null): Generator
+    {
+        $this->validateStoreAccess();
+
+        if ($cursor === null && ! in_array('read_products', $this->fetchAccessScopes(), true)) {
+            throw new CatalogReadMustStartOver('Reconnect Shopify with the read_products scope to sync its product catalog.');
+        }
+
+        $query = $this->lineItemQuery(self::PRODUCT_VARIANTS_QUERY);
+        $resumed = $cursor !== null;
+        $page = 0;
+
+        do {
+            $json = $this->catalogPage($query, $cursor);
+            $connection = $json['data']['productVariants'] ?? [];
+            $page++;
+
+            Log::info('Read a page of Shopify product variants', [
+                'shop_domain' => $this->config['shop_domain'] ?? null,
+                // Of this read, which may carry on from a saved cursor.
+                'page' => $page,
+                'from_saved_cursor' => $resumed,
+                'variants' => count($connection['nodes'] ?? []),
+                ...self::queryCost($json),
+            ]);
+
+            /** @var Collection<int, array<string, mixed>> $items */
+            $items = collect($connection['nodes'] ?? [])
+                ->filter(fn (mixed $variant): bool => is_array($variant) && ($variant['product']['status'] ?? null) === 'ACTIVE')
+                ->map(fn (array $variant): array => $this->mapCatalogVariant($variant))
+                ->filter(fn (array $item): bool => $item['sku'] !== null)
+                ->values();
+
+            $pageInfo = $connection['pageInfo'] ?? [];
+            $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
+
+            yield new ProductCatalogPage($items, $cursor);
+        } while ($cursor !== null);
+    }
+
+    /**
+     * What Shopify answers for a cursor it cannot use (development store,
+     * 2026-10-28). Matched exactly: another error that mentions a cursor is
+     * not one of these.
+     */
+    private const REFUSED_CURSOR_MESSAGES = [
+        'Malformed cursor',
+        'Invalid cursor for current pagination sort.',
+    ];
+
+    /**
+     * One page of catalog variants. A cursor Shopify refuses stops the sync
+     * with a reason rather than its raw error, and the next sync starts from
+     * the first page rather than resuming from it.
+     *
+     * @return array<string, mixed>
+     */
+    private function catalogPage(string $query, ?string $cursor): array
+    {
+        try {
+            return $this->graphql($query, $this->lineItemVariables(array_filter(['cursor' => $cursor])));
+        } catch (RuntimeException $e) {
+            $refused = collect(self::REFUSED_CURSOR_MESSAGES)
+                ->contains(fn (string $message): bool => str_contains($e->getMessage(), json_encode($message, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)));
+
+            if ($cursor !== null && $refused) {
+                throw new CatalogReadMustStartOver('Shopify no longer accepts the place this sync had reached in the catalog. Products saved so far are kept; the next sync starts from the first page.', previous: $e);
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * A catalog variant as the item array an import writes a Product from.
+     * The SKU follows the order import's rule, so a SKU-less variant lands on
+     * the Product a later order names.
+     *
+     * @param  array<string, mixed>  $variant
+     * @return array<string, mixed>
+     */
+    private function mapCatalogVariant(array $variant): array
+    {
+        $productTitle = self::filledText(data_get($variant, 'product.title'));
+        $variantTitle = self::filledText($variant['title'] ?? null);
+        $weight = data_get($variant, 'inventoryItem.measurement.weight');
+
+        return [
+            'sku' => ShopifyGoodsFingerprint::skuFor(['sku' => $variant['sku'] ?? null, 'variant' => ['id' => $variant['id'] ?? null]]),
+            'name' => self::productName($variantTitle === null || $variantTitle === self::DEFAULT_VARIANT_TITLE
+                ? $productTitle
+                : ($productTitle === null ? $variantTitle : "{$productTitle} - {$variantTitle}")),
+            'weight' => self::catalogPounds(is_array($weight) ? $weight : null),
+            ...$this->variantFields($variant),
         ];
     }
 
@@ -1431,6 +1603,31 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $value = self::filledText($value);
 
         return $value === null ? null : self::filledText(mb_substr($value, 0, 100));
+    }
+
+    /**
+     * A catalog weight in pounds, or null when it is no value: Shopify reports
+     * 0 for a variant with no weight entered, and a weight that rounds to 0.00
+     * in the two-decimal column would store as 0 all the same. Null leaves
+     * PolyBag's weight alone.
+     *
+     * @param  array<string, mixed>|null  $weight
+     */
+    private static function catalogPounds(?array $weight): ?float
+    {
+        $pounds = self::poundsFrom($weight);
+
+        return $pounds !== null && round($pounds, 2) > 0 ? $pounds : null;
+    }
+
+    /**
+     * A name cut to the `products.name` column's 255 characters. Shopify allows
+     * a product title of 255 alone, so the variant title can take it over,
+     * and MySQL's strict mode would fail the whole page on it.
+     */
+    private static function productName(?string $name): ?string
+    {
+        return $name === null ? null : rtrim(mb_substr($name, 0, 255));
     }
 
     /**

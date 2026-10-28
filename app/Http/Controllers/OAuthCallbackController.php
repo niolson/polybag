@@ -82,7 +82,9 @@ class OAuthCallbackController extends Controller
 
                 return redirect()
                     ->route('filament.app.resources.data-sources.edit', $importSource->id)
-                    ->with('oauth_notification', $notification);
+                    ->with('oauth_notification', $notification)
+                    // A newly connected store is offered a catalog sync once (`product-catalog-sync/02`).
+                    ->with('offer_product_catalog_sync', $provider === 'shopify' ? $importSource->id : null);
             }
 
             if ($account) {

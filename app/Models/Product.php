@@ -121,6 +121,22 @@ class Product extends Model
                 ->whereHas('shipment', fn (Builder $shipment) => $shipment->where('country', '!=', 'US')));
     }
 
+    /**
+     * Products, on a Package or not, without what an international label
+     * declares for them: a weight, a country of origin or an HS code
+     * (`product-catalog-sync/02`). Unlike {@see scopeMissingCustomsData()},
+     * this reaches a Product no order has brought in yet.
+     *
+     * @param  Builder<Product>  $query
+     */
+    public function scopeIncompleteCustomsData(Builder $query): void
+    {
+        $query->where(fn (Builder $missing) => $missing
+            ->whereNull('weight')->orWhere('weight', '<=', 0)
+            ->orWhereNull('country_of_origin')->orWhere('country_of_origin', '')
+            ->orWhereNull('hs_tariff_number')->orWhere('hs_tariff_number', ''));
+    }
+
     public function packageItems(): HasMany
     {
         return $this->hasMany(PackageItem::class);
