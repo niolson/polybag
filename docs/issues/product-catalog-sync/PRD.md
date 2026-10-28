@@ -43,7 +43,8 @@ find them: it lists only Products on an unshipped international Package, and a s
 Product is on none. `02` adds an **Incomplete Customs Data** filter over every Product (no
 weight, origin or HS code) for this. Filling HS codes automatically is a separate concern ([`05`](issues/05-suggest-hs-codes.md)).
 
-Keeping PolyBag in step with the store is not a goal (see *Out of scope*).
+Keeping PolyBag in step with the store *automatically* is not a goal (see *Out of scope*):
+each sync is started by hand.
 
 ## What already exists
 
@@ -177,7 +178,8 @@ No listing weight in `03` came near it.
   so order imports run between slices on the one `imports` worker. The run records its
   cursor, page and counts as each page commits, and the next slice resumes from there.
   The run, not a lock, keeps two syncs of a connection apart: a sync starts only when no
-  run is running or the running one has stalled. `failed()` records the run, so a crash
+  run is running or the running one has stalled, and a sync started after one that failed
+  or stalled partway carries on from its cursor and counts. `failed()` records the run, so a crash
   never leaves it showing *running*. It needs the connection `active`, not
   `import_enabled`. *(Revised in `02`: one 30-minute job held up every order import.)*
 - **Client.** Products land in the connection's assigned client, else the default client,
@@ -225,7 +227,8 @@ not fixed here:
 
 ## Out of scope
 
-- Scheduled or webhook-driven syncs, and keeping Products in step with the store.
+- Scheduled or webhook-driven syncs: keeping Products in step with the store
+  automatically. A sync started by hand overwrites from the store (see *Overwrite rule*).
 - Deactivating Products that leave the store, and the `active` behaviors above.
 - Database connections, which already map any column through their item query.
 - Reading the catalog's weights.

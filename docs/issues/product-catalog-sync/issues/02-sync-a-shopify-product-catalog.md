@@ -39,13 +39,17 @@ the queue, and order imports queued meanwhile run in between.
   only to its own run, while it is running. A per-job lock
   (`product-catalog-sync:{dataSourceId}`) still keeps two slices apart, but it is free
   between slices, so it cannot stop a second sync.
-- **Timeouts fit a slice.** `$timeout = 300`, `$failOnTimeout = true`, `$maxExceptions = 1`
-  (a real error is not retried: a second attempt hides the first one's error and burns API
-  quota), and `retryUntil()` as long as the run may go without progress.
-- `failed()` records its own run as `failed` at the next page, keeping the counts, so a
-  timeout or crash never leaves the Connection showing *running*. A run with no page saved
-  for longer than a slice plus the wait behind one order import is shown as
-  *interrupted*, and a new sync may start.
+- **Timeouts fit a slice; waiting is generous.** `$timeout = 420` (the minute, a page
+  throttled every time Shopify allows, and the requests), `$failOnTimeout = true`,
+  `$maxExceptions = 1` (a real error is not retried: a second attempt hides the first
+  one's error and burns API quota). A slice may wait six hours to run (`retryUntil()`),
+  and a run counts as stalled after six hours with no page saved.
+- **Resume.** A sync started after one that failed or stalled partway carries on from its
+  cursor and counts, and the Connection says it resumed. A cursor Shopify refused, or a
+  token without `read_products`, starts the next sync from the first page.
+- `failed()` rolls back open transactions, then records its own run as `failed` at the
+  next page, keeping the counts, so a timeout or crash never leaves the Connection
+  showing *running*. A stalled run is shown as *interrupted*, and a new sync may start.
 
 It asks the source for its catalog in pages and sends each item through `productIdFor()`
 for the connection's client.
@@ -140,16 +144,30 @@ keeps its own name, weight and key order. The run is a JSON column,
 through `ProductCatalogSyncRuns`, and shown under *Product Catalog* on the Connection.
 
 - **Slices** (revised after review, the user's call): one 30-minute job held the single
-  `imports` worker. A slice takes pages for 60 seconds, then hands on; the job's timeout is
-  300 (the slice, plus a page that may wait out Shopify throttling). Interrupted means no
-  page saved for 2,160 seconds: a slice's timeout, one order import's 1,800 that the next
-  slice may queue behind, and a margin. `retryUntil()` is the same, so a slice that cannot
-  run before its run goes stale fails it. The timings live in `ProductCatalogSyncTiming`.
+  `imports` worker. A slice takes pages for 60 seconds, then hands on. The job's timeout
+  is 420: the minute, plus a page started at second 59 and throttled nine times (up to
+  270 seconds), plus 90 seconds for the requests; under `retry_after` 1,860. The timings
+  live in `ProductCatalogSyncTiming`.
+- **Waiting and stalls** (second review): the scheduler queues an import for every
+  connection on every tick, so in a sale a slice can wait behind several half-hour
+  imports. A first cut gave it 2,160 seconds, which would have failed healthy runs. Both
+  `retryUntil()` and the stall limit are now six hours: what keeps syncs apart is the run
+  ID under the row lock, not the timing, and a killed worker's slice is handed out again
+  after `retry_after` anyway, so the limit only waits for a job lost outright.
+- **Resume** (second review): a new sync carries on from a failed or interrupted run's
+  cursor, pages and counts as a new run (`resumed_from_page`), unless it failed with
+  `CatalogReadMustStartOver`: a cursor Shopify refused (`Malformed cursor` or `Invalid
+  cursor for current pagination sort.`, matched exactly) or a missing `read_products`.
 - **Guard:** the run, not `ShouldBeUnique`. A unique lock held while a slice runs would
   drop the continuation it queues. Starting checks and writes the run under a row lock, so
   two tabs or a double click queue one sync, and the action refreshes the record so the
   button disables at once. A late slice of a run a new sync replaced rolls its page back
-  and stops.
+  and stops. If queueing the first slice throws, the run is failed with the reason and
+  the error rethrown; the job is queued after commit. Two starts on separate MySQL
+  connections are not tested: there is no MySQL here.
+- **Lock order:** a sync page locks Product rows, then the connection's row; an order
+  import the reverse. With more than one import worker they can deadlock, so a page is
+  written with `DB::transaction(..., attempts: 3)`; it is idempotent.
 - **Overwrite rule** (the user's call): the store's non-blank values overwrite PolyBag's;
   only the name is fill-only. See *Overwrite, except the name*.
 - **`active`:** left as `productIdFor()` has it, so a sync reactivates a listed Product
@@ -158,9 +176,11 @@ through `ProductCatalogSyncRuns`, and shown under *Product Catalog* on the Conne
   before the first page: a token without it fails the run with *Reconnect Shopify with
   the read_products scope…*. A connection that imports nothing, and has no channel, can
   still sync.
-- A name over 255 characters ("Product - Variant" can be) is cut to the column.
+- A name over 255 characters ("Product - Variant" can be) is cut to the column. A store
+  weight that rounds to 0.00 lb is treated as no weight.
 - With `auto_update_products` off, the action is hidden, nothing starts, and a run in
-  progress fails with the reason.
+  progress fails with the reason. If it turns off, or the connection is deactivated, after
+  the page was drawn, the action says which rather than "already running".
 - The offer after OAuth is a flashed `offer_product_catalog_sync` that opens the action's
   confirmation as the page's default action, only if the connection has never synced.
 - `Incomplete` is reserved for `04`; nothing records it yet.

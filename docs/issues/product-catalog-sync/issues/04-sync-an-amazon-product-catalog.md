@@ -109,7 +109,8 @@ fails the run rather than starting over.
       its barcode, and skips one checked within the recheck window
 - [ ] A Product whose `identifiers_checked_at` has expired is looked up and the stamp moves
       forward
-- [ ] A hand-entered weight or part number survives
+- [ ] A listing's non-blank weight overwrites a Product's; a listing with no weight, and a
+      catalog look-up with no part number, leave the Product's value
 - [ ] A manual connection does not show the action
 - [ ] Fixtures use synthetic SKUs, ASINs and seller IDs
 
