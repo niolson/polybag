@@ -7,10 +7,10 @@ use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Exceptions\PermanentExportException;
+use App\Http\Integrations\Amazon\AmazonRequestPacer;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
-use App\Http\Integrations\Amazon\Requests\SearchCatalogItems;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
 use App\Models\Carrier;
 use App\Models\DataSource;
@@ -20,16 +20,15 @@ use App\Models\Shipment;
 use App\Services\ClientContext;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\AmazonBuyerDataFilter;
+use App\Services\ShipmentImport\AmazonCatalogIdentifiers;
 use App\Services\ShipmentImport\AmazonClosedOrderCloser;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Sleep;
 use InvalidArgumentException;
 use RuntimeException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
-use Throwable;
 
 class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
 {
@@ -57,9 +56,8 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     /** When this import's catalog lookup ran, stamped on the Products it answered for. */
     private ?string $catalogCheckedAt = null;
 
-    private float $catalogRequestRate = 2.0;
-
-    private bool $hasSentCatalogRequest = false;
+    /** Paces this run's requests; a new run starts with none sent. */
+    private AmazonRequestPacer $requests;
 
     /**
      * The shipped and cancelled orders this run read, keyed by order ID, for
@@ -77,21 +75,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * @var array<string, mixed>|null
      */
     private ?array $pendingReadState = null;
-
-    private const CATALOG_IDENTIFIER_PRIORITY = ['UPC', 'EAN', 'GTIN', 'JAN', 'ISBN'];
-
-    private const CATALOG_MAX_ATTEMPTS = 5;
-
-    /** ASINs per catalog request, which is also the page size: Amazon's default of 10 would page a full chunk. */
-    private const CATALOG_CHUNK_SIZE = 20;
-
-    /** A Product the catalog answered for within this many days is not looked up again. */
-    private const CATALOG_RECHECK_DAYS = 30;
-
-    private const PART_NUMBER_MAX_LENGTH = 100;
-
-    /** Values Amazon carries in `partNumber` or `modelNumber` that name no part. */
-    private const PART_NUMBER_PLACEHOLDERS = ['n/a', 'na', 'none', 'not applicable', 'does not apply', 'unknown', 'generic'];
 
     private const SEARCH_ORDERS_PAGE_SIZE = 100;
 
@@ -122,6 +105,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     {
         $this->config = $config;
         $this->connector = AmazonSpApiConnector::fromSettings($config);
+        $this->requests = new AmazonRequestPacer($this->connector);
     }
 
     public function validateConfiguration(): void
@@ -158,8 +142,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         $this->orderCache = [];
         $this->catalogIdentifiers = [];
         $this->catalogCheckedAt = null;
-        $this->catalogRequestRate = 2.0;
-        $this->hasSentCatalogRequest = false;
+        $this->requests = new AmazonRequestPacer($this->connector);
         $this->closedOrders = [];
         $this->pendingReadState = null;
         $sandbox = $this->readsFromSandbox();
@@ -195,7 +178,9 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         // to say either way.
         if (! $sandbox && config('shipment-import.behavior.auto_update_products', true)) {
             $this->catalogCheckedAt = now()->toDateTimeString();
-            $this->catalogIdentifiers = $this->fetchCatalogIdentifiers($this->asinsNeedingCatalogLookup($rawOrders), $marketplaceId);
+            $this->catalogIdentifiers = $this->catalogIdentifiers(
+                'Amazon SP-API catalog lookup failed; continuing order import without those barcodes and part numbers',
+            )->fetch($this->asinsNeedingCatalogLookup($rawOrders));
         }
 
         return collect($rawOrders)->map(function (array $order): array {
@@ -920,7 +905,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             'barcode' => $catalog['barcode'] ?? null,
             'manufacturer_part_number' => $catalog['part_number'] ?? null,
             'identifiers_checked_at' => $catalog === null ? null : $this->catalogCheckedAt,
-            '_fill_only' => ['barcode', 'manufacturer_part_number'],
+            '_fill_only' => AmazonCatalogIdentifiers::FILL_ONLY_FIELDS,
             'weight' => null,
         ];
     }
@@ -957,29 +942,22 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             }
         }
 
-        if ($skusByAsin === []) {
-            return collect();
-        }
+        return AmazonCatalogIdentifiers::asinsNeedingLookup($skusByAsin, $this->importClientId());
+    }
 
-        $recheckBefore = now()->subDays(self::CATALOG_RECHECK_DAYS);
-
-        $skusNotNeedingLookup = Product::query()
-            ->where('client_id', $this->importClientId())
-            ->whereIn('sku', collect($skusByAsin)->flatten()->unique()->values())
-            ->where(fn ($query) => $query
-                ->where(fn ($complete) => $complete
-                    ->whereNotNull('barcode')->where('barcode', '!=', '')
-                    ->whereNotNull('manufacturer_part_number')->where('manufacturer_part_number', '!=', ''))
-                ->orWhere('identifiers_checked_at', '>=', $recheckBefore))
-            ->pluck('sku');
-
-        return collect($skusByAsin)
-            ->filter(fn (array $skus): bool => collect($skus)->contains(
-                fn (string $sku): bool => ! $skusNotNeedingLookup->contains($sku)
-            ))
-            ->keys()
-            ->map(fn (int|string $asin): string => (string) $asin)
-            ->values();
+    /**
+     * The catalog lookup, on this run's request pacing.
+     *
+     * @param  string  $failureMessage  what a failed lookup logs, saying what carries on without it
+     */
+    public function catalogIdentifiers(string $failureMessage): AmazonCatalogIdentifiers
+    {
+        return new AmazonCatalogIdentifiers(
+            $this->requests,
+            (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER'),
+            isset($this->config['_data_source_id']) ? (int) $this->config['_data_source_id'] : null,
+            $failureMessage,
+        );
     }
 
     /**
@@ -992,219 +970,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         $clientId = $sourceId ? DataSource::query()->whereKey($sourceId)->value('client_id') : null;
 
         return (int) ($clientId ?? app(ClientContext::class)->default()->id);
-    }
-
-    /**
-     * Ask the catalog for each ASIN's barcode and part number. Every ASIN in a
-     * chunk that succeeded gets an entry, empty or not; a failed chunk gets none.
-     *
-     * @param  Collection<int, string>  $asins
-     * @return array<string, array{barcode: string|null, part_number: string|null}>
-     */
-    private function fetchCatalogIdentifiers(Collection $asins, string $marketplaceId): array
-    {
-        $identifiers = [];
-
-        foreach ($asins->chunk(self::CATALOG_CHUNK_SIZE) as $asinChunk) {
-            try {
-                $response = $this->sendCatalogRequest(new SearchCatalogItems([
-                    'marketplaceIds' => $marketplaceId,
-                    'identifiersType' => 'ASIN',
-                    'identifiers' => $asinChunk->implode(','),
-                    'includedData' => 'identifiers,summaries',
-                    'pageSize' => self::CATALOG_CHUNK_SIZE,
-                ]));
-
-                if ($response->failed()) {
-                    $this->logCatalogLookupFailure($asinChunk->count(), 'Amazon returned HTTP '.$response->status().'.');
-
-                    continue;
-                }
-
-                // An ASIN absent from a complete answer is one the catalog has
-                // nothing for, and is recorded as checked. If Amazon paged the
-                // answer anyway, an absent ASIN may be on a page not read, so
-                // only the ASINs returned count.
-                $chunkIdentifiers = $response->json('pagination.nextToken') === null
-                    ? $asinChunk->mapWithKeys(fn (string $asin): array => [$asin => ['barcode' => null, 'part_number' => null]])->all()
-                    : [];
-
-                foreach ($response->json('items', []) as $catalogItem) {
-                    if (! is_array($catalogItem)) {
-                        continue;
-                    }
-
-                    $asin = $catalogItem['asin'] ?? null;
-
-                    if (is_string($asin) && $asinChunk->contains($asin)) {
-                        $chunkIdentifiers[$asin] = [
-                            'barcode' => $this->preferredCatalogBarcode($catalogItem, $marketplaceId),
-                            'part_number' => $this->preferredCatalogPartNumber($catalogItem, $asin, $marketplaceId),
-                        ];
-                    }
-                }
-
-                // Not spread: an all-digit ASIN (a book's ISBN-10) is an integer
-                // key, and unpacking would renumber it.
-                $identifiers = array_replace($identifiers, $chunkIdentifiers);
-            } catch (Throwable $exception) {
-                $this->logCatalogLookupFailure($asinChunk->count(), $exception->getMessage());
-            }
-        }
-
-        return $identifiers;
-    }
-
-    private function sendCatalogRequest(SearchCatalogItems $request): Response
-    {
-        $retryDelayMilliseconds = null;
-
-        for ($attempt = 1; $attempt <= self::CATALOG_MAX_ATTEMPTS; $attempt++) {
-            if ($this->hasSentCatalogRequest) {
-                Sleep::for($retryDelayMilliseconds ?? $this->catalogRequestIntervalMilliseconds())->milliseconds();
-            }
-
-            $this->hasSentCatalogRequest = true;
-            $response = $this->connector->send($request);
-            $this->updateCatalogRequestRate($response);
-
-            if ($response->status() !== 429 || $attempt === self::CATALOG_MAX_ATTEMPTS) {
-                return $response;
-            }
-
-            $retryDelayMilliseconds = $this->catalogRetryDelayMilliseconds($response, $attempt);
-        }
-
-        throw new RuntimeException('Amazon catalog request retry loop ended unexpectedly.');
-    }
-
-    private function updateCatalogRequestRate(Response $response): void
-    {
-        $rateLimit = $response->header('x-amzn-RateLimit-Limit');
-
-        if (is_array($rateLimit)) {
-            $rateLimit = $rateLimit[0] ?? null;
-        }
-
-        if (is_string($rateLimit) && is_numeric($rateLimit) && (float) $rateLimit > 0) {
-            $this->catalogRequestRate = (float) $rateLimit;
-        }
-    }
-
-    private function catalogRequestIntervalMilliseconds(): int
-    {
-        return max(1, (int) ceil(1000 / $this->catalogRequestRate));
-    }
-
-    private function catalogRetryDelayMilliseconds(Response $response, int $attempt): int
-    {
-        $retryAfter = $response->header('Retry-After');
-
-        if (is_array($retryAfter)) {
-            $retryAfter = $retryAfter[0] ?? null;
-        }
-
-        if (is_string($retryAfter) && is_numeric($retryAfter)) {
-            return max($this->catalogRequestIntervalMilliseconds(), (int) ceil((float) $retryAfter * 1000));
-        }
-
-        if (is_string($retryAfter) && ($retryAt = strtotime($retryAfter)) !== false) {
-            return max($this->catalogRequestIntervalMilliseconds(), ($retryAt - time()) * 1000);
-        }
-
-        return $this->catalogRequestIntervalMilliseconds() * (2 ** ($attempt - 1));
-    }
-
-    /**
-     * @param  array<string, mixed>  $catalogItem
-     */
-    private function preferredCatalogBarcode(array $catalogItem, string $marketplaceId): ?string
-    {
-        $identifierGroups = collect($catalogItem['identifiers'] ?? []);
-        $marketplaceGroups = $identifierGroups->where('marketplaceId', $marketplaceId);
-
-        if ($marketplaceGroups->isEmpty()) {
-            $marketplaceGroups = $identifierGroups;
-        }
-
-        $identifiers = $marketplaceGroups
-            ->flatMap(fn (mixed $group): array => is_array($group) ? ($group['identifiers'] ?? []) : [])
-            ->filter(fn (mixed $identifier): bool => is_array($identifier));
-
-        foreach (self::CATALOG_IDENTIFIER_PRIORITY as $identifierType) {
-            $identifier = $identifiers->first(
-                fn (array $identifier): bool => strtoupper((string) ($identifier['identifierType'] ?? '')) === $identifierType
-                    && is_string($identifier['identifier'] ?? null)
-                    && $identifier['identifier'] !== ''
-            );
-
-            if (is_array($identifier)) {
-                return $identifier['identifier'];
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * The summary's `partNumber`, else its `modelNumber`, from the order's
-     * marketplace or failing that any other. A value that only repeats the
-     * ASIN or the brand, or is a placeholder, is no part number. One equal to
-     * the item's own GTIN is kept: a manufacturer may use the S-PID as the
-     * NS-PID.
-     *
-     * @param  array<string, mixed>  $catalogItem
-     */
-    private function preferredCatalogPartNumber(array $catalogItem, string $asin, string $marketplaceId): ?string
-    {
-        $summaries = collect($catalogItem['summaries'] ?? [])->filter(fn (mixed $summary): bool => is_array($summary));
-        $marketplaceSummaries = $summaries->where('marketplaceId', $marketplaceId);
-
-        foreach ([$marketplaceSummaries, $summaries->diffKeys($marketplaceSummaries)] as $group) {
-            foreach ($group as $summary) {
-                $brand = is_string($summary['brand'] ?? null) ? $summary['brand'] : null;
-
-                foreach (['partNumber', 'modelNumber'] as $field) {
-                    $partNumber = $this->usablePartNumber($summary[$field] ?? null, $asin, $brand);
-
-                    if ($partNumber !== null) {
-                        return $partNumber;
-                    }
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private function usablePartNumber(mixed $value, string $asin, ?string $brand): ?string
-    {
-        if (! is_string($value)) {
-            return null;
-        }
-
-        $value = trim(mb_substr(trim($value), 0, self::PART_NUMBER_MAX_LENGTH));
-        $normalized = mb_strtolower($value);
-
-        if ($value === ''
-            || $normalized === mb_strtolower($asin)
-            || ($brand !== null && $normalized === mb_strtolower(trim($brand)))
-            || in_array($normalized, self::PART_NUMBER_PLACEHOLDERS, true)
-            || preg_match('/^[-.0]+$/', $value) === 1) {
-            return null;
-        }
-
-        return $value;
-    }
-
-    private function logCatalogLookupFailure(int $asinCount, string $error): void
-    {
-        Log::channel((string) config('shipment-import.logging.channel', 'shipment-import'))
-            ->warning('Amazon SP-API catalog lookup failed; continuing order import without those barcodes and part numbers', [
-                'data_source_id' => $this->config['_data_source_id'] ?? null,
-                'asin_count' => $asinCount,
-                'error' => $error,
-            ]);
     }
 
     /**
