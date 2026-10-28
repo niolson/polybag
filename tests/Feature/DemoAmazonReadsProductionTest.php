@@ -311,6 +311,7 @@ describe('host selection', function (): void {
             'GetShippingRates' => 'postage',
             'PurchaseShipment' => 'postage',
             'SearchCatalogItems' => 'read',
+            'SearchListingsItems' => 'read',
             'SearchOrders' => 'read',
         ]);
     });

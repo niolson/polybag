@@ -115,7 +115,9 @@ class EditDataSource extends EditRecord
                     : null)
                 ->requiresConfirmation()
                 ->modalHeading('Sync product catalog?')
-                ->modalDescription('Add every variant of this store\'s active products to Products, and update the ones already there, in the background. The store\'s weight, barcodes, part number and customs fields replace PolyBag\'s; a field blank in the store leaves PolyBag\'s value, and a Product keeps the name it has. Listed Products are marked active. Nothing is deleted, and nothing is written to the store.')
+                ->modalDescription(fn (): string => $this->dataSource()->isAmazon()
+                    ? 'Add every listing of this Amazon seller account, whatever its status, to Products, and update the ones already there, in the background. A listing\'s weight replaces PolyBag\'s; a listing with no weight leaves PolyBag\'s value, and a Product keeps the name it has. Afterwards, barcodes and part numbers are looked up in Amazon\'s catalog for Products missing one, and only fill blanks. Listed Products are marked active. Nothing is deleted, and nothing is written to Amazon.'
+                    : 'Add every variant of this store\'s active products to Products, and update the ones already there, in the background. The store\'s weight, barcodes, part number and customs fields replace PolyBag\'s; a field blank in the store leaves PolyBag\'s value, and a Product keeps the name it has. Listed Products are marked active. Nothing is deleted, and nothing is written to the store.')
                 ->modalSubmitActionLabel('Sync')
                 ->action(function (): void {
                     $dataSource = $this->dataSource();
@@ -128,7 +130,7 @@ class EditDataSource extends EditRecord
                         // Something may have changed since the page was drawn.
                         [$title, $body] = match (true) {
                             ! ProductCatalogSync::writesProducts() => ['Catalog sync is off', 'Imports are now set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS).'],
-                            ! $dataSource->syncsProductCatalog() => ['This connection cannot sync its catalog', 'It is inactive. Activate it to sync its product catalog.'],
+                            ! $dataSource->syncsProductCatalog() => ['This connection cannot sync its catalog', $dataSource->productCatalogSetupMissing() ?? 'It is inactive. Activate it to sync its product catalog.'],
                             default => ['A catalog sync is already running', 'The last run is shown under Product Catalog on this connection.'],
                         };
 

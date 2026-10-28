@@ -5,24 +5,34 @@ namespace App\Services\ShipmentImport\Sources;
 use App\Contracts\ClosesRecordsClosedAtSource;
 use App\Contracts\DataSourceInterface;
 use App\Contracts\ExportDestinationInterface;
+use App\Contracts\FollowsUpProductCatalogSync;
+use App\Contracts\SyncsProductCatalog;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
+use App\Exceptions\CatalogReadMustStartOver;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Amazon\AmazonRequestPacer;
 use App\Http\Integrations\Amazon\AmazonSpApiConnector;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Http\Integrations\Amazon\Requests\ConfirmShipment;
 use App\Http\Integrations\Amazon\Requests\SearchOrders;
+use App\Jobs\LookUpAmazonCatalogIdentifiersJob;
+use App\Models\AmazonCatalogLookup;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Services\ClientContext;
+use App\Services\ProductCatalog\AmazonCatalogLookups;
+use App\Services\ProductCatalog\AmazonListingCatalog;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\AmazonBuyerDataFilter;
 use App\Services\ShipmentImport\AmazonCatalogIdentifiers;
 use App\Services\ShipmentImport\AmazonClosedOrderCloser;
 use Carbon\CarbonImmutable;
+use Generator;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -30,7 +40,7 @@ use RuntimeException;
 use Saloon\Exceptions\Request\RequestException;
 use Saloon\Http\Response;
 
-class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface
+class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, ExportDestinationInterface, FollowsUpProductCatalogSync, SyncsProductCatalog
 {
     /**
      * `fulfillment.fulfilledBy` when Amazon ships the order from its own
@@ -958,6 +968,54 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             isset($this->config['_data_source_id']) ? (int) $this->config['_data_source_id'] : null,
             $failureMessage,
         );
+    }
+
+    /**
+     * Every listing of the seller account, a page at a time
+     * (`product-catalog-sync/04`), through {@see AmazonListingCatalog}.
+     * Listing search is by seller ID, which only an OAuth connection records.
+     *
+     * @return Generator<int, ProductCatalogPage>
+     *
+     * @throws CatalogReadMustStartOver when the connection has no seller ID, or Amazon refuses a search
+     */
+    public function fetchProductCatalogPages(?string $cursor = null): Generator
+    {
+        $sellerId = $this->config['amazon_selling_partner_id'] ?? null;
+
+        if (($this->config['auth_mode'] ?? null) !== 'authorization_code' || ! is_string($sellerId) || $sellerId === '') {
+            throw new CatalogReadMustStartOver('Connect this Amazon account through OAuth to sync its product catalog: listing search needs the seller ID that OAuth records.');
+        }
+
+        if (blank($this->config['refresh_token'] ?? null)) {
+            throw new InvalidArgumentException('Amazon SP-API refresh token is not configured for this source.');
+        }
+
+        if (blank($this->config['marketplace_id'] ?? null)) {
+            throw new InvalidArgumentException('Choose an Amazon marketplace before syncing the product catalog.');
+        }
+
+        yield from (new AmazonListingCatalog($this->requests, $sellerId, (string) $this->config['marketplace_id']))->pages($cursor);
+    }
+
+    /**
+     * Record the page's SKUs and ASINs for the catalog look-up that follows
+     * the listings.
+     */
+    public function productCatalogPageWritten(DataSource $dataSource, ProductCatalogPage $page): void
+    {
+        app(AmazonCatalogLookups::class)->record($dataSource, $page);
+    }
+
+    /**
+     * Queue the catalog look-up for the SKUs the run listed. It runs on the
+     * `imports` queue in short slices, as the sync did.
+     */
+    public function productCatalogSyncFinished(DataSource $dataSource, ProductCatalogSyncRun $run): void
+    {
+        if (AmazonCatalogLookup::query()->where('data_source_id', $dataSource->id)->exists()) {
+            LookUpAmazonCatalogIdentifiersJob::dispatch($dataSource->id);
+        }
     }
 
     /**

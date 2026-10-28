@@ -320,6 +320,8 @@ it('stores an Amazon refresh token and selling partner from the broker', functio
 
     $response->assertRedirect(route('filament.app.resources.data-sources.edit', $source->id));
     $response->assertSessionHas('oauth_notification.title', 'Amazon connected. Amazon.com (US) was selected automatically.');
+    // A newly connected seller account is offered a catalog sync once (`product-catalog-sync/04`).
+    $response->assertSessionHas('offer_product_catalog_sync', $source->id);
 
     $source->refresh();
     expect($source->secret('refresh_token'))->toBe('amazon-refresh-token')

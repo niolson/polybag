@@ -34,7 +34,19 @@ final readonly class ProductCatalogSyncRun
         public bool $startOver = false,
         /** The page this run picked up at, carrying on a run that failed or was interrupted. */
         public ?int $resumedFromPage = null,
+        /**
+         * Parts of the catalog the read passed over, as the source names them
+         * (`product-catalog-sync/04`), the first {@see MAX_UNREAD_PARTS} of them.
+         *
+         * @var list<string>
+         */
+        public array $unreadParts = [],
+        /** How many parts were passed over in all. */
+        public int $unreadCount = 0,
     ) {}
+
+    /** How many unread parts a run names; the rest are counted. */
+    public const MAX_UNREAD_PARTS = 10;
 
     public static function start(string $runId): self
     {
@@ -61,6 +73,8 @@ final readonly class ProductCatalogSyncRun
             pages: $this->pages,
             cursor: $this->cursor,
             resumedFromPage: $this->pages + 1,
+            unreadParts: $this->unreadParts,
+            unreadCount: $this->unreadCount,
         );
     }
 
@@ -77,10 +91,12 @@ final readonly class ProductCatalogSyncRun
     }
 
     /**
-     * The run with one more page saved: its counts added, and where the next
-     * page starts.
+     * The run with one more page saved: its counts added, where the next
+     * page starts, and any part of the catalog the read passed over.
+     *
+     * @param  list<string>  $unreadParts
      */
-    public function withPage(int $created, int $updated, int $unchanged, ?string $nextCursor): self
+    public function withPage(int $created, int $updated, int $unchanged, ?string $nextCursor, array $unreadParts = []): self
     {
         return $this->copy([
             'progressAt' => CarbonImmutable::now(),
@@ -89,7 +105,29 @@ final readonly class ProductCatalogSyncRun
             'unchanged' => $this->unchanged + $unchanged,
             'pages' => $this->pages + 1,
             'cursor' => $nextCursor,
+            'unreadParts' => array_slice([...$this->unreadParts, ...$unreadParts], 0, self::MAX_UNREAD_PARTS),
+            'unreadCount' => $this->unreadCount + count($unreadParts),
         ]);
+    }
+
+    /**
+     * The run at the end of the catalog: complete, or incomplete when the
+     * read passed over part of it, stopping at nothing but naming what it
+     * could not read.
+     */
+    public function finishReading(): self
+    {
+        if ($this->unreadCount === 0) {
+            return $this->finish(ProductCatalogSyncStatus::Complete);
+        }
+
+        $more = $this->unreadCount - count($this->unreadParts);
+
+        return $this->finish(
+            ProductCatalogSyncStatus::Incomplete,
+            implode('; ', $this->unreadParts).($more > 0 ? "; and {$more} more" : ''),
+            'Amazon returns at most 1,000 listings for one search, and more than that were created within one second, so some listings created then were not read.',
+        );
     }
 
     public function finish(ProductCatalogSyncStatus $status, ?string $stoppedAt = null, ?string $error = null, bool $startOver = false): self
@@ -155,6 +193,8 @@ final readonly class ProductCatalogSyncRun
             'error' => $this->error,
             'start_over' => $this->startOver,
             'resumed_from_page' => $this->resumedFromPage,
+            'unread_parts' => $this->unreadParts,
+            'unread_count' => $this->unreadCount,
         ];
     }
 
@@ -186,6 +226,8 @@ final readonly class ProductCatalogSyncRun
             error: isset($data['error']) ? (string) $data['error'] : null,
             startOver: (bool) ($data['start_over'] ?? false),
             resumedFromPage: isset($data['resumed_from_page']) ? (int) $data['resumed_from_page'] : null,
+            unreadParts: is_array($data['unread_parts'] ?? null) ? array_values(array_filter($data['unread_parts'], is_string(...))) : [],
+            unreadCount: (int) ($data['unread_count'] ?? 0),
         );
     }
 
@@ -209,6 +251,8 @@ final readonly class ProductCatalogSyncRun
             'error' => $this->error,
             'startOver' => $this->startOver,
             'resumedFromPage' => $this->resumedFromPage,
+            'unreadParts' => $this->unreadParts,
+            'unreadCount' => $this->unreadCount,
             ...$changes,
         ]);
     }

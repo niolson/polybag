@@ -111,11 +111,33 @@ class DataSource extends Model
     /**
      * Whether this connection's product catalog can be synced
      * (`product-catalog-sync/02`): an active connection whose driver reads a
-     * catalog. Import need not be on.
+     * catalog and that has what reading it needs. Import need not be on.
      */
     public function syncsProductCatalog(): bool
     {
-        return $this->active && self::driverSyncsProductCatalog($this->source_type);
+        return $this->active
+            && self::driverSyncsProductCatalog($this->source_type)
+            && $this->productCatalogSetupMissing() === null;
+    }
+
+    /**
+     * What this connection lacks to read its catalog, whether or not it is
+     * active, or null. An Amazon listing search is by seller ID, which only
+     * an OAuth connection records (`product-catalog-sync/04`).
+     */
+    public function productCatalogSetupMissing(): ?string
+    {
+        if (! $this->isAmazon()) {
+            return null;
+        }
+
+        $settings = $this->settings ?? [];
+
+        return match (true) {
+            ($settings['auth_mode'] ?? null) !== 'authorization_code' || blank($settings['amazon_selling_partner_id'] ?? null) => 'Connect this Amazon account through OAuth (Connect Amazon) to sync its product catalog: listing search needs the seller ID that OAuth records, and a connection with its own credentials has none.',
+            blank($settings['marketplace_id'] ?? null) => 'Choose an Amazon marketplace to sync this connection\'s product catalog.',
+            default => null,
+        };
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Enums\AmazonMarketplace;
 use App\Enums\AppMode;
 use App\Enums\ImportExistingBehavior;
 use App\Enums\OffAmazonShippingStatus;
+use App\Enums\ProductCatalogSyncStatus;
 use App\Enums\ScheduleInterval;
 use App\Enums\ShopifyMetafieldOwner;
 use App\Filament\Components\LazyOptionsSelect;
@@ -1382,11 +1383,15 @@ class DataSourceForm
             return 'Catalog sync is off: imports are set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS), so Products are kept outside PolyBag.';
         }
 
-        $unavailable = $record->active ? null : 'Activate this connection to sync its product catalog. ';
+        $unavailable = match (true) {
+            $record->productCatalogSetupMissing() !== null => $record->productCatalogSetupMissing().' ',
+            ! $record->active => 'Activate this connection to sync its product catalog. ',
+            default => null,
+        };
         $run = $record->productCatalogSyncRun();
 
         if ($run === null) {
-            return $unavailable ?? 'Not synced yet. Use “Sync Product Catalog” above to add this store\'s products to Products.';
+            return rtrim($unavailable ?? 'Not synced yet. Use “Sync Product Catalog” above to add this '.($record->isAmazon() ? 'seller account\'s listings' : 'store\'s products').' to Products.');
         }
 
         $timezone = Location::timezone();
@@ -1404,7 +1409,9 @@ class DataSourceForm
         $summary = implode(', ', $parts).". {$pages}: {$run->created} created, {$run->updated} updated, {$run->unchanged} unchanged.";
 
         if ($run->stoppedAt !== null) {
-            $summary .= " Stopped at {$run->stoppedAt}.";
+            $summary .= $run->status === ProductCatalogSyncStatus::Incomplete
+                ? " Not read: {$run->stoppedAt}."
+                : " Stopped at {$run->stoppedAt}.";
         }
 
         if ($run->error !== null) {
