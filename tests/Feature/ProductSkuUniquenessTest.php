@@ -86,7 +86,7 @@ it('merges duplicate SKUs into the lowest id, filling its blanks and repointing 
 
     $migration->up();
 
-    $survivor = DB::table('products')->find($survivorId);
+    $survivor = Product::findOrFail($survivorId);
 
     expect(DB::table('products')->whereIn('id', [$secondId, $thirdId])->exists())->toBeFalse()
         ->and(DB::table('products')->where('id', $otherClientId)->exists())->toBeTrue()
