@@ -262,6 +262,9 @@ class ProductResource extends Resource
                 Tables\Filters\Filter::make('missing_customs_data')
                     ->label('Missing Customs Data')
                     ->query(fn (Builder $query) => $query->scopes('missingCustomsData')),
+                Tables\Filters\Filter::make('incomplete_customs_data')
+                    ->label('Incomplete Customs Data')
+                    ->query(fn (Builder $query) => $query->scopes('incompleteCustomsData')),
                 Tables\Filters\TernaryFilter::make('contains_alcohol')
                     ->label('Contains Alcohol'),
                 Tables\Filters\TernaryFilter::make('is_media')

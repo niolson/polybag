@@ -6,6 +6,7 @@ use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Jobs\RunDataSourceImportJob;
+use App\Jobs\SyncProductCatalogJob;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Services\AmazonMarketplaceDiscoveryService;
@@ -56,6 +57,23 @@ class EditDataSource extends EditRecord
 
             $message->send();
         }
+
+        // Offered once, after a new connection is connected; never started on its own.
+        if (session('offer_product_catalog_sync') === $this->dataSource()->id
+            && $this->dataSource()->productCatalogSyncRun() === null
+            && self::canSyncProductCatalog($this->dataSource())) {
+            $this->defaultAction = 'sync_product_catalog';
+        }
+    }
+
+    /**
+     * Whether the Sync Product Catalog action is offered: an active connection
+     * that can list a catalog, while imports may write Products.
+     */
+    public static function canSyncProductCatalog(DataSource $dataSource): bool
+    {
+        return $dataSource->syncsProductCatalog()
+            && (bool) config('shipment-import.behavior.auto_update_products', true);
     }
 
     protected function getHeaderActions(): array
@@ -83,6 +101,30 @@ class EditDataSource extends EditRecord
                         ->info()
                         ->title('Import queued')
                         ->body("You'll be notified when \"{$this->record->name}\" finishes importing.")
+                        ->send();
+                }),
+
+            Action::make('sync_product_catalog')
+                ->authorize('update')
+                ->label('Sync Product Catalog')
+                ->icon('heroicon-o-cube')
+                ->color('gray')
+                ->visible(fn (): bool => self::canSyncProductCatalog($this->dataSource()))
+                ->disabled(fn (): bool => (bool) $this->dataSource()->productCatalogSyncRun()?->isRunning())
+                ->tooltip(fn (): ?string => $this->dataSource()->productCatalogSyncRun()?->isRunning()
+                    ? 'A catalog sync of this connection is running.'
+                    : null)
+                ->requiresConfirmation()
+                ->modalHeading('Sync product catalog?')
+                ->modalDescription('Add every variant of this store\'s active products to Products, in the background. Only empty fields are filled: a name, weight or customs field already on a Product is kept. Nothing is deleted, and nothing is written to the store.')
+                ->modalSubmitActionLabel('Sync')
+                ->action(function (): void {
+                    SyncProductCatalogJob::dispatch($this->dataSource()->id, auth()->id());
+
+                    Notification::make()
+                        ->info()
+                        ->title('Catalog sync queued')
+                        ->body('The last run is shown under Product Catalog on this connection.')
                         ->send();
                 }),
 

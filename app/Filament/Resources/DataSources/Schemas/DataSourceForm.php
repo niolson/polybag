@@ -322,6 +322,16 @@ class DataSourceForm
                     && (bool) $record?->exists
                     && self::importsOrders($get)),
 
+            Section::make('Product Catalog')
+                ->schema([
+                    Placeholder::make('product_catalog_sync')
+                        ->label('Last Sync')
+                        ->content(fn (DataSource $record): string => self::describeProductCatalogSync($record))
+                        ->columnSpanFull(),
+                ])
+                ->visible(fn (?DataSource $record): bool => (bool) $record?->exists
+                    && DataSource::driverSyncsProductCatalog($record->source_type)),
+
             // ── Amazon ─────────────────────────────────────────────────────────────
 
             Section::make('Amazon SP-API Connection')
@@ -1359,5 +1369,49 @@ class DataSourceForm
         }
 
         return $options;
+    }
+
+    /**
+     * The connection's last product catalog sync, or why it cannot run
+     * (`product-catalog-sync/02`).
+     */
+    public static function describeProductCatalogSync(DataSource $record): string
+    {
+        if (! config('shipment-import.behavior.auto_update_products', true)) {
+            return 'Catalog sync is off: imports are set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS), so Products are kept outside PolyBag.';
+        }
+
+        $unavailable = $record->active ? null : 'Activate this connection to sync its product catalog. ';
+        $run = $record->productCatalogSyncRun();
+
+        if ($run === null) {
+            return $unavailable ?? 'Not synced yet. Use “Sync Product Catalog” above to add this store\'s products to Products.';
+        }
+
+        $timezone = Location::timezone();
+        $parts = [
+            $run->label(),
+            'started '.$run->startedAt->setTimezone($timezone)->format('M j, Y g:i A'),
+        ];
+
+        if ($run->finishedAt !== null) {
+            $parts[] = 'finished '.$run->finishedAt->setTimezone($timezone)->format('M j, Y g:i A');
+        }
+
+        $summary = implode(', ', $parts).". {$run->created} created, {$run->updated} updated, {$run->unchanged} unchanged.";
+
+        if ($run->stoppedAt !== null) {
+            $summary .= " Stopped at {$run->stoppedAt}.";
+        }
+
+        if ($run->error !== null) {
+            $summary .= " {$run->error}";
+        }
+
+        if ($run->isInterrupted()) {
+            $summary .= ' The sync stopped without finishing. Products it saved are kept; a new sync can start.';
+        }
+
+        return ($unavailable ?? '').$summary;
     }
 }
