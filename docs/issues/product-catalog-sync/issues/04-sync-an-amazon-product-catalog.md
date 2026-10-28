@@ -91,8 +91,10 @@ written only where a Product has none. Only what the seller's own listing provid
 A listing's non-blank weight overwrites PolyBag's, and the name is written only where a
 Product has none; the catalog look-up fills blanks only (above). The sync runs
 as `02`'s chain of short jobs, so the remaining date windows, the window in hand and its
-`nextToken` have to fit in the run's cursor string, and a token Amazon no longer accepts
-fails the run rather than starting over.
+`nextToken` have to fit in the run's cursor string. A token Amazon calls expired reads the
+window in hand again from its start, once; any other token it refuses fails the run rather
+than starting over. *(Revised after the live run: a slice can wait longer than a token
+lives.)*
 
 ## Acceptance criteria
 
@@ -121,6 +123,9 @@ fails the run rather than starting over.
       catalog look-up with no part number, leave the Product's value
 - [x] The catalog look-up fills a blank barcode and part number and never replaces one
 - [x] A manual connection does not show the action
+- [x] An expired page token mid-window reads that window again and the run completes,
+      counting each SKU created once; a second expiry in the same window fails the run
+- [x] A request slower than the pacing interval is followed at once
 - [x] Fixtures use synthetic SKUs, ASINs and seller IDs
 
 ## Comments
@@ -150,14 +155,23 @@ listings and catalog together took about 28 minutes on a 30k-SKU account.
   on after it.
 - **Incomplete:** a page names any window it passed over; the run keeps the first ten and
   a count, finishes `incomplete` with them as *Not read*, and is not resumed.
-- **A refused search:** any 400 fails the run through `CatalogReadMustStartOver`, since
-  its window and token came from the cursor; other failures resume. A probe on 2026-10-28
-  could not show how Amazon answers an expired token (below).
+- **A refused search:** Amazon answers an expired page token `400 InvalidInput` "Expired
+  'pageToken' provided." (matched exactly). A slice can wait hours behind order imports,
+  longer than a token may live, so that reads the current window again from its first
+  page, within the run. The listings it already wrote come back as unchanged, so the
+  created count holds each SKU once; the unchanged count includes the re-read. A token in
+  a window already read again that expires too fails the run. Any other 400 (an
+  unreadable token is "Invalid 'pageToken' provided.") fails it through
+  `CatalogReadMustStartOver`, since its window and token came from the cursor; other
+  failures resume.
 - **Pacing:** `AmazonRequestPacer` is `sendCatalogRequest()`'s pacing and 429 retry,
   generalized per request class: each paces from its own `x-amzn-RateLimit-Limit`
-  (defaults 5 for listings, 2 for catalog). The order import's catalog look-up moved to
-  `AmazonCatalogIdentifiers` with `asinsNeedingLookup()`, the rule both paths share; the
-  order import's tests pass unedited.
+  (defaults 5 for listings, 2 for catalog), counting from when the previous request
+  *started*, so a request slower than the interval is followed at once (revised after the
+  live run below). 429 backoff is unchanged. The order import's catalog look-up moved to
+  `AmazonCatalogIdentifiers` with `asinsNeedingLookup()`, the rule both paths share; its
+  tests pass, one with the clock frozen, since its expected 250 ms wait now assumes no
+  latency.
 - **The look-up job** (`LookUpAmazonCatalogIdentifiersJob`, `AmazonCatalogLookups`): each
   listings page records its SKUs and ASINs in `amazon_catalog_lookups` inside the page's
   transaction, through a `FollowsUpProductCatalogSync` hook; a finished run queues the job.
@@ -173,10 +187,21 @@ listings and catalog together took about 28 minutes on a 30k-SKU account.
   require MFA, which the order import requires for buyer data; listings carry none.
 - The first window runs from 1999-01-01 to the run's start.
 
-*Probe, 2026-10-28.* Ten read-only calls on the production probe connection, raw responses
-in `.scratch/product-catalog-sync/raw/04-tokens/`. Every `searchListingsItems` call,
-including the exact request that succeeded on 10-22 and one with only `marketplaceIds`,
-was answered `400 InvalidInput` "Could not match input arguments". The account has
-changed since `03`, so the response to an expired page token is still unknown; a
-garbage token gets the same 400.
+**2026-10-28 — run against production.** The seller account of `03` (29,728 SKUs),
+captures in `.scratch/product-catalog-sync/`.
 
+- *Listings:* `complete`, 29,728 Products created (exactly `numberOfResults`), 1,611
+  pages in 27 min 14 s, no errors. 93% have a weight; the heaviest is 16 lb, as in `03`.
+- *Catalog look-up:* drained in about 19 minutes against `03`'s 11.5 minutes of catalog
+  calls: waiting a full interval after each answer, on top of its latency, cost about 65%.
+  Pacing now counts from when the previous request started. All 29,728 were checked; 89%
+  have a barcode and 84% a part number. **3,486 have a part number equal to their
+  barcode**: the catalog quirk `03` found (a UPC in `partNumber`). It is left alone; an
+  NS-PID equal to the GTIN can be legitimate.
+- *Page tokens* (`raw/04-tokens/`, `raw/04-token-age/`): a garbage token is answered `400
+  InvalidInput` "Invalid 'pageToken' provided."; a six-day-old one "Expired 'pageToken'
+  provided."; a fresh one still worked after 5 and after 15 minutes. The 30- and 60-minute
+  checks failed on the probe's own expired LWA access token (403), not the page token, so
+  a token lives somewhere between 15 minutes and 6 days. Hence the window restart above.
+- An earlier probe the same day got "Could not match input arguments" on every call,
+  even requests that had worked on 10-22: it was running in sandbox mode.
