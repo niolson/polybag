@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Services\ClientContext;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 
 class ImportReferenceResolver
@@ -89,7 +90,9 @@ class ImportReferenceResolver
         $client ??= app(ClientContext::class)->default();
         $sku = $itemData['sku'] ?? null;
 
-        if (! $sku) {
+        // The same blank the Product model stores as NULL: a whitespace SKU would
+        // otherwise make a new SKU-less Product on every import.
+        if (blank($sku)) {
             return ['id' => null, 'created' => false, 'updated' => false];
         }
 
@@ -111,10 +114,25 @@ class ImportReferenceResolver
                 'is_media' => $this->mediaFlagFrom($itemData, $sku),
             ], filled(...));
 
-            $product = Product::firstOrNew([
-                'client_id' => $client->id,
-                'sku' => $sku,
-            ]);
+            $key = ['client_id' => $client->id, 'sku' => $sku];
+            $product = Product::query()->where($key)->first();
+
+            if ($product === null) {
+                try {
+                    $product = Product::query()->withSavepointIfNeeded(
+                        fn (): Product => Product::create([...$key, ...$updateData, 'active' => true]),
+                    );
+
+                    $this->productCache[$sku] = $product->id;
+
+                    return ['id' => $product->id, 'created' => true, 'updated' => false];
+                } catch (UniqueConstraintViolationException $e) {
+                    // Another writer inserted the SKU after the read. A plain read would
+                    // still miss it inside a MySQL transaction, whose snapshot predates
+                    // that row; a locking read sees the latest committed one.
+                    $product = Product::query()->where($key)->lockForUpdate()->first() ?? throw $e;
+                }
+            }
 
             foreach ($this->fillOnlyFieldsFrom($itemData) as $field) {
                 if (filled($product->getAttribute($field))) {

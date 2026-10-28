@@ -6,6 +6,7 @@ use App\Enums\HazmatClass;
 use App\Enums\PackageStatus;
 use App\Models\Concerns\HasDefaultClient;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -53,6 +54,20 @@ class Product extends Model
             'identifiers_checked_at' => 'datetime',
             'hazmat_class' => HazmatClass::class,
         ];
+    }
+
+    /**
+     * A blank SKU is stored as NULL: the unique `(client_id, sku)` index allows any
+     * number of NULLs, but would treat two empty strings as the same SKU.
+     *
+     * @return Attribute<string|null, string|null>
+     */
+    protected function sku(): Attribute
+    {
+        return Attribute::make(
+            get: fn (?string $value): ?string => $value,
+            set: fn (?string $value): ?string => filled($value) ? $value : null,
+        );
     }
 
     /**

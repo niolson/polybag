@@ -1,6 +1,6 @@
 # Make Products unique by client and SKU
 
-Status: ready-for-agent
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -40,6 +40,13 @@ client all overlap.
   repoint one Product's history onto another. An empty-string SKU is not NULL, so the
   unique index treats two of them as a clash. Set empty SKUs to NULL before adding the
   index, and have the model do the same on save.
+- **Duplicates are found the way the database compares SKUs.** MySQL's
+  `utf8mb4_unicode_ci` treats SKUs that differ only in case (`abc`, `ABC`), accents
+  (`CAFÉ`, `CAFE`) or trailing spaces (`abc `, `abc`) as equal, so the unique index
+  treats them as one SKU. SQLite compares them byte for byte. The merge therefore groups
+  in SQL on the connection being migrated, never in PHP; otherwise it passes on SQLite and
+  then fails to add the index on MySQL. Imports already behave this way on MySQL:
+  `firstOrNew()` for `abc` finds an existing `ABC` row, so no import behavior changes.
 - **The resolver survives the race.** Creating a Product goes through Laravel's
   `createOrFirst()` (or catches `UniqueConstraintViolationException` and re-reads), then
   applies the same update and fill-only rules to the row that won. The returned
@@ -50,16 +57,33 @@ client all overlap.
 
 ## Acceptance criteria
 
-- [ ] Inserting a second Product with the same `client_id` and `sku` fails at the database
-- [ ] Two Products with the same SKU in different clients are allowed, and so are many with
+- [x] Inserting a second Product with the same `client_id` and `sku` fails at the database
+- [x] Two Products with the same SKU in different clients are allowed, and so are many with
       a NULL SKU
-- [ ] The migration merges seeded duplicates: one survives with the merged values, and the
+- [x] The migration merges seeded duplicates: one survives with the merged values, and the
       Shipment and Package items that pointed at the others now point at it
-- [ ] Several Products in one client with NULL SKUs, and with empty SKUs, all survive the
+- [x] Several Products in one client with NULL SKUs, and with empty SKUs, all survive the
       migration as separate rows, each keeping its own items
-- [ ] `productIdFor()` given a SKU whose row appears between its read and its insert
+- [x] SKUs differing only in case or trailing spaces are merged before the index is added
+      (`mysql` group)
+- [x] `productIdFor()` given a SKU whose row appears between its read and its insert
       (simulated) returns the existing row's id with `created: false` and applies the update
-- [ ] Creating a duplicate SKU on the Products page shows a validation error
-- [ ] Runs in the `mysql` test group as well as SQLite
+- [x] Creating a duplicate SKU on the Products page shows a validation error
+- [x] Runs in the `mysql` test group as well as SQLite
 
 ## Comments
+
+**Done 2026-10-28.** Migration `2026_10_28_050738_make_products_unique_by_client_and_sku`
+blanks empty SKUs to NULL, merges duplicates grouped in SQL, and adds the unique index
+before dropping the plain one, which may back the `client_id` foreign key on MySQL. A merge
+also keeps `contains_alcohol` and `is_media` if any duplicate declared them, and logs each
+merged group. The resolver inserts and, on a unique violation, re-reads with
+`lockForUpdate()`: inside an import transaction a plain read uses MySQL's snapshot, which
+predates the other writer's row, so `createOrFirst()` rethrew. A blank or whitespace SKU
+makes no Product. The Products form's SKU rule is scoped to the product's client; it was
+global before.
+
+Verified on MySQL 8.4: the race test writes on a second, separately committed connection
+and fails against `createOrFirst()`. MariaDB 11.8 (the LAN dev server) has
+`innodb_snapshot_isolation` on, which refuses that locking read with error 1020, so on it a
+lost race still fails the order's row, to be imported on the next run.
