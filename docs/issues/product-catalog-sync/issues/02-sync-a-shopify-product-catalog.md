@@ -1,6 +1,6 @@
 # Sync a Shopify product catalog
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -89,26 +89,62 @@ run reports what it saved. The Connection shows the last run.
 
 ## Acceptance criteria
 
-- [ ] A two-page fake `productVariants` response creates a Product per variant in the
+- [x] A two-page fake `productVariants` response creates a Product per variant in the
       connection's client, with weight in pounds, barcode, GTIN, part number, HS code and
       origin
-- [ ] A SKU-less variant synced first and then seen on an order ends up as one Product
-- [ ] Variants of archived and draft products are not synced
-- [ ] A Product with a hand-entered weight, name or HS code keeps it
-- [ ] An order import still maps a line item exactly as before, including name from
+- [x] A SKU-less variant synced first and then seen on an order ends up as one Product
+- [x] Variants of archived and draft products are not synced
+- [x] A Product with a hand-entered weight, name or HS code keeps it
+- [x] An order import still maps a line item exactly as before, including name from
       `productTitle` and weight from the line item (existing Shopify import tests pass
       unchanged)
-- [ ] The sync names a multi-variant Product "Product - Variant" and a single-variant one by
+- [x] The sync names a multi-variant Product "Product - Variant" and a single-variant one by
       the product title alone, and takes weight from `inventoryItem.measurement`
-- [ ] *Incomplete Customs Data* lists a synced Product that is on no Package and lacks an
+- [x] *Incomplete Customs Data* lists a synced Product that is on no Package and lacks an
       HS code; *Missing Customs Data* does not
-- [ ] After a run is killed (simulated timeout), the run is recorded `failed`, and once the
+- [x] After a run is killed (simulated timeout), the run is recorded `failed`, and once the
       lock expires a new sync for that connection runs
-- [ ] A failure on page two leaves page one's Products saved and queued for indexing, and
+- [x] A failure on page two leaves page one's Products saved and queued for indexing, and
       the run recorded as failed with page one's counts
-- [ ] A second sync for the same connection does not run while one is running
-- [ ] With `auto_update_products` off, the action is hidden and says why
-- [ ] The action is not shown to a Manager, or on an inactive or non-Shopify connection
-- [ ] Fixtures use synthetic SKUs, variant IDs and store names
+- [x] A second sync for the same connection does not run while one is running
+- [x] With `auto_update_products` off, the action is hidden and says why
+- [x] The action is not shown to a Manager, or on an inactive or non-Shopify connection
+- [x] Fixtures use synthetic SKUs, variant IDs and store names
 
 ## Comments
+
+**Done 2026-10-28.** `SyncProductCatalogJob` runs `ProductCatalogSync`, which reads pages from
+any source implementing `SyncsProductCatalog` and sends each item through `productIdFor()`
+with every data field `_fill_only`, one transaction per page inside
+`Product::withoutSyncingToSearch()`, then queues Scout's `MakeSearchable` for the page on
+`low`. `ShopifySource::variantFields()` is the one mapping both paths call; the order line
+item keeps its own name, weight and key order. The last run is a JSON column,
+`data_sources.product_catalog_sync`, read through `ProductCatalogSyncRun`, and shown under
+*Product Catalog* on the Connection. Departures from the job spec above:
+
+- The job follows `RunDataSourceImportJob` as it now is, not `WithoutOverlapping` and
+  `$tries = 60`: `PreventOverlappingImports` (generalized, with a `product-catalog-sync:{id}`
+  lock of its own, so a sync and an order import may overlap), `retryUntil()`, `$maxExceptions = 1`.
+- Each job carries a run ID, and `failed()` marks a run failed only if it is that job's
+  run and still running. Otherwise a sync that stopped waiting behind another would mark
+  the running one failed.
+- *Interrupted* is computed rather than stored: running, and started more than the lock's
+  1,860 seconds ago. Laravel's array lock ignores expiry in `isLocked()`, so asking the lock
+  could not be tested, and the start time and lock expiry come from the same place.
+- "Where it stopped" is the page number (`page 2`). `04` can name a window instead.
+- A catalog read needs only the shop domain and credentials, not the channel an order
+  import needs, so it works on a connection that imports nothing.
+- With `auto_update_products` off, a queued job records the run *failed* with the reason.
+  It does not return quietly having written nothing.
+- The offer after OAuth is a flashed `offer_product_catalog_sync` that opens the action's
+  confirmation as the page's default action. It is offered only if the connection has
+  never synced.
+
+Query cost on the development store at 2026-10, saved under `.scratch/product-catalog-sync/`:
+250 to a page requests 90 points, and 101 with a part-number metafield on either owner.
+`product_status:active` returned only active products: 100 variants, with 87 archived
+excluded. The store has no draft products. The Shopify AI Toolkit's validator rejects
+`ProductVariant.barcodes` at 2026-10, but the live API accepts it, as the order import
+already relies on. The store's product titles already name the variant, so the
+"Product - Variant" rule gives names like "Sheet Set - Terracotta - Terracotta" there.
+

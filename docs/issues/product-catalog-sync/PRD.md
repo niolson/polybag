@@ -231,8 +231,8 @@ not fixed here:
 
 | # | Issue | Status | Blocked by |
 |---|---|---|---|
-| [01](issues/01-make-products-unique-by-sku.md) | Make Products unique by client and SKU | `ready-for-agent` | — |
-| [02](issues/02-sync-a-shopify-product-catalog.md) | Sync a Shopify product catalog | `ready-for-agent` | `01` |
+| [01](issues/01-make-products-unique-by-sku.md) | Make Products unique by client and SKU | `done` | — |
+| [02](issues/02-sync-a-shopify-product-catalog.md) | Sync a Shopify product catalog | `done` | `01` |
 | [03](issues/03-probe-amazon-listings-for-weights-and-customs-fields.md) | Probe Amazon listings for weights and customs fields | `done` | — |
 | [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `ready-for-agent` | `01`, `02` |
 | [05](issues/05-suggest-hs-codes.md) | Suggest HS codes for Products without one | `needs-triage` | — |
