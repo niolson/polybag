@@ -172,24 +172,29 @@ No listing weight in `03` came near it.
 
 ## Shared
 
-- **A queued job,** `SyncProductCatalogJob`, on the `imports` queue, with
-  `RunDataSourceImportJob`'s timeout, retry and lock settings: a 30-minute timeout that
-  fails the job, a per-connection `WithoutOverlapping` lock that **expires** (a lock
-  without expiry outlives a killed worker and blocks every later sync), and one real
-  attempt. `failed()` records the run, so a crash never leaves it showing *running*. It
-  needs the connection `active`, not `import_enabled`.
+- **Queued jobs, in short slices.** `SyncProductCatalogJob`, on the `imports` queue,
+  writes about a minute of pages and then queues the next slice at the back of the queue,
+  so order imports run between slices on the one `imports` worker. The run records its
+  cursor, page and counts as each page commits, and the next slice resumes from there.
+  The run, not a lock, keeps two syncs of a connection apart: a sync starts only when no
+  run is running or the running one has stalled. `failed()` records the run, so a crash
+  never leaves it showing *running*. It needs the connection `active`, not
+  `import_enabled`. *(Revised in `02`: one 30-minute job held up every order import.)*
 - **Client.** Products land in the connection's assigned client, else the default client,
   as `productIdFor()` already resolves.
 - **The action.** *Sync Product Catalog* on the Connection. Connections are Admin-only, so
   the action is too. It is shown for active Shopify and Amazon connections, and offered
   once after a new connection finishes connecting, but never started automatically.
 - **Overwrite rule.** An order import writes every non-blank value over the Product
-  except the `_fill_only` ones. A catalog sync fills blanks only: every **Product data
-  field** is fill-only, because a catalog touches every Product a client has, including
-  ones corrected by hand. `identifiers_checked_at` is bookkeeping, not data, and always
-  updates, or an expired look-up could never be renewed and the catalog would be asked
-  again on every run. So a product renamed or reweighed at the store reaches PolyBag
-  through the next order containing it, not through another sync.
+  except the `_fill_only` ones. A catalog sync does the same: the store's non-blank values
+  overwrite PolyBag's, and a blank at the store (or a Shopify weight of 0, which means no
+  weight entered) leaves PolyBag's value. PolyBag is not the source of truth for product
+  data; a correction belongs in Shopify or the ERP. The **name** is the exception, written
+  only where a Product has none: an order import names a Product by its line's title, and
+  overwriting it with "Product - Variant" would flip the name on every import and sync.
+  `identifiers_checked_at` is bookkeeping, not data, and always updates, or an expired
+  look-up could never be renewed and the catalog would be asked again on every run.
+  *(Revised 2026-10-28: the sync first filled blanks only.)*
 - **Search indexing.** The sync saves inside `Product::withoutSyncingToSearch()` and, after
   each page commits, queues index updates for that page's Products on the `low` queue. A
   run that fails partway leaves everything saved so far searchable. Search may lag by

@@ -70,10 +70,10 @@ display groups found the same: no HS code, no `country_of_origin` even on appare
 apparel's `import_designation` mostly "Imported", which names no country.
 
 **Then the catalog, as its own job.** *(From `03`)*: a 29,728-SKU account took 16 minutes
-of listing calls and 11.5 minutes of catalog calls. Together that is close to the
-30-minute timeout `02`'s job inherits. So when the listing sync finishes, it queues a
-catalog look-up job on the `imports` queue, with the same lock and timeout settings,
-for the run's SKUs. The run's status covers the listings. A failed look-up is logged as
+of listing calls and 11.5 minutes of catalog calls. Together that is close to
+half an hour on the one `imports` worker. So when the listing sync finishes, it queues a
+catalog look-up on the `imports` queue, run in short slices as `02`'s sync is, so
+order imports run between them, for the run's SKUs. The run's status covers the listings. A failed look-up is logged as
 the order import's look-up failures are, and leaves `identifiers_checked_at` as it was, so
 the next run asks again. The existing `SearchCatalogItems` lookup runs over the synced SKUs
 under `asinsNeedingCatalogLookup()`'s rule as it stands: a SKU whose Product is missing a
@@ -81,7 +81,11 @@ barcode **or** a part number, and whose `identifiers_checked_at` is older than
 `CATALOG_RECHECK_DAYS`. Extract that rule so the order import and the sync share it.
 `identifiers_checked_at` updates on every answered look-up and is never fill-only.
 
-**Fill only, indexing, run status:** as `02`.
+**Overwrite rule, slices, indexing, run status:** as `02`. Amazon's non-blank values
+overwrite PolyBag's, and the name is written only where a Product has none. The sync runs
+as `02`'s chain of short jobs, so the remaining date windows, the window in hand and its
+`nextToken` have to fit in the run's cursor string, and a token Amazon no longer accepts
+fails the run rather than starting over.
 
 ## Acceptance criteria
 
