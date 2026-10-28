@@ -35,7 +35,7 @@ it('moves to the next window, skipping only SKUs created on the shared second', 
 });
 
 it('refuses a string it did not write, so the next sync starts over', function (string $cursor): void {
-    expect(fn () => AmazonListingsCursor::fromString($cursor))->toThrow(CatalogReadMustStartOver::class);
+    expect(fn (): AmazonListingsCursor => AmazonListingsCursor::fromString($cursor))->toThrow(CatalogReadMustStartOver::class);
 })->with([
     'not JSON' => ['cursor-page-2'],
     'one bound' => ['{"b":[100]}'],
