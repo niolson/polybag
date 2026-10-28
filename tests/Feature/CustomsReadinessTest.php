@@ -97,7 +97,8 @@ function readinessPackage(string $country, array $lines, array $shipment = [], ?
 
     foreach ($lines as $index => $line) {
         $product = Product::factory()->create([
-            'sku' => $line['sku'] ?? 'SKU-'.($index + 1),
+            'client_id' => $shipment->client_id,
+            'sku' => $line['sku'] ?? 'SKU-'.$package->id.'-'.($index + 1),
             'manufacturer_part_number' => 'MPN-'.($index + 1),
             'description' => $line['description'] ?? 'Item '.($index + 1),
             'hs_tariff_number' => array_key_exists('hs', $line) ? $line['hs'] : '610910',

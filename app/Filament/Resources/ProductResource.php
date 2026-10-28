@@ -8,6 +8,7 @@ use App\Filament\Resources\ProductResource\Pages;
 use App\Models\Location;
 use App\Models\Product;
 use App\Models\SpecialService;
+use App\Services\ClientContext;
 use App\Services\SettingsService;
 use App\Support\Gtin;
 use BackedEnum;
@@ -16,12 +17,14 @@ use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\Resource;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Validation\Rules\Unique;
 
 class ProductResource extends Resource
 {
@@ -71,7 +74,13 @@ class ProductResource extends Resource
                 Forms\Components\TextInput::make('sku')
                     ->required()
                     ->maxLength(255)
-                    ->unique(ignoreRecord: true),
+                    ->unique(
+                        ignoreRecord: true,
+                        modifyRuleUsing: fn (Unique $rule, Get $get, ?Product $record): Unique => $rule->where(
+                            'client_id',
+                            $get('client_id') ?? $record->client_id ?? app(ClientContext::class)->id(),
+                        ),
+                    ),
                 Forms\Components\TextInput::make('barcode')
                     ->maxLength(255),
                 Forms\Components\TextInput::make('weight')

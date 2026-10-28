@@ -122,7 +122,7 @@ function dutiesFilterPackage(string $country, ShippingMethod $method, array $shi
         'status' => PackageStatus::Unshipped,
     ]);
 
-    $product = Product::factory()->create(['weight' => 0.5, 'sku' => 'SKU-1', 'manufacturer_part_number' => 'MPN-1']);
+    $product = Product::factory()->create(['weight' => 0.5, 'sku' => 'SKU-'.$package->id, 'manufacturer_part_number' => 'MPN-1']);
     $shipmentItem = ShipmentItem::factory()->create([
         'shipment_id' => $shipment->id,
         'product_id' => $product->id,

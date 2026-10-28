@@ -1,8 +1,10 @@
 <?php
 
 use App\Models\Product;
+use App\Services\ClientContext;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -179,3 +181,63 @@ it('leaves hand-entered identifiers alone when a database column returns empty s
         ->and($after->hs_tariff_number)->toBe('6912.00')
         ->and($after->country_of_origin)->toBe('CN');
 });
+
+it('updates the row another writer inserted between its read and its insert', function (): void {
+    $clientId = app(ClientContext::class)->id();
+    $raced = null;
+    $writer = DB::connection();
+
+    if (DB::getDriverName() === 'mysql') {
+        // A second worker writes on its own connection and commits, so the row is
+        // missing from the snapshot this test's transaction already holds. Its client
+        // is uncommitted here, so the other connection skips the foreign key check
+        // and deletes its row once this test's transaction has rolled back.
+        config(['database.connections.race_writer' => config('database.connections.'.config('database.default'))]);
+        $writer = DB::connection('race_writer');
+        $writer->statement('SET FOREIGN_KEY_CHECKS = 0');
+        $this->beforeApplicationDestroyed(function () use (&$raced, $writer): void {
+            $writer->table('products')->where('id', $raced)->delete();
+            $writer->disconnect();
+        });
+    }
+
+    // Insert the SKU right after the resolver's read finds nothing, as a second
+    // import worker would.
+    DB::listen(function (QueryExecuted $query) use (&$raced, $clientId, $writer): void {
+        if ($raced !== null || ! str_starts_with(strtolower($query->sql), 'select') || ! str_contains($query->sql, 'products')) {
+            return;
+        }
+
+        $raced = $writer->table('products')->insertGetId([
+            'client_id' => $clientId,
+            'sku' => 'RACED-1',
+            'name' => 'Other Writer',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+    });
+
+    $result = app(ImportReferenceResolver::class)->productIdFor(['sku' => 'RACED-1', 'name' => 'Imported Name', 'weight' => 2.5]);
+
+    $product = Product::where('sku', 'RACED-1')->sole();
+
+    expect($result)->toBe(['id' => $raced, 'created' => false, 'updated' => true])
+        ->and($product->id)->toBe($raced)
+        ->and($product->name)->toBe('Imported Name')
+        ->and((float) $product->weight)->toBe(2.5);
+})->group('mysql');
+
+it('makes no product for a blank SKU', function (mixed $sku): void {
+    $resolver = app(ImportReferenceResolver::class);
+
+    $first = $resolver->productIdFor(['sku' => $sku, 'name' => 'Blank']);
+    $second = $resolver->productIdFor(['sku' => $sku, 'name' => 'Blank']);
+
+    expect($first)->toBe(['id' => null, 'created' => false, 'updated' => false])
+        ->and($second)->toBe($first)
+        ->and(Product::count())->toBe(0);
+})->with([
+    'null' => [null],
+    'empty' => [''],
+    'spaces' => ['   '],
+]);
