@@ -3,15 +3,17 @@
 namespace App\Services\ProductCatalog;
 
 use App\Contracts\SyncsProductCatalog;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\Enums\ProductCatalogSyncStatus;
+use App\Jobs\SyncProductCatalogJob;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Product;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\ImportRunRecorder;
-use Illuminate\Support\Collection;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Laravel\Scout\Jobs\MakeSearchable;
 use RuntimeException;
@@ -22,44 +24,86 @@ use Throwable;
  * (`product-catalog-sync/02`), so the first scan of any listed item finds
  * one.
  *
- * Every item goes through {@see ImportReferenceResolver::productIdFor()},
- * and fills blanks only: a catalog touches every Product a client has,
- * including ones corrected by hand. Nothing is deleted or deactivated, and
- * nothing is written back to the source.
+ * Every item goes through {@see ImportReferenceResolver::productIdFor()}.
+ * The store's non-blank values overwrite PolyBag's, except the name
+ * ({@see FILL_ONLY_FIELDS}). A listed Product is marked active, as an order
+ * import marks it. Nothing is deleted, and nothing is written back to the
+ * source.
+ *
+ * A sync is a chain of short jobs ({@see ProductCatalogSyncTiming}), each
+ * running one slice from where the run's cursor stands.
  */
 class ProductCatalogSync
 {
-    /** Every Product data field a sync writes only where the Product has no value. */
-    public const FILL_ONLY_FIELDS = [
-        'name',
-        'description',
-        'barcode',
-        'weight',
-        'hs_tariff_number',
-        'country_of_origin',
-        'manufacturer_part_number',
-        'gtin',
-    ];
+    /**
+     * The Product fields a sync writes only where the Product has none.
+     *
+     * Every other field takes the store's value when the store has one: PolyBag
+     * is not the source of truth for product data, and a correction belongs in
+     * Shopify or the ERP. A blank at the store (and a weight of 0, which
+     * Shopify reports for a variant with no weight entered) is no value, so it
+     * leaves PolyBag's alone. The name is the exception: an order import names
+     * a Product by the line's title, and if the sync overwrote it with
+     * "Product - Variant", the name would flip with every import and every
+     * sync, each counting the flip as an update.
+     */
+    public const FILL_ONLY_FIELDS = ['name'];
 
     public function __construct(
         private readonly DataSourceFactory $sources,
         private readonly ImportReferenceResolver $references,
+        private readonly ProductCatalogSyncRuns $runs,
     ) {}
 
     /**
-     * Run a sync, recording it on the connection as it goes: the counts after
-     * each page commits, and how it ended. A failure is recorded with the
-     * page it stopped at and rethrown; what was saved before it stays, and
-     * is queued for indexing.
+     * Start a sync and queue its first slice. Null, and nothing queued, when
+     * the connection cannot sync or a sync of it is already running.
      */
-    public function run(DataSource $dataSource, string $runId): ProductCatalogSyncRun
+    public function start(DataSource $dataSource, ?int $userId = null): ?ProductCatalogSyncRun
     {
-        $run = ProductCatalogSyncRun::start($runId);
-        $dataSource->recordProductCatalogSyncRun($run);
-        $pagesSaved = 0;
+        if (! self::writesProducts() || ! $dataSource->syncsProductCatalog()) {
+            return null;
+        }
+
+        $run = $this->runs->start($dataSource);
+
+        if ($run !== null) {
+            SyncProductCatalogJob::dispatch($dataSource->id, $run->runId, $userId);
+        }
+
+        return $run;
+    }
+
+    /**
+     * Whether imports may create and update Products at all. When they may
+     * not, Products are kept somewhere else, and a sync would write nothing.
+     */
+    public static function writesProducts(): bool
+    {
+        return (bool) config('shipment-import.behavior.auto_update_products', true);
+    }
+
+    /**
+     * Write pages of the run `$runId` from where it stands until the slice's
+     * time is up or the catalog ends. Each page commits with the run's
+     * counts and cursor. A failure is recorded, with the page it stopped at,
+     * and rethrown; what was saved before it stays, and is queued for
+     * indexing.
+     *
+     * @return bool whether the run has more to read
+     */
+    public function runSlice(DataSource $dataSource, string $runId): bool
+    {
+        $run = $dataSource->productCatalogSyncRun();
+
+        if ($run === null || $run->runId !== $runId || $run->status !== ProductCatalogSyncStatus::Running) {
+            return false;
+        }
+
+        $sliceEndsAt = CarbonImmutable::now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS);
 
         try {
-            if (! config('shipment-import.behavior.auto_update_products', true)) {
+            if (! self::writesProducts()) {
                 throw new RuntimeException('Products are kept outside PolyBag (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS is off), so a catalog sync would write nothing.');
             }
 
@@ -69,61 +113,80 @@ class ProductCatalogSync
                 throw new RuntimeException("{$dataSource->name} cannot list a product catalog.");
             }
 
-            foreach ($source->fetchProductCatalogPages() as $items) {
-                [$productIds, $created, $updated, $unchanged] = $this->writePage($items, $dataSource->client);
-
-                $run = $run->withPage($created, $updated, $unchanged);
-                $dataSource->recordProductCatalogSyncRun($run);
-                $pagesSaved++;
-
+            foreach ($source->fetchProductCatalogPages($run->cursor) as $page) {
+                $productIds = $this->writePage($dataSource, $runId, $page);
                 $this->queueIndexing($productIds);
+
+                if ($page->nextCursor === null) {
+                    break;
+                }
+
+                if (CarbonImmutable::now()->greaterThanOrEqualTo($sliceEndsAt)) {
+                    return true;
+                }
             }
+        } catch (ProductCatalogSyncSuperseded) {
+            return false;
         } catch (Throwable $e) {
-            $dataSource->recordProductCatalogSyncRun($run->finish(
-                ProductCatalogSyncStatus::Failed,
-                stoppedAt: 'page '.($pagesSaved + 1),
-                error: ImportRunRecorder::reasonFor($e),
-            ));
+            $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->failAtNextPage(ImportRunRecorder::reasonFor($e)));
 
             throw $e;
         }
 
-        $run = $run->finish(ProductCatalogSyncStatus::Complete);
-        $dataSource->recordProductCatalogSyncRun($run);
+        $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->finish(ProductCatalogSyncStatus::Complete));
 
-        return $run;
+        return false;
     }
 
     /**
-     * Write one page in one transaction, without indexing each save.
+     * Write one page and advance the run past it, in one transaction, without
+     * indexing each save. A run that is no longer this one's rolls the page
+     * back.
      *
-     * @param  Collection<int, array<string, mixed>>  $items
+     * @return list<int> the Products written
+     */
+    private function writePage(DataSource $dataSource, string $runId, ProductCatalogPage $page): array
+    {
+        return DB::transaction(function () use ($dataSource, $runId, $page): array {
+            [$productIds, $created, $updated, $unchanged] = Product::withoutSyncingToSearch(
+                fn (): array => $this->writeItems($page, $dataSource->client),
+            );
+
+            $this->runs->update(
+                $dataSource,
+                $runId,
+                fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor),
+            ) ?? throw new ProductCatalogSyncSuperseded;
+
+            return $productIds;
+        });
+    }
+
+    /**
      * @return array{0: list<int>, 1: int, 2: int, 3: int} the Products written, then how many were created, updated and unchanged
      */
-    private function writePage(Collection $items, ?Client $client): array
+    private function writeItems(ProductCatalogPage $page, ?Client $client): array
     {
-        return DB::transaction(fn (): array => Product::withoutSyncingToSearch(function () use ($items, $client): array {
-            $productIds = [];
-            $created = $updated = $unchanged = 0;
+        $productIds = [];
+        $created = $updated = $unchanged = 0;
 
-            foreach ($items as $item) {
-                $result = $this->references->productIdFor([...$item, '_fill_only' => self::FILL_ONLY_FIELDS], $client);
+        foreach ($page->items as $item) {
+            $result = $this->references->productIdFor([...$item, '_fill_only' => self::FILL_ONLY_FIELDS], $client);
 
-                if ($result['id'] === null) {
-                    continue;
-                }
-
-                $productIds[] = $result['id'];
-
-                match (true) {
-                    $result['created'] => $created++,
-                    $result['updated'] => $updated++,
-                    default => $unchanged++,
-                };
+            if ($result['id'] === null) {
+                continue;
             }
 
-            return [$productIds, $created, $updated, $unchanged];
-        }));
+            $productIds[] = $result['id'];
+
+            match (true) {
+                $result['created'] => $created++,
+                $result['updated'] => $updated++,
+                default => $unchanged++,
+            };
+        }
+
+        return [$productIds, $created, $updated, $unchanged];
     }
 
     /**

@@ -1,5 +1,6 @@
 <?php
 
+use App\Contracts\DataSourceInterface;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\Enums\ProductCatalogSyncStatus;
 use App\Enums\Role;
@@ -8,6 +9,7 @@ use App\Filament\Resources\DataSources\Schemas\DataSourceForm;
 use App\Filament\Resources\ProductResource\Pages\ListProducts;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Jobs\Middleware\PreventOverlappingImports;
+use App\Jobs\RunDataSourceImportJob;
 use App\Jobs\SyncProductCatalogJob;
 use App\Models\Channel;
 use App\Models\ChannelAlias;
@@ -16,16 +18,22 @@ use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Product;
+use App\Models\Shipment;
 use App\Models\User;
 use App\Services\ClientContext;
 use App\Services\ProductCatalog\ProductCatalogSync;
+use App\Services\ProductCatalog\ProductCatalogSyncRuns;
+use App\Services\ProductCatalog\ProductCatalogSyncTiming;
 use App\Services\ShipmentImport\ShipmentImportService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Queue\TimeoutExceededException;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Scout\Jobs\MakeSearchable;
 use Livewire\Livewire;
@@ -103,23 +111,56 @@ function catalogPage(array $variants, ?string $nextCursor = null): MockResponse
 }
 
 /**
- * Answer catalog reads with `$pages` in order, recording each request body.
+ * Answer the scope check with `$scopes` (every required scope by default),
+ * and catalog reads with `$pages` in order, recording each catalog request.
+ * A page given as a closure is called when it is read, then answered with
+ * what it returns.
  *
- * @param  list<MockResponse>  $pages
+ * @param  list<MockResponse|Closure(): MockResponse>  $pages
  * @param  list<array<string, mixed>>  $requests
+ * @param  list<string>|null  $scopes
  */
-function fakeCatalogPages(array $pages, array &$requests = []): void
+function fakeCatalogPages(array $pages, array &$requests = [], ?array $scopes = null): void
 {
-    Saloon::fake([GraphQL::class => function (PendingRequest $pendingRequest) use (&$pages, &$requests): MockResponse {
-        $requests[] = $pendingRequest->body()?->all() ?? [];
+    Saloon::fake([GraphQL::class => function (PendingRequest $pendingRequest) use (&$pages, &$requests, $scopes): MockResponse {
+        $body = $pendingRequest->body()?->all() ?? [];
 
-        return array_shift($pages) ?? throw new RuntimeException('No more catalog pages faked.');
+        if (str_contains((string) ($body['query'] ?? ''), 'currentAppInstallation')) {
+            return shopifyAccessScopesResponse($scopes);
+        }
+
+        $requests[] = $body;
+        $page = array_shift($pages) ?? throw new RuntimeException('No more catalog pages faked.');
+
+        return $page instanceof Closure ? $page() : $page;
     }]);
 }
 
-function syncCatalog(DataSource $dataSource, string $runId = 'run-1'): void
+/** A catalog page read as a slice's time runs out. */
+function lastPageOfSlice(MockResponse $page): Closure
 {
-    app(ProductCatalogSync::class)->run($dataSource->fresh(), $runId);
+    return function () use ($page): MockResponse {
+        Carbon::setTestNow(now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS + 1));
+
+        return $page;
+    };
+}
+
+/** Start a run and work every slice of it in this process; its ID. */
+function syncCatalog(DataSource $dataSource): string
+{
+    $run = app(ProductCatalogSyncRuns::class)->start($dataSource) ?? throw new RuntimeException('A sync is already running.');
+
+    while (app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId)) {
+        // The next slice.
+    }
+
+    return $run->runId;
+}
+
+function catalogRun(DataSource $dataSource): ProductCatalogSyncRun
+{
+    return $dataSource->fresh()->productCatalogSyncRun();
 }
 
 beforeEach(function (): void {
@@ -172,12 +213,10 @@ describe('the sync', function (): void {
             ->and($requests[0]['variables'] ?? [])->not->toHaveKey('cursor')
             ->and($requests[1]['variables']['cursor'])->toBe('cursor-page-2');
 
-        $run = $dataSource->fresh()->productCatalogSyncRun();
+        $run = catalogRun($dataSource);
 
         expect($run->status)->toBe(ProductCatalogSyncStatus::Complete)
-            ->and($run->created)->toBe(2)
-            ->and($run->updated)->toBe(0)
-            ->and($run->unchanged)->toBe(0)
+            ->and([$run->created, $run->updated, $run->unchanged, $run->pages])->toBe([2, 0, 0, 2])
             ->and($run->finishedAt)->not->toBeNull();
 
         Queue::assertPushedOn('low', MakeSearchable::class);
@@ -226,18 +265,19 @@ describe('the sync', function (): void {
         expect(Product::pluck('sku')->all())->toBe(['SYN-TEE-RED']);
     });
 
-    it('fills blanks only, keeping a hand-entered name, weight and HS code', function (): void {
+    it('overwrites every field with the store\'s value, but keeps the Product\'s name', function (): void {
         $dataSource = catalogShopifyConnection();
         $product = Product::factory()->create([
             'client_id' => app(ClientContext::class)->default()->id,
             'sku' => 'SYN-TEE-RED',
-            'name' => 'Tee, as the packer calls it',
+            'name' => 'Tee, as the order named it',
+            'description' => 'Kept: the store sends no description',
             'weight' => 0.75,
+            'barcode' => '0000000000017',
+            'gtin' => '0000000000017',
+            'manufacturer_part_number' => 'OLD-PN',
             'hs_tariff_number' => '610990',
-            'country_of_origin' => null,
-            'barcode' => null,
-            'gtin' => null,
-            'manufacturer_part_number' => null,
+            'country_of_origin' => 'US',
         ]);
         fakeCatalogPages([catalogPage([catalogVariant()])]);
 
@@ -245,25 +285,96 @@ describe('the sync', function (): void {
 
         $product->refresh();
 
-        expect($product->name)->toBe('Tee, as the packer calls it')
-            ->and((float) $product->weight)->toBe(0.75)
-            ->and($product->hs_tariff_number)->toBe('610990')
-            ->and($product->country_of_origin)->toBe('PT')
+        expect($product->name)->toBe('Tee, as the order named it')
+            ->and($product->description)->toBe('Kept: the store sends no description')
+            ->and((float) $product->weight)->toBe(0.5)
             ->and($product->barcode)->toBe('036000291452')
-            ->and($dataSource->fresh()->productCatalogSyncRun()->updated)->toBe(1);
+            ->and($product->gtin)->toBe('036000291452')
+            ->and($product->manufacturer_part_number)->toBe('SYN-PN-1')
+            ->and($product->hs_tariff_number)->toBe('610910')
+            ->and($product->country_of_origin)->toBe('PT')
+            ->and(catalogRun($dataSource)->updated)->toBe(1);
     });
 
-    it('counts a Product the sync has nothing to add to as unchanged', function (): void {
+    it('names a Product that has no name yet', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $product = Product::factory()->create(['client_id' => app(ClientContext::class)->default()->id, 'sku' => 'SYN-TEE-RED', 'name' => '']);
+        fakeCatalogPages([catalogPage([catalogVariant()])]);
+
+        syncCatalog($dataSource);
+
+        expect($product->refresh()->name)->toBe('Synthetic Tee - Red');
+    });
+
+    it('leaves PolyBag\'s values where the store\'s are blank, and its weight where the store\'s is 0', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $product = Product::factory()->create([
+            'client_id' => app(ClientContext::class)->default()->id,
+            'sku' => 'SYN-TEE-RED',
+            'weight' => 0.75,
+            'barcode' => '0000000000017',
+            'gtin' => '0000000000017',
+            'manufacturer_part_number' => 'KEPT-PN',
+            'hs_tariff_number' => '610990',
+            'country_of_origin' => 'US',
+        ]);
+        fakeCatalogPages([catalogPage([catalogVariant([
+            'barcodes' => ['nodes' => []],
+            'inventoryItem' => [
+                'harmonizedSystemCode' => '',
+                'countryCodeOfOrigin' => null,
+                'measurement' => ['weight' => ['unit' => 'POUNDS', 'value' => 0]],
+            ],
+        ])])]);
+
+        syncCatalog($dataSource);
+
+        $product->refresh();
+
+        expect((float) $product->weight)->toBe(0.75)
+            ->and($product->barcode)->toBe('0000000000017')
+            ->and($product->gtin)->toBe('0000000000017')
+            ->and($product->manufacturer_part_number)->toBe('KEPT-PN')
+            ->and($product->hs_tariff_number)->toBe('610990')
+            ->and($product->country_of_origin)->toBe('US');
+    });
+
+    it('replaces a weight of 0 with the store\'s', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $product = Product::factory()->create(['client_id' => app(ClientContext::class)->default()->id, 'sku' => 'SYN-TEE-RED', 'weight' => 0]);
+        fakeCatalogPages([catalogPage([catalogVariant()])]);
+
+        syncCatalog($dataSource);
+
+        expect((float) $product->refresh()->weight)->toBe(0.5);
+    });
+
+    it('counts a Product the store has nothing new for as unchanged', function (): void {
         $dataSource = catalogShopifyConnection();
         fakeCatalogPages([catalogPage([catalogVariant()]), catalogPage([catalogVariant()])]);
 
-        syncCatalog($dataSource, 'run-1');
-        syncCatalog($dataSource, 'run-2');
+        syncCatalog($dataSource);
+        $second = syncCatalog($dataSource);
 
-        $run = $dataSource->fresh()->productCatalogSyncRun();
+        $run = catalogRun($dataSource);
 
-        expect($run->runId)->toBe('run-2')
+        expect($run->runId)->toBe($second)
             ->and([$run->created, $run->updated, $run->unchanged])->toBe([0, 0, 1]);
+    });
+
+    it('cuts a name past the column\'s 255 characters', function (): void {
+        $dataSource = catalogShopifyConnection();
+        fakeCatalogPages([catalogPage([catalogVariant([
+            'title' => 'Ünïcode Large / Midnight Blue / Organic Cotton',
+            'product' => ['title' => str_repeat('é', 255)],
+        ])])]);
+
+        syncCatalog($dataSource);
+
+        $name = Product::where('sku', 'SYN-TEE-RED')->sole()->name;
+
+        expect(mb_strlen($name))->toBe(255)
+            ->and($name)->toBe(str_repeat('é', 255));
     });
 
     it('gives a SKU-less variant the SKU an order import gives it, so both write one Product', function (): void {
@@ -317,6 +428,22 @@ describe('the sync', function (): void {
             ->and((float) Product::sole()->weight)->toBe(0.6);
     });
 
+    it('fails a run whose token lacks read_products, with what to do about it', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $requests = [];
+        fakeCatalogPages([catalogPage([catalogVariant()])], $requests, scopes: ['read_orders']);
+
+        expect(fn (): string => syncCatalog($dataSource))->toThrow(DomainException::class);
+
+        $run = catalogRun($dataSource);
+
+        expect($run->status)->toBe(ProductCatalogSyncStatus::Failed)
+            ->and($run->error)->toBe('Reconnect Shopify with the read_products scope to sync its product catalog.')
+            ->and($run->stoppedAt)->toBe('page 1')
+            ->and($requests)->toBe([])
+            ->and(Product::count())->toBe(0);
+    });
+
     it('keeps page one saved and queued for indexing when page two fails, and records the run failed', function (): void {
         $dataSource = catalogShopifyConnection();
         fakeCatalogPages([
@@ -324,13 +451,13 @@ describe('the sync', function (): void {
             MockResponse::make(['errors' => [['message' => 'Internal error', 'extensions' => ['code' => 'BAD_REQUEST']]]]),
         ]);
 
-        expect(fn () => syncCatalog($dataSource))->toThrow(RuntimeException::class);
+        expect(fn (): string => syncCatalog($dataSource))->toThrow(RuntimeException::class);
 
         expect(Product::pluck('sku')->all())->toBe(['SYN-TEE-RED']);
         Queue::assertPushed(MakeSearchable::class, fn (MakeSearchable $job): bool => $job->queue === 'low'
             && $job->models->pluck('sku')->all() === ['SYN-TEE-RED']);
 
-        $run = $dataSource->fresh()->productCatalogSyncRun();
+        $run = catalogRun($dataSource);
 
         expect($run->status)->toBe(ProductCatalogSyncStatus::Failed)
             ->and($run->created)->toBe(1)
@@ -339,45 +466,257 @@ describe('the sync', function (): void {
             ->and($run->finishedAt)->not->toBeNull();
     });
 
-    it('writes nothing, and records the run failed, while imports may not write Products', function (): void {
-        config(['shipment-import.behavior.auto_update_products' => false]);
+    it('starts nothing, and fails a run in progress, while imports may not write Products', function (): void {
         $dataSource = catalogShopifyConnection();
+        $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
+        config(['shipment-import.behavior.auto_update_products' => false]);
         fakeCatalogPages([catalogPage([catalogVariant()])]);
 
-        expect(fn () => syncCatalog($dataSource))->toThrow(RuntimeException::class);
+        expect(app(ProductCatalogSync::class)->start($dataSource))->toBeNull()
+            ->and(fn () => app(ProductCatalogSync::class)->runSlice($dataSource, $run->runId))->toThrow(RuntimeException::class)
+            ->and(Product::count())->toBe(0)
+            ->and(catalogRun($dataSource)->status)->toBe(ProductCatalogSyncStatus::Failed);
+    });
+});
 
-        expect(Product::count())->toBe(0)
-            ->and($dataSource->fresh()->productCatalogSyncRun()->status)->toBe(ProductCatalogSyncStatus::Failed);
+describe('slices', function (): void {
+    it('runs a sync as a chain of short jobs, each resuming from the saved cursor and keeping the counts', function (): void {
+        $queue = Queue::fake();
+        $dataSource = catalogShopifyConnection();
+        $requests = [];
+        fakeCatalogPages([
+            catalogPage([catalogVariant()], nextCursor: 'cursor-page-2'),
+            lastPageOfSlice(catalogPage([catalogVariant(['id' => 'gid://shopify/ProductVariant/900010', 'sku' => 'SYN-2'])], nextCursor: 'cursor-page-3')),
+            lastPageOfSlice(catalogPage([catalogVariant(['id' => 'gid://shopify/ProductVariant/900011', 'sku' => 'SYN-3'])], nextCursor: 'cursor-page-4')),
+            catalogPage([catalogVariant(['id' => 'gid://shopify/ProductVariant/900012', 'sku' => 'SYN-4'])]),
+        ], $requests);
+
+        $run = app(ProductCatalogSync::class)->start($dataSource, userId: 7);
+        $first = $queue->pushed(SyncProductCatalogJob::class)->sole();
+
+        expect($first->runId)->toBe($run->runId)
+            ->and($first->connection)->toBe('imports')
+            ->and($first->queue)->toBe('imports');
+
+        app()->call([$first, 'handle']);
+
+        $afterFirst = catalogRun($dataSource);
+        $second = $queue->pushed(SyncProductCatalogJob::class)->last();
+
+        expect($afterFirst->status)->toBe(ProductCatalogSyncStatus::Running)
+            ->and([$afterFirst->pages, $afterFirst->created, $afterFirst->cursor])->toBe([2, 2, 'cursor-page-3'])
+            ->and($second)->not->toBe($first)
+            ->and([$second->runId, $second->userId])->toBe([$run->runId, 7]);
+
+        app()->call([$second, 'handle']);
+
+        $third = $queue->pushed(SyncProductCatalogJob::class)->last();
+
+        expect(catalogRun($dataSource)->cursor)->toBe('cursor-page-4')
+            ->and($requests[2]['variables']['cursor'])->toBe('cursor-page-3');
+
+        app()->call([$third, 'handle']);
+
+        $done = catalogRun($dataSource);
+
+        expect($queue->pushed(SyncProductCatalogJob::class))->toHaveCount(3)
+            ->and($done->status)->toBe(ProductCatalogSyncStatus::Complete)
+            ->and([$done->pages, $done->created, $done->updated, $done->unchanged])->toBe([4, 4, 0, 0])
+            ->and(Product::count())->toBe(4)
+            ->and($requests[3]['variables']['cursor'])->toBe('cursor-page-4');
+    });
+
+    it('lets an order import queued mid-run go before the sync\'s next slice', function (): void {
+        Notification::fake();
+        // A real queue, for a real worker: drop the fake this file starts with.
+        app()->forgetInstance('queue');
+        Queue::clearResolvedInstance('queue');
+        config(['queue.connections.imports' => [
+            'driver' => 'database',
+            'connection' => null,
+            'table' => 'jobs',
+            'queue' => 'imports',
+            'retry_after' => 1860,
+        ]]);
+
+        $driver = new class([]) implements DataSourceInterface
+        {
+            public function __construct(array $config = []) {} // @phpstan-ignore constructor.unusedParameter
+
+            public function fetchShipments(): Collection
+            {
+                return collect([[
+                    'shipment_reference' => 'SYN-ORDER-1', 'first_name' => 'Sam', 'last_name' => 'Synthetic',
+                    'address1' => '1 Test Way', 'city' => 'Seattle', 'state_or_province' => 'WA', 'postal_code' => '98101', 'country' => 'US',
+                ]]);
+            }
+
+            public function fetchShipmentItems(string $sourceRecordId): Collection
+            {
+                return collect();
+            }
+
+            public function validateConfiguration(): void {}
+
+            public function getFieldMapping(): array
+            {
+                return [];
+            }
+
+            public function markExported(string $sourceRecordId): bool
+            {
+                return false;
+            }
+        };
+        $orders = DataSource::factory()->create(['source_type' => get_class($driver)]);
+        $catalog = catalogShopifyConnection();
+
+        fakeCatalogPages([
+            function () use ($orders): MockResponse {
+                // A sale starts while the sync is on its first slice.
+                RunDataSourceImportJob::dispatch($orders->id, null);
+                Carbon::setTestNow(now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS + 1));
+
+                return catalogPage([catalogVariant()], nextCursor: 'cursor-page-2');
+            },
+            catalogPage([catalogVariant(['id' => 'gid://shopify/ProductVariant/900010', 'sku' => 'SYN-2'])]),
+        ]);
+
+        app(ProductCatalogSync::class)->start($catalog);
+        $work = fn () => $this->artisan('queue:work', ['connection' => 'imports', '--queue' => 'imports', '--once' => true])->assertSuccessful();
+
+        $work();
+
+        expect(catalogRun($catalog)->pages)->toBe(1)
+            ->and(Shipment::count())->toBe(0);
+
+        $work();
+
+        expect(Shipment::where('shipment_reference', 'SYN-ORDER-1')->exists())->toBeTrue()
+            ->and(catalogRun($catalog)->status)->toBe(ProductCatalogSyncStatus::Running);
+
+        $work();
+
+        expect(catalogRun($catalog)->status)->toBe(ProductCatalogSyncStatus::Complete)
+            ->and(Product::count())->toBe(2);
+    });
+
+    it('records a failure in a later slice at that slice\'s page, with the counts so far', function (): void {
+        $queue = Queue::fake();
+        $dataSource = catalogShopifyConnection();
+        fakeCatalogPages([
+            catalogPage([catalogVariant()], nextCursor: 'cursor-page-2'),
+            lastPageOfSlice(catalogPage([catalogVariant(['id' => 'gid://shopify/ProductVariant/900010', 'sku' => 'SYN-2'])], nextCursor: 'cursor-page-3')),
+            MockResponse::make(['errors' => [['message' => 'Internal error', 'extensions' => ['code' => 'INTERNAL']]]]),
+        ]);
+
+        app(ProductCatalogSync::class)->start($dataSource);
+        app()->call([$queue->pushed(SyncProductCatalogJob::class)->sole(), 'handle']);
+
+        expect(fn () => app()->call([$queue->pushed(SyncProductCatalogJob::class)->last(), 'handle']))->toThrow(RuntimeException::class);
+
+        $run = catalogRun($dataSource);
+
+        expect($run->status)->toBe(ProductCatalogSyncStatus::Failed)
+            ->and($run->stoppedAt)->toBe('page 3')
+            ->and([$run->created, $run->pages])->toBe([2, 2])
+            ->and(Product::count())->toBe(2);
+    });
+
+    it('fails, rather than starting over, when Shopify no longer accepts the saved cursor', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
+        app(ProductCatalogSyncRuns::class)->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage(250, 0, 0, 'cursor-gone'));
+        $requests = [];
+        fakeCatalogPages([
+            MockResponse::make(['errors' => [['message' => 'Invalid cursor for current pagination sort.', 'extensions' => ['code' => 'BAD_REQUEST']]], 'data' => null]),
+        ], $requests);
+
+        expect(fn () => app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toThrow(RuntimeException::class);
+
+        $failed = catalogRun($dataSource);
+
+        expect($failed->status)->toBe(ProductCatalogSyncStatus::Failed)
+            ->and($failed->error)->toBe('Shopify no longer accepts the place this sync had reached in the catalog. Products saved so far are kept; start the sync again to read the rest.')
+            ->and($failed->stoppedAt)->toBe('page 2')
+            ->and($failed->created)->toBe(250)
+            ->and($requests)->toHaveCount(1)
+            ->and($requests[0]['variables']['cursor'])->toBe('cursor-gone');
+    });
+
+    it('does not start a second sync while one is running, but does once it is stale, and the stale one then stops', function (): void {
+        $queue = Queue::fake();
+        $dataSource = catalogShopifyConnection();
+        $sync = app(ProductCatalogSync::class);
+
+        $first = $sync->start($dataSource);
+
+        expect($sync->start($dataSource))->toBeNull();
+
+        $this->travel(ProductCatalogSyncTiming::STALE_AFTER_SECONDS - 60)->seconds();
+
+        expect($sync->start($dataSource))->toBeNull();
+
+        $this->travel(61)->seconds();
+
+        expect(catalogRun($dataSource)->isInterrupted())->toBeTrue();
+
+        $second = $sync->start($dataSource);
+
+        expect($second)->not->toBeNull()
+            ->and($second->runId)->not->toBe($first->runId)
+            ->and($queue->pushed(SyncProductCatalogJob::class))->toHaveCount(2);
+
+        // The first run's job, reached late, writes nothing to the new run.
+        Saloon::fake([GraphQL::class => fn () => throw new RuntimeException('should not read')]);
+        app()->call([$queue->pushed(SyncProductCatalogJob::class)->first(), 'handle']);
+
+        expect(catalogRun($dataSource)->runId)->toBe($second->runId)
+            ->and(catalogRun($dataSource)->status)->toBe(ProductCatalogSyncStatus::Running);
+    });
+
+    it('rolls back a page whose run was replaced while it was being written', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $runs = app(ProductCatalogSyncRuns::class);
+        $old = $runs->start($dataSource);
+
+        fakeCatalogPages([function () use ($dataSource): MockResponse {
+            // The run goes stale mid-page and a new sync replaces it.
+            $this->travel(ProductCatalogSyncTiming::STALE_AFTER_SECONDS + 1)->seconds();
+            app(ProductCatalogSyncRuns::class)->start($dataSource);
+
+            return catalogPage([catalogVariant()]);
+        }]);
+
+        expect(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $old->runId))->toBeFalse()
+            ->and(Product::count())->toBe(0)
+            ->and(catalogRun($dataSource)->runId)->not->toBe($old->runId);
     });
 });
 
 describe('the job', function (): void {
-    it('is configured like an order import, on a lock of its own', function (): void {
-        $job = new SyncProductCatalogJob(42, 1);
+    it('fits one slice and waits no longer than its run takes to go stale', function (): void {
+        $this->freezeTime();
+        $job = new SyncProductCatalogJob(42, 'run-1', 1);
         $middleware = $job->middleware();
 
         expect($middleware)->toHaveCount(1)
             ->and($middleware[0])->toBeInstanceOf(PreventOverlappingImports::class)
             ->and($middleware[0]->key)->toBe('product-catalog-sync:42')
             ->and($middleware[0]->releaseAfter)->toBe(60)
-            ->and($middleware[0]->expiresAfter)->toBe(1860)
-            ->and($job->timeout)->toBe(1800)
+            ->and($middleware[0]->expiresAfter)->toBe(360)
+            ->and($job->timeout)->toBe(300)
+            ->and($job->timeout)->toBeLessThan(config('queue.connections.imports.retry_after'))
             ->and($job->maxExceptions)->toBe(1)
             ->and($job->failOnTimeout)->toBeTrue()
             ->and($job->connection)->toBe('imports')
             ->and($job->queue)->toBe('imports')
-            ->and($job->runId)->not->toBe((new SyncProductCatalogJob(42, 1))->runId);
+            ->and($job->retryUntil()->getTimestamp())->toBe(now()->addSeconds(ProductCatalogSyncTiming::STALE_AFTER_SECONDS)->getTimestamp());
     });
 
-    it('waits behind another sync by time, not attempts', function (): void {
-        $this->freezeTime();
-
-        expect((new SyncProductCatalogJob(42, 1))->retryUntil()->getTimestamp())->toBe(now()->addSeconds(2100)->getTimestamp());
-    });
-
-    it('does not run a second sync of a connection while one is running', function (): void {
-        Cache::lock('product-catalog-sync:42', 1860)->get();
-        $job = (new SyncProductCatalogJob(42, 1))->withFakeQueueInteractions();
+    it('waits behind another slice of the connection\'s sync', function (): void {
+        Cache::lock('product-catalog-sync:42', 360)->get();
+        $job = (new SyncProductCatalogJob(42, 'run-1'))->withFakeQueueInteractions();
 
         $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
 
@@ -385,9 +724,9 @@ describe('the job', function (): void {
         $job->assertNotFailed();
     });
 
-    it('runs beside an order import of the same connection', function (): void {
+    it('takes a different lock from an order import of the connection', function (): void {
         Cache::lock('data-source-import:42', 1860)->get();
-        $job = (new SyncProductCatalogJob(42, 1))->withFakeQueueInteractions();
+        $job = (new SyncProductCatalogJob(42, 'run-1'))->withFakeQueueInteractions();
         $ran = false;
 
         $job->middleware()[0]->handle($job, function () use (&$ran): void {
@@ -398,92 +737,106 @@ describe('the job', function (): void {
         $job->assertNotReleased();
     });
 
-    it('records a killed run failed, and runs a new sync once the lock expires', function (): void {
+    it('records a slice that timed out as failed at its page, keeping the counts', function (): void {
         $dataSource = catalogShopifyConnection();
-        $killed = new SyncProductCatalogJob($dataSource->id, 1);
+        $runs = app(ProductCatalogSyncRuns::class);
+        $run = $runs->start($dataSource);
+        $runs->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage(3, 1, 0, 'cursor-page-2'));
 
-        // The killed worker took the lock and started its run; a worker killed
-        // on its timeout releases nothing.
-        Cache::lock('product-catalog-sync:'.$dataSource->id, SyncProductCatalogJob::LOCK_SECONDS)->get();
-        $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start($killed->runId)->withPage(3, 0, 0));
-        $killed->failed(new TimeoutExceededException('App\\Jobs\\SyncProductCatalogJob has timed out.'));
+        (new SyncProductCatalogJob($dataSource->id, $run->runId))->failed(new TimeoutExceededException('App\\Jobs\\SyncProductCatalogJob has timed out.'));
 
-        $run = $dataSource->fresh()->productCatalogSyncRun();
+        $failed = catalogRun($dataSource);
 
-        expect($run->status)->toBe(ProductCatalogSyncStatus::Failed)
-            ->and($run->created)->toBe(3)
-            ->and($run->error)->toBe('The sync took longer than 30 minutes and was stopped. Products it had already saved are kept.');
+        expect($failed->status)->toBe(ProductCatalogSyncStatus::Failed)
+            ->and([$failed->created, $failed->updated])->toBe([3, 1])
+            ->and($failed->stoppedAt)->toBe('page 2')
+            ->and($failed->error)->toBe('Part of the sync took longer than 5 minutes and was stopped. Products it had already saved are kept.');
+    });
 
-        $next = (new SyncProductCatalogJob($dataSource->id, 1))->withFakeQueueInteractions();
-        $next->middleware()[0]->handle($next, fn () => throw new RuntimeException('should wait'));
-        $next->assertReleased(delay: 60);
+    it('leaves another run alone when it fails', function (): void {
+        $dataSource = catalogShopifyConnection();
+        app(ProductCatalogSyncRuns::class)->start($dataSource);
 
-        $this->travel(SyncProductCatalogJob::LOCK_SECONDS + 1)->seconds();
+        (new SyncProductCatalogJob($dataSource->id, 'some-other-run'))->failed(new MaxAttemptsExceededException('has been attempted too many times.'));
 
+        expect(catalogRun($dataSource)->status)->toBe(ProductCatalogSyncStatus::Running);
+    });
+
+    it('leaves a finished run alone when it fails', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $runs = app(ProductCatalogSyncRuns::class);
+        $run = $runs->start($dataSource);
+        $runs->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->finish(ProductCatalogSyncStatus::Complete));
+
+        (new SyncProductCatalogJob($dataSource->id, $run->runId))->failed(new RuntimeException('late'));
+
+        expect(catalogRun($dataSource)->status)->toBe(ProductCatalogSyncStatus::Complete);
+    });
+
+    it('stops a run whose connection was deactivated', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
+        $dataSource->update(['active' => false]);
+
+        app()->call([new SyncProductCatalogJob($dataSource->id, $run->runId), 'handle']);
+
+        expect(catalogRun($dataSource)->status)->toBe(ProductCatalogSyncStatus::Failed);
+    });
+
+    it('runs on a connection that imports no orders', function (): void {
+        $queue = Queue::fake();
+        $dataSource = catalogShopifyConnection(['import_enabled' => false]);
         fakeCatalogPages([catalogPage([catalogVariant()])]);
-        $later = (new SyncProductCatalogJob($dataSource->id, 1))->withFakeQueueInteractions();
-        $later->middleware()[0]->handle($later, fn () => app()->call([$later, 'handle']));
 
-        $later->assertNotReleased();
-        expect($dataSource->fresh()->productCatalogSyncRun()->status)->toBe(ProductCatalogSyncStatus::Complete)
-            ->and(Product::where('sku', 'SYN-TEE-RED')->exists())->toBeTrue();
+        app(ProductCatalogSync::class)->start($dataSource);
+        app()->call([$queue->pushed(SyncProductCatalogJob::class)->sole(), 'handle']);
+
+        expect(Product::where('sku', 'SYN-TEE-RED')->exists())->toBeTrue();
     });
 
-    it('leaves a running sync alone when a sync waiting behind it fails', function (): void {
-        $dataSource = catalogShopifyConnection();
-        $running = new SyncProductCatalogJob($dataSource->id, 1);
-        $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start($running->runId));
-
-        (new SyncProductCatalogJob($dataSource->id, 1))->failed(new MaxAttemptsExceededException('has been attempted too many times.'));
-
-        expect($dataSource->fresh()->productCatalogSyncRun()->status)->toBe(ProductCatalogSyncStatus::Running);
-    });
-
-    it('does nothing for an inactive connection or one that cannot list a catalog', function (array $attributes): void {
+    it('starts no sync of a connection that cannot list a catalog', function (array $attributes): void {
+        $queue = Queue::fake();
         $dataSource = DataSource::factory()->create($attributes);
 
-        app()->call([new SyncProductCatalogJob($dataSource->id, 1), 'handle']);
-
-        expect($dataSource->fresh()->productCatalogSyncRun())->toBeNull();
+        expect(app(ProductCatalogSync::class)->start($dataSource))->toBeNull()
+            ->and($dataSource->fresh()->productCatalogSyncRun())->toBeNull();
+        Queue::assertNothingPushed();
     })->with([
         'inactive Shopify' => [['source_type' => ShopifySource::class, 'active' => false]],
         'Amazon' => [['source_type' => AmazonSource::class]],
         'Database' => [[]],
     ]);
-
-    it('runs on a connection that imports no orders', function (): void {
-        $dataSource = catalogShopifyConnection(['import_enabled' => false]);
-        fakeCatalogPages([catalogPage([catalogVariant()])]);
-
-        app()->call([new SyncProductCatalogJob($dataSource->id, 1), 'handle']);
-
-        expect(Product::where('sku', 'SYN-TEE-RED')->exists())->toBeTrue();
-    });
 });
 
 describe('the run status', function (): void {
-    it('shows a run still marked running after its lock expired as interrupted', function (): void {
+    it('shows a running sync as interrupted once it has saved no page for too long', function (): void {
         $dataSource = catalogShopifyConnection();
-        $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start('run-killed')->withPage(4, 1, 0));
+        $runs = app(ProductCatalogSyncRuns::class);
+        $run = $runs->start($dataSource);
 
-        expect($dataSource->productCatalogSyncRun()->isRunning())->toBeTrue()
-            ->and(DataSourceForm::describeProductCatalogSync($dataSource))->toStartWith('Running');
+        // A long run that keeps saving pages is not interrupted, however long ago it started.
+        $this->travel(ProductCatalogSyncTiming::STALE_AFTER_SECONDS)->seconds();
+        $runs->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage(4, 1, 0, 'cursor-page-2'));
+        $this->travel(ProductCatalogSyncTiming::STALE_AFTER_SECONDS - 1)->seconds();
 
-        $this->travel(SyncProductCatalogJob::LOCK_SECONDS + 1)->seconds();
+        expect(catalogRun($dataSource)->isRunning())->toBeTrue()
+            ->and(DataSourceForm::describeProductCatalogSync($dataSource->fresh()))->toStartWith('Running');
 
-        expect($dataSource->productCatalogSyncRun()->isInterrupted())->toBeTrue()
-            ->and($dataSource->productCatalogSyncRun()->isRunning())->toBeFalse()
-            ->and(DataSourceForm::describeProductCatalogSync($dataSource))
+        $this->travel(2)->seconds();
+
+        expect(catalogRun($dataSource)->isInterrupted())->toBeTrue()
+            ->and(catalogRun($dataSource)->isRunning())->toBeFalse()
+            ->and(DataSourceForm::describeProductCatalogSync($dataSource->fresh()))
             ->toStartWith('Interrupted')
-            ->toContain('4 created, 1 updated, 0 unchanged')
+            ->toContain('1 page: 4 created, 1 updated, 0 unchanged')
             ->toContain('a new sync can start');
     });
 
     it('shows where a failed run stopped and why', function (): void {
         $dataSource = catalogShopifyConnection();
         $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start('run-1')
-            ->withPage(250, 0, 0)
-            ->finish(ProductCatalogSyncStatus::Failed, stoppedAt: 'page 2', error: 'Shopify GraphQL error'));
+            ->withPage(250, 0, 0, 'cursor-page-2')
+            ->failAtNextPage('Shopify GraphQL error'));
 
         expect(DataSourceForm::describeProductCatalogSync($dataSource))
             ->toStartWith('Failed')
@@ -498,18 +851,35 @@ describe('the action', function (): void {
         $this->actingAs(User::factory()->admin()->create());
     });
 
-    it('queues a sync of an active Shopify connection, whether or not it imports orders', function (bool $importEnabled): void {
-        Queue::fake();
+    it('starts a sync of an active Shopify connection, whether or not it imports orders, and shows it at once', function (bool $importEnabled): void {
+        $queue = Queue::fake();
         $dataSource = catalogShopifyConnection(['import_enabled' => $importEnabled]);
 
         Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
             ->assertActionVisible('sync_product_catalog')
             ->callAction('sync_product_catalog')
-            ->assertNotified('Catalog sync queued');
+            ->assertNotified('Catalog sync queued')
+            ->assertActionDisabled('sync_product_catalog')
+            ->assertSee('Running, started');
 
         Queue::assertPushed(SyncProductCatalogJob::class, fn (SyncProductCatalogJob $job): bool => $job->dataSourceId === $dataSource->id
+            && $job->runId === catalogRun($dataSource)->runId
             && $job->connection === 'imports');
     })->with(['importing' => true, 'not importing' => false]);
+
+    it('queues one sync when started from two tabs', function (): void {
+        $queue = Queue::fake();
+        $dataSource = catalogShopifyConnection();
+        $firstTab = Livewire::test(EditDataSource::class, ['record' => $dataSource->id]);
+        $secondTab = Livewire::test(EditDataSource::class, ['record' => $dataSource->id]);
+
+        $firstTab->callAction('sync_product_catalog')->assertNotified('Catalog sync queued');
+        $runId = catalogRun($dataSource)->runId;
+        $secondTab->callAction('sync_product_catalog');
+
+        Queue::assertPushed(SyncProductCatalogJob::class, 1);
+        expect(catalogRun($dataSource)->runId)->toBe($runId);
+    });
 
     it('is not shown on an inactive or non-Shopify connection', function (array $attributes): void {
         $dataSource = DataSource::factory()->create($attributes);
@@ -532,12 +902,12 @@ describe('the action', function (): void {
 
     it('is disabled while a sync is running, and enabled once it is interrupted', function (): void {
         $dataSource = catalogShopifyConnection();
-        $dataSource->recordProductCatalogSyncRun(ProductCatalogSyncRun::start('run-1'));
+        app(ProductCatalogSyncRuns::class)->start($dataSource);
 
         Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
             ->assertActionDisabled('sync_product_catalog');
 
-        $this->travel(SyncProductCatalogJob::LOCK_SECONDS + 1)->seconds();
+        $this->travel(ProductCatalogSyncTiming::STALE_AFTER_SECONDS + 1)->seconds();
 
         Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
             ->assertActionEnabled('sync_product_catalog');
@@ -551,7 +921,7 @@ describe('the action', function (): void {
     });
 
     it('is offered once after a new connection is connected, never started', function (): void {
-        Queue::fake();
+        $queue = Queue::fake();
         $dataSource = catalogShopifyConnection();
         session()->flash('offer_product_catalog_sync', $dataSource->id);
 
@@ -572,7 +942,7 @@ describe('the action', function (): void {
 });
 
 describe('Incomplete Customs Data', function (): void {
-    it('lists a synced Product on no Package that lacks an HS code, which Missing Customs Data does not', function (): void {
+    it('lists a synced Product on no Package that lacks an HS code or a weight, which Missing Customs Data does not', function (): void {
         $this->actingAs(User::factory()->admin()->create());
         $dataSource = catalogShopifyConnection();
         fakeCatalogPages([catalogPage([
@@ -586,12 +956,14 @@ describe('Incomplete Customs Data', function (): void {
         $noHsCode = Product::where('sku', 'SYN-TEE-RED')->sole();
         $noWeight = Product::where('sku', 'SYN-NO-WEIGHT')->sole();
         $complete = Product::where('sku', 'SYN-COMPLETE')->sole();
+        $zeroWeight = Product::factory()->create(['weight' => 0]);
 
-        expect($noHsCode->hs_tariff_number)->toBeNull();
+        expect($noHsCode->hs_tariff_number)->toBeNull()
+            ->and($noWeight->weight)->toBeNull();
 
         Livewire::test(ListProducts::class)
             ->filterTable('incomplete_customs_data')
-            ->assertCanSeeTableRecords([$noHsCode, $noWeight])
+            ->assertCanSeeTableRecords([$noHsCode, $noWeight, $zeroWeight])
             ->assertCanNotSeeTableRecords([$complete]);
 
         Livewire::test(ListProducts::class)

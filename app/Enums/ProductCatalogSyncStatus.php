@@ -7,14 +7,18 @@ use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 /**
  * How a connection's last product catalog sync stands (`product-catalog-sync/02`).
  *
- * *Interrupted* is not stored: it is a run still marked running after its
- * lock expired, read off {@see ProductCatalogSyncRun::isInterrupted()}.
+ * *Interrupted* is not stored: it is a run still marked running that has
+ * saved no page for too long, read off {@see ProductCatalogSyncRun::isInterrupted()}.
  */
 enum ProductCatalogSyncStatus: string
 {
     case Running = 'running';
     case Complete = 'complete';
-    /** The source read everything it could, but could not list part of the catalog. */
+    /**
+     * Reserved for Amazon (`product-catalog-sync/04`): the run read all it
+     * could, but a date window it could not split left listings unread.
+     * Nothing records it yet.
+     */
     case Incomplete = 'incomplete';
     case Failed = 'failed';
 

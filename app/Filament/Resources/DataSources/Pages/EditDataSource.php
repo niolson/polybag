@@ -6,12 +6,12 @@ use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Jobs\RunDataSourceImportJob;
-use App\Jobs\SyncProductCatalogJob;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Services\AmazonMarketplaceDiscoveryService;
 use App\Services\OAuthService;
 use App\Services\PostageSources\OffAmazonShippingCheck;
+use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
@@ -72,8 +72,7 @@ class EditDataSource extends EditRecord
      */
     public static function canSyncProductCatalog(DataSource $dataSource): bool
     {
-        return $dataSource->syncsProductCatalog()
-            && (bool) config('shipment-import.behavior.auto_update_products', true);
+        return $dataSource->syncsProductCatalog() && ProductCatalogSync::writesProducts();
     }
 
     protected function getHeaderActions(): array
@@ -116,15 +115,29 @@ class EditDataSource extends EditRecord
                     : null)
                 ->requiresConfirmation()
                 ->modalHeading('Sync product catalog?')
-                ->modalDescription('Add every variant of this store\'s active products to Products, in the background. Only empty fields are filled: a name, weight or customs field already on a Product is kept. Nothing is deleted, and nothing is written to the store.')
+                ->modalDescription('Add every variant of this store\'s active products to Products, and update the ones already there, in the background. The store\'s weight, barcodes, part number and customs fields replace PolyBag\'s; a field blank in the store leaves PolyBag\'s value, and a Product keeps the name it has. Listed Products are marked active. Nothing is deleted, and nothing is written to the store.')
                 ->modalSubmitActionLabel('Sync')
                 ->action(function (): void {
-                    SyncProductCatalogJob::dispatch($this->dataSource()->id, auth()->id());
+                    $dataSource = $this->dataSource();
+                    $run = app(ProductCatalogSync::class)->start($dataSource, auth()->id());
+
+                    // Disable the button and show the run at once, rather than when the queue reaches it.
+                    $dataSource->refresh();
+
+                    if ($run === null) {
+                        Notification::make()
+                            ->warning()
+                            ->title('A catalog sync is already running')
+                            ->body('The last run is shown under Product Catalog on this connection.')
+                            ->send();
+
+                        return;
+                    }
 
                     Notification::make()
                         ->info()
                         ->title('Catalog sync queued')
-                        ->body('The last run is shown under Product Catalog on this connection.')
+                        ->body('Its progress is shown under Product Catalog on this connection. Order imports keep running between its steps.')
                         ->send();
                 }),
 

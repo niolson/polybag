@@ -8,6 +8,7 @@ use App\Contracts\ExportDestinationInterface;
 use App\Contracts\ReadsInPages;
 use App\Contracts\ReconcilesSupersededRecords;
 use App\Contracts\SyncsProductCatalog;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ShopifyFulfillmentOrderIdentity;
 use App\DataTransferObjects\ShipmentImport\ShopifyMetafieldReference;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
@@ -1408,27 +1409,32 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     }
 
     /**
-     * Every variant of the store's active products, a page at a time
+     * Every variant of the store's active products, a page at a time, from
+     * the start or from a cursor an earlier page gave
      * (`product-catalog-sync/02`).
      *
-     * @return Generator<int, Collection<int, array<string, mixed>>>
+     * @return Generator<int, ProductCatalogPage>
+     *
+     * @throws DomainException when the token lacks `read_products`
+     * @throws RuntimeException when Shopify no longer accepts `$cursor`
      */
-    public function fetchProductCatalogPages(): Generator
+    public function fetchProductCatalogPages(?string $cursor = null): Generator
     {
         $this->validateStoreAccess();
 
+        if ($cursor === null && ! in_array('read_products', $this->fetchAccessScopes(), true)) {
+            throw new DomainException('Reconnect Shopify with the read_products scope to sync its product catalog.');
+        }
+
         $query = $this->lineItemQuery(self::PRODUCT_VARIANTS_QUERY);
-        $cursor = null;
-        $page = 0;
 
         do {
-            $json = $this->graphql($query, $this->lineItemVariables(array_filter(['cursor' => $cursor])));
+            $json = $this->catalogPage($query, $cursor);
             $connection = $json['data']['productVariants'] ?? [];
-            $page++;
 
             Log::info('Read a page of Shopify product variants', [
                 'shop_domain' => $this->config['shop_domain'] ?? null,
-                'page' => $page,
+                'resumed' => $cursor !== null,
                 'variants' => count($connection['nodes'] ?? []),
                 ...self::queryCost($json),
             ]);
@@ -1440,11 +1446,32 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 ->filter(fn (array $item): bool => $item['sku'] !== null)
                 ->values();
 
-            yield $items;
-
             $pageInfo = $connection['pageInfo'] ?? [];
             $cursor = ($pageInfo['hasNextPage'] ?? false) ? ($pageInfo['endCursor'] ?? null) : null;
+
+            yield new ProductCatalogPage($items, $cursor);
         } while ($cursor !== null);
+    }
+
+    /**
+     * One page of catalog variants. Shopify answers a cursor it cannot use
+     * with `Malformed cursor` or `Invalid cursor for current pagination sort`
+     * (development store, 2026-10-28); either stops the sync with a reason
+     * rather than its raw error, and the sync does not start over.
+     *
+     * @return array<string, mixed>
+     */
+    private function catalogPage(string $query, ?string $cursor): array
+    {
+        try {
+            return $this->graphql($query, $this->lineItemVariables(array_filter(['cursor' => $cursor])));
+        } catch (RuntimeException $e) {
+            if ($cursor !== null && stripos($e->getMessage(), 'cursor') !== false) {
+                throw new RuntimeException('Shopify no longer accepts the place this sync had reached in the catalog. Products saved so far are kept; start the sync again to read the rest.', previous: $e);
+            }
+
+            throw $e;
+        }
     }
 
     /**
@@ -1463,9 +1490,11 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
 
         return [
             'sku' => ShopifyGoodsFingerprint::skuFor(['sku' => $variant['sku'] ?? null, 'variant' => ['id' => $variant['id'] ?? null]]),
-            'name' => $variantTitle === null || $variantTitle === self::DEFAULT_VARIANT_TITLE
+            'name' => self::productName($variantTitle === null || $variantTitle === self::DEFAULT_VARIANT_TITLE
                 ? $productTitle
-                : ($productTitle === null ? $variantTitle : "{$productTitle} - {$variantTitle}"),
+                : ($productTitle === null ? $variantTitle : "{$productTitle} - {$variantTitle}")),
+            // Null for a weight of 0, which Shopify reports for a variant with
+            // no weight entered: it is no value, and leaves PolyBag's alone.
             'weight' => self::poundsFrom(is_array($weight) ? $weight : null),
             ...$this->variantFields($variant),
         ];
@@ -1559,6 +1588,16 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $value = self::filledText($value);
 
         return $value === null ? null : self::filledText(mb_substr($value, 0, 100));
+    }
+
+    /**
+     * A name cut to the `products.name` column's 255 characters. Shopify allows
+     * a product title of 255 alone, so the variant title can take it over,
+     * and MySQL's strict mode would fail the whole page on it.
+     */
+    private static function productName(?string $name): ?string
+    {
+        return $name === null ? null : rtrim(mb_substr($name, 0, 255));
     }
 
     /**

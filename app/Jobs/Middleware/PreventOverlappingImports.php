@@ -22,10 +22,13 @@ use Illuminate\Support\Facades\Log;
  * own overlap guard did: the next tick runs it. Someone who asked for an
  * import waits for it.
  *
- * A product catalog sync (`product-catalog-sync/02`) takes a lock of its own,
- * so a sync and an order import of the same connection may run together:
- * Products are unique by client and SKU (`product-catalog-sync/01`). A second
- * sync of a connection waits for the first.
+ * A product catalog sync (`product-catalog-sync/02`) takes a lock of its own
+ * for each of its short jobs. With one `imports` worker, a sync and an order
+ * import of the same connection take turns between the sync's jobs; with
+ * more workers they could overlap, which Products being unique by client and
+ * SKU (`product-catalog-sync/01`) makes safe. The lock only keeps two of a
+ * sync's jobs apart: what stops a second sync starting is the run itself
+ * (`ProductCatalogSyncRuns`), since this lock is free between jobs.
  */
 class PreventOverlappingImports
 {

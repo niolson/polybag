@@ -22,6 +22,7 @@ use App\Models\Location;
 use App\Models\ShippingMethod;
 use App\Services\CredentialFieldVisibility;
 use App\Services\OAuthService;
+use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportConnectionConfig;
@@ -1377,7 +1378,7 @@ class DataSourceForm
      */
     public static function describeProductCatalogSync(DataSource $record): string
     {
-        if (! config('shipment-import.behavior.auto_update_products', true)) {
+        if (! ProductCatalogSync::writesProducts()) {
             return 'Catalog sync is off: imports are set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS), so Products are kept outside PolyBag.';
         }
 
@@ -1398,7 +1399,8 @@ class DataSourceForm
             $parts[] = 'finished '.$run->finishedAt->setTimezone($timezone)->format('M j, Y g:i A');
         }
 
-        $summary = implode(', ', $parts).". {$run->created} created, {$run->updated} updated, {$run->unchanged} unchanged.";
+        $pages = $run->pages === 1 ? '1 page' : "{$run->pages} pages";
+        $summary = implode(', ', $parts).". {$pages}: {$run->created} created, {$run->updated} updated, {$run->unchanged} unchanged.";
 
         if ($run->stoppedAt !== null) {
             $summary .= " Stopped at {$run->stoppedAt}.";

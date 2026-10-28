@@ -8,6 +8,7 @@ use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\DemoLifetime;
+use App\Services\ProductCatalog\ProductCatalogSyncRuns;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\DataSourceFactory;
@@ -135,11 +136,15 @@ class DataSource extends Model
 
     /**
      * Store the last product catalog sync. Only this column is written, so a
-     * long run never saves over settings someone changed meanwhile.
+     * sync never saves over settings someone changed meanwhile, and it is
+     * written whatever this instance last read. {@see ProductCatalogSyncRuns}
+     * decides whether a job may write it.
      */
     public function recordProductCatalogSyncRun(ProductCatalogSyncRun $run): void
     {
-        $this->forceFill(['product_catalog_sync' => $run->toArray()])->save();
+        static::query()->whereKey($this->id)->update(['product_catalog_sync' => json_encode($run->toArray())]);
+
+        $this->forceFill(['product_catalog_sync' => $run->toArray()])->syncOriginalAttribute('product_catalog_sync');
     }
 
     public function importsOrders(): bool

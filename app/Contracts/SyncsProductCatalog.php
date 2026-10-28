@@ -2,7 +2,7 @@
 
 namespace App\Contracts;
 
-use Illuminate\Support\Collection;
+use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 
 /**
  * A source that can list its whole product catalog, for a catalog sync
@@ -12,15 +12,17 @@ use Illuminate\Support\Collection;
 interface SyncsProductCatalog
 {
     /**
-     * The catalog's items, a page at a time, each mapped to the item array
-     * `ImportReferenceResolver::productIdFor()` takes. Each page is written
-     * before the next is read.
+     * The catalog a page at a time, from the start or from a cursor an
+     * earlier page gave. A sync runs as a chain of short jobs, so a read may
+     * stop after any page and resume in another job from that page's
+     * {@see ProductCatalogPage::$nextCursor}.
      *
      * The source checks what reading its catalog needs, which may be less
      * than an order import does. A page that cannot be read throws, and the
-     * run stops there.
+     * run stops there; so does a cursor the source no longer accepts, rather
+     * than reading from the start again.
      *
-     * @return iterable<int, Collection<int, array<string, mixed>>>
+     * @return iterable<int, ProductCatalogPage>
      */
-    public function fetchProductCatalogPages(): iterable;
+    public function fetchProductCatalogPages(?string $cursor = null): iterable;
 }
