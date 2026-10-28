@@ -163,8 +163,9 @@ through `ProductCatalogSyncRuns`, and shown under *Product Catalog* on the Conne
   two tabs or a double click queue one sync, and the action refreshes the record so the
   button disables at once. A late slice of a run a new sync replaced rolls its page back
   and stops. If queueing the first slice throws, the run is failed with the reason and
-  the error rethrown; the job is queued after commit. Two starts on separate MySQL
-  connections are not tested: there is no MySQL here.
+  the error rethrown; the job is queued after commit. Two starts from separate processes
+  were checked by hand on MySQL 8.4 (2026-10-28): the second waited on the row lock until
+  the first committed, then found its run and started none. No automated test covers it.
 - **Lock order:** a sync page locks Product rows, then the connection's row; an order
   import the reverse. With more than one import worker they can deadlock, so a page is
   written with `DB::transaction(..., attempts: 3)`; it is idempotent.
