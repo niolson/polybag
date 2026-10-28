@@ -21,7 +21,9 @@ use Illuminate\Support\Str;
 class ProductCatalogSyncRuns
 {
     /**
-     * Start a run, unless one is already running. Null when one is.
+     * Start a run, unless one is already running. Null when one is. A run
+     * that failed or was interrupted partway is carried on from its cursor,
+     * pages and counts, unless its failure ruled the cursor out.
      */
     public function start(DataSource $dataSource): ?ProductCatalogSyncRun
     {
@@ -32,7 +34,8 @@ class ProductCatalogSyncRuns
                 return null;
             }
 
-            $run = ProductCatalogSyncRun::start((string) Str::uuid());
+            $runId = (string) Str::uuid();
+            $run = $current?->canResume() ? $current->resumeAs($runId) : ProductCatalogSyncRun::start($runId);
             $dataSource->recordProductCatalogSyncRun($run);
 
             return $run;

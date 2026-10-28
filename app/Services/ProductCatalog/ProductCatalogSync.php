@@ -6,6 +6,7 @@ use App\Contracts\SyncsProductCatalog;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\Enums\ProductCatalogSyncStatus;
+use App\Exceptions\CatalogReadMustStartOver;
 use App\Jobs\SyncProductCatalogJob;
 use App\Models\Client;
 use App\Models\DataSource;
@@ -14,7 +15,9 @@ use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\ImportRunRecorder;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Laravel\Scout\Jobs\MakeSearchable;
 use RuntimeException;
 use Throwable;
@@ -56,8 +59,9 @@ class ProductCatalogSync
     ) {}
 
     /**
-     * Start a sync and queue its first slice. Null, and nothing queued, when
-     * the connection cannot sync or a sync of it is already running.
+     * Start a sync and queue its first slice, resuming a run that failed or
+     * was interrupted partway. Null, and nothing queued, when the connection
+     * cannot sync or a sync of it is already running.
      */
     public function start(DataSource $dataSource, ?int $userId = null): ?ProductCatalogSyncRun
     {
@@ -67,8 +71,17 @@ class ProductCatalogSync
 
         $run = $this->runs->start($dataSource);
 
-        if ($run !== null) {
-            SyncProductCatalogJob::dispatch($dataSource->id, $run->runId, $userId);
+        if ($run === null) {
+            return null;
+        }
+
+        try {
+            Bus::dispatch((new SyncProductCatalogJob($dataSource->id, $run->runId, $userId))->afterCommit());
+        } catch (Throwable $e) {
+            // Otherwise the run would show running with no job behind it.
+            $this->runs->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->failAtNextPage('The sync could not be queued: '.ImportRunRecorder::reasonFor($e)));
+
+            throw $e;
         }
 
         return $run;
@@ -128,7 +141,10 @@ class ProductCatalogSync
         } catch (ProductCatalogSyncSuperseded) {
             return false;
         } catch (Throwable $e) {
-            $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->failAtNextPage(ImportRunRecorder::reasonFor($e)));
+            $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->failAtNextPage(
+                ImportRunRecorder::reasonFor($e),
+                startOver: $e instanceof CatalogReadMustStartOver,
+            ));
 
             throw $e;
         }
@@ -147,19 +163,31 @@ class ProductCatalogSync
      */
     private function writePage(DataSource $dataSource, string $runId, ProductCatalogPage $page): array
     {
+        // Product rows are locked before the connection's row, the reverse of
+        // an order import; with more than one import worker the two can
+        // deadlock. The page is idempotent, so a deadlock retries it.
         return DB::transaction(function () use ($dataSource, $runId, $page): array {
             [$productIds, $created, $updated, $unchanged] = Product::withoutSyncingToSearch(
                 fn (): array => $this->writeItems($page, $dataSource->client),
             );
 
-            $this->runs->update(
+            $run = $this->runs->update(
                 $dataSource,
                 $runId,
                 fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor),
             ) ?? throw new ProductCatalogSyncSuperseded;
 
+            Log::info('Saved a page of a product catalog', [
+                'data_source_id' => $dataSource->id,
+                'run_id' => $runId,
+                'page' => $run->pages,
+                'created' => $created,
+                'updated' => $updated,
+                'unchanged' => $unchanged,
+            ]);
+
             return $productIds;
-        });
+        }, attempts: 3);
     }
 
     /**

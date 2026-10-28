@@ -51,7 +51,7 @@ class SyncProductCatalogJob implements ShouldQueue
     /**
      * One slice of a connection's sync at a time, should two workers take
      * them. A sync and an order import of the same connection take different
-     * locks; on the one `imports` worker they take turns.
+     * locks; on the one `imports` worker they take turns between slices.
      *
      * @return array<int, object>
      */
@@ -99,6 +99,11 @@ class SyncProductCatalogJob implements ShouldQueue
      */
     public function failed(?Throwable $exception): void
     {
+        // A slice stopped mid-page leaves its transaction open, and only some
+        // paths roll it back before this runs; the failure is recorded
+        // whichever path, and whatever stores failed jobs.
+        app(FailQueuedJobOnFatalError::class)->rollBackOpenTransactions();
+
         $dataSource = DataSource::find($this->dataSourceId);
 
         if ($dataSource === null) {

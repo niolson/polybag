@@ -15,6 +15,7 @@ use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
 use App\Enums\DutiesTerms;
 use App\Enums\RecipientTaxIdType;
 use App\Enums\ShopifyMetafieldOwner;
+use App\Exceptions\CatalogReadMustStartOver;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
@@ -1415,26 +1416,30 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      *
      * @return Generator<int, ProductCatalogPage>
      *
-     * @throws DomainException when the token lacks `read_products`
-     * @throws RuntimeException when Shopify no longer accepts `$cursor`
+     * @throws CatalogReadMustStartOver when the token lacks `read_products`, or Shopify no longer accepts `$cursor`
      */
     public function fetchProductCatalogPages(?string $cursor = null): Generator
     {
         $this->validateStoreAccess();
 
         if ($cursor === null && ! in_array('read_products', $this->fetchAccessScopes(), true)) {
-            throw new DomainException('Reconnect Shopify with the read_products scope to sync its product catalog.');
+            throw new CatalogReadMustStartOver('Reconnect Shopify with the read_products scope to sync its product catalog.');
         }
 
         $query = $this->lineItemQuery(self::PRODUCT_VARIANTS_QUERY);
+        $resumed = $cursor !== null;
+        $page = 0;
 
         do {
             $json = $this->catalogPage($query, $cursor);
             $connection = $json['data']['productVariants'] ?? [];
+            $page++;
 
             Log::info('Read a page of Shopify product variants', [
                 'shop_domain' => $this->config['shop_domain'] ?? null,
-                'resumed' => $cursor !== null,
+                // Of this read, which may carry on from a saved cursor.
+                'page' => $page,
+                'from_saved_cursor' => $resumed,
                 'variants' => count($connection['nodes'] ?? []),
                 ...self::queryCost($json),
             ]);
@@ -1454,10 +1459,19 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     }
 
     /**
-     * One page of catalog variants. Shopify answers a cursor it cannot use
-     * with `Malformed cursor` or `Invalid cursor for current pagination sort`
-     * (development store, 2026-10-28); either stops the sync with a reason
-     * rather than its raw error, and the sync does not start over.
+     * What Shopify answers for a cursor it cannot use (development store,
+     * 2026-10-28). Matched exactly: another error that mentions a cursor is
+     * not one of these.
+     */
+    private const REFUSED_CURSOR_MESSAGES = [
+        'Malformed cursor',
+        'Invalid cursor for current pagination sort.',
+    ];
+
+    /**
+     * One page of catalog variants. A cursor Shopify refuses stops the sync
+     * with a reason rather than its raw error, and the next sync starts from
+     * the first page rather than resuming from it.
      *
      * @return array<string, mixed>
      */
@@ -1466,8 +1480,11 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         try {
             return $this->graphql($query, $this->lineItemVariables(array_filter(['cursor' => $cursor])));
         } catch (RuntimeException $e) {
-            if ($cursor !== null && stripos($e->getMessage(), 'cursor') !== false) {
-                throw new RuntimeException('Shopify no longer accepts the place this sync had reached in the catalog. Products saved so far are kept; start the sync again to read the rest.', previous: $e);
+            $refused = collect(self::REFUSED_CURSOR_MESSAGES)
+                ->contains(fn (string $message): bool => str_contains($e->getMessage(), json_encode($message, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)));
+
+            if ($cursor !== null && $refused) {
+                throw new CatalogReadMustStartOver('Shopify no longer accepts the place this sync had reached in the catalog. Products saved so far are kept; the next sync starts from the first page.', previous: $e);
             }
 
             throw $e;
@@ -1493,9 +1510,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'name' => self::productName($variantTitle === null || $variantTitle === self::DEFAULT_VARIANT_TITLE
                 ? $productTitle
                 : ($productTitle === null ? $variantTitle : "{$productTitle} - {$variantTitle}")),
-            // Null for a weight of 0, which Shopify reports for a variant with
-            // no weight entered: it is no value, and leaves PolyBag's alone.
-            'weight' => self::poundsFrom(is_array($weight) ? $weight : null),
+            'weight' => self::catalogPounds(is_array($weight) ? $weight : null),
             ...$this->variantFields($variant),
         ];
     }
@@ -1588,6 +1603,21 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $value = self::filledText($value);
 
         return $value === null ? null : self::filledText(mb_substr($value, 0, 100));
+    }
+
+    /**
+     * A catalog weight in pounds, or null when it is no value: Shopify reports
+     * 0 for a variant with no weight entered, and a weight that rounds to 0.00
+     * in the two-decimal column would store as 0 all the same. Null leaves
+     * PolyBag's weight alone.
+     *
+     * @param  array<string, mixed>|null  $weight
+     */
+    private static function catalogPounds(?array $weight): ?float
+    {
+        $pounds = self::poundsFrom($weight);
+
+        return $pounds !== null && round($pounds, 2) > 0 ? $pounds : null;
     }
 
     /**

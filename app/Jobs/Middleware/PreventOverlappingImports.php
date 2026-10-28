@@ -23,12 +23,15 @@ use Illuminate\Support\Facades\Log;
  * import waits for it.
  *
  * A product catalog sync (`product-catalog-sync/02`) takes a lock of its own
- * for each of its short jobs. With one `imports` worker, a sync and an order
- * import of the same connection take turns between the sync's jobs; with
- * more workers they could overlap, which Products being unique by client and
- * SKU (`product-catalog-sync/01`) makes safe. The lock only keeps two of a
- * sync's jobs apart: what stops a second sync starting is the run itself
- * (`ProductCatalogSyncRuns`), since this lock is free between jobs.
+ * for each of its short jobs. With one `imports` worker, as on-prem runs, a
+ * sync and an order import of the same connection take turns between the
+ * sync's jobs. With more workers they could overlap. Products being unique by
+ * client and SKU (`product-catalog-sync/01`) keeps that from duplicating a
+ * Product, but the two lock rows in opposite orders (a sync page its Products
+ * then the connection, an import the connection then its Products), so they
+ * can deadlock; the sync retries its page when they do. The lock only keeps
+ * two of a sync's jobs apart: what stops a second sync starting is the run
+ * itself (`ProductCatalogSyncRuns`), since this lock is free between jobs.
  */
 class PreventOverlappingImports
 {

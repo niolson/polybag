@@ -125,11 +125,14 @@ class EditDataSource extends EditRecord
                     $dataSource->refresh();
 
                     if ($run === null) {
-                        Notification::make()
-                            ->warning()
-                            ->title('A catalog sync is already running')
-                            ->body('The last run is shown under Product Catalog on this connection.')
-                            ->send();
+                        // Something may have changed since the page was drawn.
+                        [$title, $body] = match (true) {
+                            ! ProductCatalogSync::writesProducts() => ['Catalog sync is off', 'Imports are now set not to create or update Products (SHIPMENT_IMPORT_AUTO_UPDATE_PRODUCTS).'],
+                            ! $dataSource->syncsProductCatalog() => ['This connection cannot sync its catalog', 'It is inactive. Activate it to sync its product catalog.'],
+                            default => ['A catalog sync is already running', 'The last run is shown under Product Catalog on this connection.'],
+                        };
+
+                        Notification::make()->warning()->title($title)->body($body)->send();
 
                         return;
                     }
@@ -137,7 +140,9 @@ class EditDataSource extends EditRecord
                     Notification::make()
                         ->info()
                         ->title('Catalog sync queued')
-                        ->body('Its progress is shown under Product Catalog on this connection. Order imports keep running between its steps.')
+                        ->body($run->resumedFromPage !== null
+                            ? "It carries on from page {$run->resumedFromPage}, where the last sync stopped. Its progress is shown under Product Catalog on this connection."
+                            : 'Its progress is shown under Product Catalog on this connection. Order imports keep running between its steps.')
                         ->send();
                 }),
 

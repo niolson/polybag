@@ -1392,6 +1392,7 @@ class DataSourceForm
         $timezone = Location::timezone();
         $parts = [
             $run->label(),
+            ...($run->resumedFromPage !== null ? ["resumed at page {$run->resumedFromPage}"] : []),
             'started '.$run->startedAt->setTimezone($timezone)->format('M j, Y g:i A'),
         ];
 
@@ -1410,8 +1411,12 @@ class DataSourceForm
             $summary .= " {$run->error}";
         }
 
+        if ($run->canResume() && ! $run->isInterrupted()) {
+            $summary .= ' The next sync carries on from page '.($run->pages + 1).'.';
+        }
+
         if ($run->isInterrupted()) {
-            $summary .= ' The sync stopped without finishing. Products it saved are kept; a new sync can start.';
+            $summary .= ' The sync stopped without finishing. Products it saved are kept; a new sync carries on from where it stopped.';
         }
 
         return ($unavailable ?? '').$summary;
