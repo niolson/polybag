@@ -119,7 +119,8 @@ function amazonCatalogListings(int $count, string $from = '2026-01-01T00:00:00Z'
  * include their endpoint, at full precision; oldest first; 20 to a page; at
  * most 1,000 to a search. `numberOfResults` is the window's true total,
  * unless `$reportsTotal` is off or `$totalFor` gives one for the window.
- * Each request is recorded. A page token not issued is refused.
+ * Each request is recorded. A page token not issued is refused as invalid,
+ * and one `$tokenExpired` says has expired is refused as expired.
  *
  * @param  list<array<string, mixed>>  $listings
  * @param  list<array<string, mixed>>  $requests
@@ -127,6 +128,7 @@ function amazonCatalogListings(int $count, string $from = '2026-01-01T00:00:00Z'
  * @param  (Closure(array<string, mixed>): void)|null  $beforeAnswer  called with each request's query
  * @param  array<string, array<string, mixed>>  $catalog  catalog items by ASIN
  * @param  list<array<string, mixed>>  $catalogRequests
+ * @param  (Closure(string): bool)|null  $tokenExpired  whether a page token has expired, asked each time one is used
  */
 function fakeAmazonCatalog(
     array $listings,
@@ -136,11 +138,12 @@ function fakeAmazonCatalog(
     ?Closure $beforeAnswer = null,
     array $catalog = [],
     array &$catalogRequests = [],
+    ?Closure $tokenExpired = null,
 ): void {
     usort($listings, fn (array $a, array $b): int => strcmp($a['summaries'][0]['createdDate'], $b['summaries'][0]['createdDate']));
 
     Saloon::fake([
-        SearchListingsItems::class => function (PendingRequest $pendingRequest) use ($listings, &$requests, $reportsTotal, $totalFor, $beforeAnswer): MockResponse {
+        SearchListingsItems::class => function (PendingRequest $pendingRequest) use ($listings, &$requests, $reportsTotal, $totalFor, $beforeAnswer, $tokenExpired): MockResponse {
             $query = $pendingRequest->query()->all();
             $requests[] = $query;
 
@@ -159,8 +162,13 @@ function fakeAmazonCatalog(
             $offset = 0;
 
             if (isset($query['pageToken'])) {
+                // As Amazon answered in production, 2026-10-28.
                 if (preg_match('/^synthetic-token-(\d+)$/', $query['pageToken'], $matches) !== 1) {
-                    return MockResponse::make(['errors' => [['code' => 'InvalidInput', 'message' => 'Could not match input arguments', 'details' => '']]], 400);
+                    return MockResponse::make(['errors' => [['code' => 'InvalidInput', 'message' => "Invalid 'pageToken' provided.", 'details' => '']]], 400);
+                }
+
+                if ($tokenExpired !== null && $tokenExpired($query['pageToken'])) {
+                    return MockResponse::make(['errors' => [['code' => 'InvalidInput', 'message' => "Expired 'pageToken' provided.", 'details' => '']]], 400);
                 }
 
                 $offset = (int) $matches[1];
@@ -381,7 +389,7 @@ describe('listings', function (): void {
             ->and(Product::where('sku', 'SYN-151')->value('weight'))->toBeNull();
     });
 
-    it('fails the run, to start over, when Amazon refuses a page token', function (): void {
+    it('fails the run, to start over, when Amazon cannot read a page token', function (): void {
         $dataSource = amazonCatalogConnection();
         $requests = [];
         fakeAmazonCatalog(amazonCatalogListings(25), $requests);
@@ -390,20 +398,71 @@ describe('listings', function (): void {
         $run = $runs->start($dataSource);
         $cursor = new AmazonListingsCursor(
             [CarbonImmutable::parse('1999-01-01T00:00:00Z')->getTimestamp(), CarbonImmutable::parse(AMAZON_CATALOG_NOW)->getTimestamp()],
-            pageToken: 'expired-token',
+            pageToken: 'not-a-token',
             fetched: 20,
         );
         $runs->update($dataSource, $run->runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage(20, 0, 0, $cursor->toString()));
 
         expect(fn () => app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))
-            ->toThrow(RuntimeException::class, 'Amazon refused the search for listings created 1999-01-01 00:00:00 to 2026-10-28 00:00:00 UTC (Could not match input arguments). The next sync starts from the beginning.');
+            ->toThrow(RuntimeException::class, "Amazon refused the search for listings created 1999-01-01 00:00:00 to 2026-10-28 00:00:00 UTC (Invalid 'pageToken' provided.). The next sync starts from the beginning.");
 
         $failed = amazonCatalogRun($dataSource);
 
         expect($failed->status)->toBe(ProductCatalogSyncStatus::Failed)
             ->and($failed->startOver)->toBeTrue()
             ->and($failed->canResume())->toBeFalse()
-            ->and(collect($requests)->pluck('pageToken')->all())->toBe(['expired-token']);
+            ->and(collect($requests)->pluck('pageToken')->all())->toBe(['not-a-token']);
+    });
+
+    it('reads a window again from its start when its page token expired between slices, counting each SKU created once', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $requests = [];
+        $expiredOnce = false;
+
+        fakeAmazonCatalog(amazonCatalogListings(25), $requests,
+            // The first page is the last of its slice.
+            beforeAnswer: function (array $query): void {
+                if (! isset($query['pageToken']) && count(Product::all()) === 0) {
+                    Carbon::setTestNow(now()->addSeconds(ProductCatalogSyncTiming::SLICE_SECONDS + 1));
+                }
+            },
+            // By the next slice, the token has expired.
+            tokenExpired: function (string $token) use (&$expiredOnce): bool {
+                if ($expiredOnce) {
+                    return false;
+                }
+
+                return $expiredOnce = true;
+            });
+
+        $run = app(ProductCatalogSyncRuns::class)->start($dataSource);
+
+        expect(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toBeTrue()
+            ->and(amazonCatalogRun($dataSource)->created)->toBe(20)
+            ->and(app(ProductCatalogSync::class)->runSlice($dataSource->fresh(), $run->runId))->toBeFalse();
+
+        $finished = amazonCatalogRun($dataSource);
+
+        expect($finished->status)->toBe(ProductCatalogSyncStatus::Complete)
+            ->and($finished->created)->toBe(25)
+            ->and($finished->unchanged)->toBe(20)
+            ->and(Product::count())->toBe(25)
+            ->and(collect($requests)->pluck('pageToken')->all())->toBe([null, 'synthetic-token-20', null, 'synthetic-token-20']);
+    });
+
+    it('fails the run, to start over, when a token of a window already read again expires too', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $requests = [];
+        fakeAmazonCatalog(amazonCatalogListings(25), $requests, tokenExpired: fn (string $token): bool => true);
+
+        expect(fn (): string => amazonSyncCatalog($dataSource))
+            ->toThrow(RuntimeException::class, "Amazon's page token for listings created 1999-01-01 00:00:00 to 2026-10-28 00:00:00 UTC expired again after the window was read from its start. The next sync starts from the beginning.");
+
+        $failed = amazonCatalogRun($dataSource);
+
+        expect($failed->status)->toBe(ProductCatalogSyncStatus::Failed)
+            ->and($failed->startOver)->toBeTrue()
+            ->and(collect($requests)->pluck('pageToken')->all())->toBe([null, 'synthetic-token-20', null, 'synthetic-token-20']);
     });
 });
 

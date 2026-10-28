@@ -43,6 +43,13 @@ class AmazonListingCatalog
     /** The heaviest parcel the direct carriers accept. A heavier listing weight is freight, or wrong. */
     public const MAX_POUNDS = 150.0;
 
+    /**
+     * What Amazon answers, with a 400, for a page token past its lifetime
+     * (production, 2026-10-28). Matched exactly: a token it cannot read at
+     * all is answered "Invalid 'pageToken' provided." and starts over.
+     */
+    private const EXPIRED_PAGE_TOKEN = "Expired 'pageToken' provided.";
+
     /** Before any third-party listing on Amazon. */
     private const EARLIEST = '1999-01-01T00:00:00Z';
 
@@ -66,7 +73,7 @@ class AmazonListingCatalog
      *
      * @return Generator<int, ProductCatalogPage>
      *
-     * @throws CatalogReadMustStartOver when Amazon refuses a search: its window or page token came from the cursor, so the next sync starts over
+     * @throws CatalogReadMustStartOver when Amazon refuses a search: its window or page token came from the cursor, so the next sync starts over. An expired page token instead reads its window again, once.
      */
     public function pages(?string $cursor): Generator
     {
@@ -76,6 +83,13 @@ class AmazonListingCatalog
 
         while (true) {
             $json = $this->search($position);
+
+            if ($json === null) {
+                $position = $this->restartWindowAfterExpiredToken($position);
+
+                continue;
+            }
+
             $listings = array_values(array_filter($json['items'] ?? [], is_array(...)));
             $total = is_int($json['numberOfResults'] ?? null) ? $json['numberOfResults'] : null;
             $unreadParts = [];
@@ -154,11 +168,42 @@ class AmazonListingCatalog
     }
 
     /**
-     * One search of the window in hand.
+     * The window in hand again from its first page, after Amazon called its
+     * page token expired: a slice can wait hours behind order imports, longer
+     * than a token lives (between 15 minutes and 6 days, `product-catalog-sync/04`).
+     * Only that window is read again, not the run.
      *
-     * @return array<string, mixed>
+     * Listings the window already wrote come back and are written again.
+     * They already have Products, so `productIdFor()` reports them unchanged
+     * (or updated), never created: the run's created count holds each SKU
+     * once, while its unchanged count includes the re-read. The skip list
+     * from the previous window is kept; the tail is rebuilt by the re-read.
+     *
+     * @throws CatalogReadMustStartOver when the window was already restarted and a token expired again
      */
-    private function search(AmazonListingsCursor $position): array
+    private function restartWindowAfterExpiredToken(AmazonListingsCursor $position): AmazonListingsCursor
+    {
+        $window = self::describeWindow($position->from(), $position->to());
+
+        if ($position->restarted) {
+            throw new CatalogReadMustStartOver("Amazon's page token for {$window} expired again after the window was read from its start. The next sync starts from the beginning.");
+        }
+
+        Log::info('An Amazon listings page token expired; reading its window again from the start', [
+            'window' => $window,
+            'fetched' => $position->fetched,
+        ]);
+
+        return $position->restartWindow();
+    }
+
+    /**
+     * One search of the window in hand; null when Amazon calls its page token
+     * expired.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function search(AmazonListingsCursor $position): ?array
     {
         $window = self::describeWindow($position->from(), $position->to());
 
@@ -187,9 +232,13 @@ class AmazonListingCatalog
             'errors' => $response->json('errors'),
         ]);
 
+        if ($response->status() === 400 && $position->pageToken !== null && $error === self::EXPIRED_PAGE_TOKEN) {
+            return null;
+        }
+
         // The window and page token came from the saved cursor, so a request
-        // Amazon calls invalid (an expired page token among them) would be
-        // invalid again on a resume.
+        // Amazon calls invalid (a page token it cannot read among them) would
+        // be invalid again on a resume.
         if ($response->status() === 400) {
             throw new CatalogReadMustStartOver("Amazon refused the search for {$window} ({$error}). The next sync starts from the beginning.");
         }

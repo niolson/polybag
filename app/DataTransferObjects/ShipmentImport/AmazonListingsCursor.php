@@ -30,6 +30,7 @@ final readonly class AmazonListingsCursor
      * @param  list<string>  $skip  SKUs already synced from the window's first second, which the previous window also returned
      * @param  ?int  $tailSecond  the latest creation second the window in hand has returned
      * @param  list<string>  $tailSkus  the SKUs created in that second
+     * @param  bool  $restarted  whether the window in hand was read again from its start after its page token expired
      */
     public function __construct(
         public array $bounds,
@@ -38,6 +39,7 @@ final readonly class AmazonListingsCursor
         public array $skip = [],
         public ?int $tailSecond = null,
         public array $tailSkus = [],
+        public bool $restarted = false,
     ) {}
 
     /** One window over the whole of `[$from, $to]`. */
@@ -65,6 +67,7 @@ final readonly class AmazonListingsCursor
             skip: self::skus($data['s'] ?? []),
             tailSecond: is_int($data['ls'] ?? null) ? $data['ls'] : null,
             tailSkus: self::skus($data['lk'] ?? []),
+            restarted: ($data['r'] ?? false) === true,
         );
     }
 
@@ -77,7 +80,8 @@ final readonly class AmazonListingsCursor
             's' => $this->skip,
             'ls' => $this->tailSecond,
             'lk' => $this->tailSkus,
-        ], fn (mixed $value): bool => $value !== null && $value !== [] && $value !== 0), JSON_UNESCAPED_SLASHES);
+            'r' => $this->restarted,
+        ], fn (mixed $value): bool => $value !== null && $value !== [] && $value !== 0 && $value !== false), JSON_UNESCAPED_SLASHES);
     }
 
     /** The start of the window in hand. */
@@ -114,7 +118,16 @@ final readonly class AmazonListingsCursor
      */
     public function nextPage(string $pageToken, int $fetched, ?int $tailSecond, array $tailSkus): self
     {
-        return new self($this->bounds, $pageToken, $fetched, $this->skip, $tailSecond, $tailSkus);
+        return new self($this->bounds, $pageToken, $fetched, $this->skip, $tailSecond, $tailSkus, $this->restarted);
+    }
+
+    /**
+     * The window in hand from its first page again, keeping what it skips
+     * from the previous window: for a page token Amazon calls expired.
+     */
+    public function restartWindow(): self
+    {
+        return new self($this->bounds, skip: $this->skip, restarted: true);
     }
 
     /**
