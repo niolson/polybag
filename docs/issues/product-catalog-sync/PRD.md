@@ -144,7 +144,7 @@ account took 1,277 calls in 11.5 minutes at 2 per second.
 
 From each listing: `sku`, `name` from the summary's `itemName`, the ASIN, and the weight.
 Attribute values are lists. Take the entry for the connection's marketplace, else the
-first. Then the existing catalog lookup runs over the synced SKUs under
+first. Then the existing catalog lookup runs over the synced SKUs, filling blanks only, under
 `asinsNeedingCatalogLookup()`'s rule as it stands: missing barcode **or** part number, and
 not checked within the recheck window.
 
@@ -196,7 +196,11 @@ No listing weight in `03` came near it.
   overwriting it with "Product - Variant" would flip the name on every import and sync.
   `identifiers_checked_at` is bookkeeping, not data, and always updates, or an expired
   look-up could never be renewed and the catalog would be asked again on every run.
-  *(Revised 2026-10-28: the sync first filled blanks only.)*
+  *(Revised 2026-10-28: the sync first filled blanks only.)* Amazon's **catalog look-up**
+  is not the seller's data but Amazon's shared record, and about one in five of its part
+  numbers is really the UPC (`03`), so its barcode and part number only fill blanks, as
+  in the order import. The rule above covers what the seller's listing provides: weight,
+  and the name. *(Decided in `04`.)*
 - **Search indexing.** The sync saves inside `Product::withoutSyncingToSearch()` and, after
   each page commits, queues index updates for that page's Products on the `low` queue. A
   run that fails partway leaves everything saved so far searchable. Search may lag by
@@ -242,7 +246,7 @@ not fixed here:
 | [01](issues/01-make-products-unique-by-sku.md) | Make Products unique by client and SKU | `done` | — |
 | [02](issues/02-sync-a-shopify-product-catalog.md) | Sync a Shopify product catalog | `done` | `01` |
 | [03](issues/03-probe-amazon-listings-for-weights-and-customs-fields.md) | Probe Amazon listings for weights and customs fields | `done` | — |
-| [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `ready-for-agent` | `01`, `02` |
+| [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `done` | `01`, `02` |
 | [05](issues/05-suggest-hs-codes.md) | Suggest HS codes for Products without one | `needs-triage` | — |
 
 About four to five days for `01`–`04`. `05` is unsized.

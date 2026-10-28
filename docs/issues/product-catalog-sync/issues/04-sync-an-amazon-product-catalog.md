@@ -1,6 +1,6 @@
 # Sync an Amazon product catalog
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -81,38 +81,47 @@ barcode **or** a part number, and whose `identifiers_checked_at` is older than
 `CATALOG_RECHECK_DAYS`. Extract that rule so the order import and the sync share it.
 `identifiers_checked_at` updates on every answered look-up and is never fill-only.
 
-**Overwrite rule, slices, indexing, run status:** as `02`. Amazon's non-blank values
-overwrite PolyBag's, and the name is written only where a Product has none. The sync runs
+**The catalog look-up only fills blanks.** The catalog is Amazon's shared record of a
+product, not the seller's data, and *(from `03`)* about one in five of its part numbers is
+really the UPC. So, as in the order import, its barcode and `manufacturer_part_number` are
+written only where a Product has none. Only what the seller's own listing provides follows
+`02`'s overwrite rule. *(Decided 2026-10-28.)*
+
+**Overwrite rule, slices, indexing, run status:** as `02`, for what the listing provides.
+A listing's non-blank weight overwrites PolyBag's, and the name is written only where a
+Product has none; the catalog look-up fills blanks only (above). The sync runs
 as `02`'s chain of short jobs, so the remaining date windows, the window in hand and its
 `nextToken` have to fit in the run's cursor string, and a token Amazon no longer accepts
 fails the run rather than starting over.
 
 ## Acceptance criteria
 
-- [ ] Fake listings pages with `nextToken` create a Product per SKU, with name and weight
-- [ ] Weight prefers `item_package_weight`, falls back to `item_weight`, converts each
+- [x] Fake listings pages with `nextToken` create a Product per SKU, with name and weight
+- [x] Weight prefers `item_package_weight`, falls back to `item_weight`, converts each
       unit, and skips unknown units, values that are not positive, and values over the
       ceiling
-- [ ] A window whose first page reports `numberOfResults` of 1,000 or more is split
+- [x] A window whose first page reports `numberOfResults` of 1,000 or more is split
       without fetching its second page, and both halves are fetched; more than 1,000
       listings in total are all synced; a one-second window at the cap ends the run
       `incomplete` and names the window
-- [ ] A first page with no `numberOfResults` is paged, and 1,000 fetched splits the window
-- [ ] A listing created exactly on a split boundary is synced once and counted once
-- [ ] A listing created a fraction of a second after a split boundary (for example
+- [x] A first page with no `numberOfResults` is paged, and 1,000 fetched splits the window
+      (at the last second reached, not the middle: see the 2026-10-28 comment)
+- [x] A listing created exactly on a split boundary is synced once and counted once
+- [x] A listing created a fraction of a second after a split boundary (for example
       `m + 0.500s`) is synced
-- [ ] A listing whose summary status is not `BUYABLE` is synced
-- [ ] A weight of 151 lb is skipped; one of 150 lb is kept
-- [ ] The listing sync queues the catalog look-up job; a failed look-up leaves
+- [x] A listing whose summary status is not `BUYABLE` is synced
+- [x] A weight of 151 lb is skipped; one of 150 lb is kept
+- [x] The listing sync queues the catalog look-up job; a failed look-up leaves
       `identifiers_checked_at` unchanged and the listing run's outcome unchanged
-- [ ] The catalog step looks up a SKU missing only its part number, and one missing only
+- [x] The catalog step looks up a SKU missing only its part number, and one missing only
       its barcode, and skips one checked within the recheck window
-- [ ] A Product whose `identifiers_checked_at` has expired is looked up and the stamp moves
+- [x] A Product whose `identifiers_checked_at` has expired is looked up and the stamp moves
       forward
-- [ ] A listing's non-blank weight overwrites a Product's; a listing with no weight, and a
+- [x] A listing's non-blank weight overwrites a Product's; a listing with no weight, and a
       catalog look-up with no part number, leave the Product's value
-- [ ] A manual connection does not show the action
-- [ ] Fixtures use synthetic SKUs, ASINs and seller IDs
+- [x] The catalog look-up fills a blank barcode and part number and never replaces one
+- [x] A manual connection does not show the action
+- [x] Fixtures use synthetic SKUs, ASINs and seller IDs
 
 ## Comments
 
@@ -121,3 +130,53 @@ report path and its comma-SKU handling are removed: the report is allowed but mi
 recent listings. Windows split from the first page's `numberOfResults`. The ceiling is
 150 lb. No customs fields are read. The catalog look-up became its own job, because
 listings and catalog together took about 28 minutes on a 30k-SKU account.
+
+**Done 2026-10-28.** `AmazonSource` implements `SyncsProductCatalog` through
+`AmazonListingCatalog`, and `02`'s sync, job, run and action are reused unchanged in shape.
+
+- **The cursor** (`AmazonListingsCursor`, JSON in the run's cursor string): the windows
+  still to read are stored as their boundaries alone, since depth-first, oldest-first
+  splitting keeps them contiguous (a few dozen at most); then the window's page token,
+  how many it has fetched, and its *tail*, the SKUs created in the latest second it has
+  returned. The next window skips the tail's SKUs when it starts on that second, so a
+  listing on a shared boundary is synced and counted once, across slices too. That is
+  the only dedup state, bounded by one second's listings. `03`'s captures show why it is
+  enough: all 205 repeats were created exactly on the boundary (`.000Z`), and 94 listings
+  a fraction after one came back only from the later window.
+- **No `numberOfResults`:** the window is paged, and at 1,000 fetched it carries on from
+  the last second reached (`[t, b]`, skipping the tail) rather than halving. Halving
+  would re-read up to 1,000 listings already written and count them twice. If all 1,000
+  sit in the window's first second, that second is recorded unread and the read carries
+  on after it.
+- **Incomplete:** a page names any window it passed over; the run keeps the first ten and
+  a count, finishes `incomplete` with them as *Not read*, and is not resumed.
+- **A refused search:** any 400 fails the run through `CatalogReadMustStartOver`, since
+  its window and token came from the cursor; other failures resume. A probe on 2026-10-28
+  could not show how Amazon answers an expired token (below).
+- **Pacing:** `AmazonRequestPacer` is `sendCatalogRequest()`'s pacing and 429 retry,
+  generalized per request class: each paces from its own `x-amzn-RateLimit-Limit`
+  (defaults 5 for listings, 2 for catalog). The order import's catalog look-up moved to
+  `AmazonCatalogIdentifiers` with `asinsNeedingLookup()`, the rule both paths share; the
+  order import's tests pass unedited.
+- **The look-up job** (`LookUpAmazonCatalogIdentifiersJob`, `AmazonCatalogLookups`): each
+  listings page records its SKUs and ASINs in `amazon_catalog_lookups` inside the page's
+  transaction, through a `FollowsUpProductCatalogSync` hook; a finished run queues the job.
+  Its slices take 100 ASINs at a time, apply the rule, ask the catalog 20 at a time, write
+  through `productIdFor()` (existing Products only, barcode and part number fill-only),
+  and delete the rows. The rows are the only record of work left, so a second look-up of
+  the connection finds only what is undone, and an overlap lock of its own
+  (`amazon-catalog-lookup:{id}`) keeps two slices off the same rows. A failed request is
+  logged and its rows dropped; the stamp is untouched, so the next sync asks again.
+- **Availability:** the action needs an OAuth connection with a seller ID and a
+  marketplace; otherwise it is hidden and *Product Catalog* says what to do. A connection
+  connected through OAuth is offered the sync once, as Shopify is. The read does not
+  require MFA, which the order import requires for buyer data; listings carry none.
+- The first window runs from 1999-01-01 to the run's start.
+
+*Probe, 2026-10-28.* Ten read-only calls on the production probe connection, raw responses
+in `.scratch/product-catalog-sync/raw/04-tokens/`. Every `searchListingsItems` call,
+including the exact request that succeeded on 10-22 and one with only `marketplaceIds`,
+was answered `400 InvalidInput` "Could not match input arguments". The account has
+changed since `03`, so the response to an expired page token is still unknown; a
+garbage token gets the same 400.
+
