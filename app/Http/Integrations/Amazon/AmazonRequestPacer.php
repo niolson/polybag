@@ -2,6 +2,7 @@
 
 namespace App\Http\Integrations\Amazon;
 
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Sleep;
 use RuntimeException;
 use Saloon\Http\Request;
@@ -13,11 +14,18 @@ use Saloon\Http\Response;
  * lookup's own pacing).
  *
  * Each request class is paced on its own: the first request of a class is
- * sent at once, and each later one waits one interval at the rate the last
- * answer's `x-amzn-RateLimit-Limit` gave (the request's default until one
- * does). A 429 waits for its `Retry-After`, else doubles the interval, up to
- * {@see MAX_ATTEMPTS} attempts; the last answer is returned whatever it is.
- * One pacer is one run: a new run starts with no request sent.
+ * sent at once, and each later one is sent no sooner than one interval, at
+ * the rate the last answer's `x-amzn-RateLimit-Limit` gave (the request's
+ * default until one does), after the previous one *started*. A request that
+ * took longer than the interval is followed at once, so latency is not paid
+ * on top of the interval (`product-catalog-sync/04`: waiting a full interval
+ * after each answer made a 29,728-SKU catalog look-up about 65% slower than
+ * its rate allows). A 429 waits for its `Retry-After`, else doubles the
+ * interval, up to {@see MAX_ATTEMPTS} attempts; the last answer is returned
+ * whatever it is. One pacer is one run: a new run starts with no request
+ * sent.
+ *
+ * Time is read from Carbon, so a test can move it.
  */
 class AmazonRequestPacer
 {
@@ -26,8 +34,8 @@ class AmazonRequestPacer
     /** @var array<class-string<Request>, float> requests per second, by request class */
     private array $rates = [];
 
-    /** @var array<class-string<Request>, true> */
-    private array $sent = [];
+    /** @var array<class-string<Request>, float> when the last request of each class started, in milliseconds */
+    private array $startedAt = [];
 
     public function __construct(private readonly AmazonSpApiConnector $connector) {}
 
@@ -41,11 +49,16 @@ class AmazonRequestPacer
         $retryDelayMilliseconds = null;
 
         for ($attempt = 1; $attempt <= self::MAX_ATTEMPTS; $attempt++) {
-            if (isset($this->sent[$operation])) {
-                Sleep::for($retryDelayMilliseconds ?? $this->intervalMilliseconds($operation))->milliseconds();
+            if (isset($this->startedAt[$operation])) {
+                $waitMilliseconds = $retryDelayMilliseconds
+                    ?? (int) ceil($this->intervalMilliseconds($operation) - (self::nowMilliseconds() - $this->startedAt[$operation]));
+
+                if ($waitMilliseconds > 0) {
+                    Sleep::for($waitMilliseconds)->milliseconds();
+                }
             }
 
-            $this->sent[$operation] = true;
+            $this->startedAt[$operation] = self::nowMilliseconds();
             $response = $this->connector->send($request);
             $this->updateRate($operation, $response);
 
@@ -57,6 +70,11 @@ class AmazonRequestPacer
         }
 
         throw new RuntimeException('Amazon request retry loop ended unexpectedly.');
+    }
+
+    private static function nowMilliseconds(): float
+    {
+        return (float) CarbonImmutable::now()->getPreciseTimestamp(3);
     }
 
     /**
