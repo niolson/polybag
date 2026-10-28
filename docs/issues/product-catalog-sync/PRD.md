@@ -56,11 +56,12 @@ each sync is started by hand.
   (`product-identifier-import/03`) and `inventoryItem { harmonizedSystemCode
   countryCodeOfOrigin }` (`product-identifier-import/04`). The import already requires
   `read_products` (`product-identifier-import/02`).
-- **Amazon catalog lookup.** `AmazonSource` batches ASINs into `SearchCatalogItems` for
-  the barcode and part number. `asinsNeedingCatalogLookup()` decides which: an ASIN with
-  any SKU whose Product is missing a barcode **or** a part number and has not been
-  answered for within `CATALOG_RECHECK_DAYS` (`identifiers_checked_at`). Pacing and retry
-  live in `sendCatalogRequest()`.
+- **Amazon catalog lookup.** `AmazonCatalogIdentifiers` batches ASINs into
+  `SearchCatalogItems` for the barcode and part number.
+  `AmazonCatalogIdentifiers::asinsNeedingLookup()` decides which: an ASIN with any SKU
+  whose Product is missing a barcode **or** a part number and has not been answered for
+  within `RECHECK_DAYS` (`identifiers_checked_at`). Pacing and retry live in
+  `AmazonRequestPacer`. *(Moved out of `AmazonSource` in `04`.)*
 - **Amazon listings access.** The 2026-10-05 probe (`product-identifier-import/06`) called
   `searchListingsItems` with `includedData=attributes` on an OAuth connection: 33 calls,
   all 200. The app has the Product Listing role, and every OAuth connection stores the
@@ -145,7 +146,7 @@ account took 1,277 calls in 11.5 minutes at 2 per second.
 From each listing: `sku`, `name` from the summary's `itemName`, the ASIN, and the weight.
 Attribute values are lists. Take the entry for the connection's marketplace, else the
 first. Then the existing catalog lookup runs over the synced SKUs, filling blanks only, under
-`asinsNeedingCatalogLookup()`'s rule as it stands: missing barcode **or** part number, and
+`AmazonCatalogIdentifiers::asinsNeedingLookup()`'s rule: missing barcode **or** part number, and
 not checked within the recheck window.
 
 A manual (non-OAuth) connection has no seller ID, so the action is hidden, with a note

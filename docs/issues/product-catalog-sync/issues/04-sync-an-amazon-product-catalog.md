@@ -91,10 +91,10 @@ written only where a Product has none. Only what the seller's own listing provid
 A listing's non-blank weight overwrites PolyBag's, and the name is written only where a
 Product has none; the catalog look-up fills blanks only (above). The sync runs
 as `02`'s chain of short jobs, so the remaining date windows, the window in hand and its
-`nextToken` have to fit in the run's cursor string. A token Amazon calls expired reads the
-window in hand again from its start, once; any other token it refuses fails the run rather
-than starting over. *(Revised after the live run: a slice can wait longer than a token
-lives.)*
+`nextToken` have to fit in the run's cursor string. A token Amazon calls expired carries
+the read on from the last second the window reached; any other token it refuses fails the
+run rather than starting over. *(Revised after the live run: a slice can wait longer than
+a token lives.)*
 
 ## Acceptance criteria
 
@@ -123,8 +123,14 @@ lives.)*
       catalog look-up with no part number, leave the Product's value
 - [x] The catalog look-up fills a blank barcode and part number and never replaces one
 - [x] A manual connection does not show the action
-- [x] An expired page token mid-window reads that window again and the run completes,
-      counting each SKU created once; a second expiry in the same window fails the run
+- [x] An expired page token deep in a window carries on near where it stopped; two
+      expiries in a window, each after progress, still complete the run; an expiry with
+      no progress since the window was read again fails it
+- [x] A counted window is never paged past 1,000, and a window read again names an
+      unread second once
+- [x] The look-up keeps its rows and retries in a minute when Amazon cannot answer (5xx,
+      a 429 it kept sending, no answer), and drops them for a 4xx
+- [x] In sandbox mode the action is hidden, saying why, and the look-up asks nothing
 - [x] A request slower than the pacing interval is followed at once
 - [x] Fixtures use synthetic SKUs, ASINs and seller IDs
 
@@ -153,14 +159,19 @@ listings and catalog together took about 28 minutes on a 30k-SKU account.
   would re-read up to 1,000 listings already written and count them twice. If all 1,000
   sit in the window's first second, that second is recorded unread and the read carries
   on after it.
-- **Incomplete:** a page names any window it passed over; the run keeps the first ten and
-  a count, finishes `incomplete` with them as *Not read*, and is not resumed.
+- **Incomplete:** a page names any window it passed over, with the source's reason; the
+  run keeps the first ten and a count, finishes `incomplete` with them as *Not read*, and
+  is not resumed. A window read again after an expired token does not name its second
+  twice. No window is paged past 1,000, counted or not.
 - **A refused search:** Amazon answers an expired page token `400 InvalidInput` "Expired
   'pageToken' provided." (matched exactly). A slice can wait hours behind order imports,
-  longer than a token may live, so that reads the current window again from its first
-  page, within the run. The listings it already wrote come back as unchanged, so the
-  created count holds each SKU once; the unchanged count includes the re-read. A token in
-  a window already read again that expires too fails the run. Any other 400 (an
+  longer than a token may live, so the read carries on from the last second the window
+  reached (`[t, b]`, skipping that second's SKUs), as the no-total path does: nothing is
+  written twice, and each expiry moves the read forward, so it cannot loop. Only a window
+  that has returned nothing past its first second is read again from its start; what it
+  wrote comes back as unchanged, never created. A token expiring again with no progress
+  since then fails the run (review, 2026-10-28: re-reading a 50-page window could itself
+  outlast a token and throw away a 27-minute run). Any other 400 (an
   unreadable token is "Invalid 'pageToken' provided.") fails it through
   `CatalogReadMustStartOver`, since its window and token came from the cursor; other
   failures resume.
@@ -177,12 +188,24 @@ listings and catalog together took about 28 minutes on a 30k-SKU account.
   transaction, through a `FollowsUpProductCatalogSync` hook; a finished run queues the job.
   Its slices take 100 ASINs at a time, apply the rule, ask the catalog 20 at a time, write
   through `productIdFor()` (existing Products only, barcode and part number fill-only),
-  and delete the rows. The rows are the only record of work left, so a second look-up of
-  the connection finds only what is undone, and an overlap lock of its own
-  (`amazon-catalog-lookup:{id}`) keeps two slices off the same rows. A failed request is
-  logged and its rows dropped; the stamp is untouched, so the next sync asks again.
+  and delete the rows read, by ID, so a row a concurrent sync adds under the same ASIN
+  survives. The rows are the only record of work left, so a second look-up finds only
+  what is undone. The job is `ShouldBeUniqueUntilProcessing` per connection (released as
+  a slice starts, so its own continuation is not dropped, unlike a lock held while it
+  runs, `02`), with its own overlap lock (`amazon-catalog-lookup:{id}`), and retries a
+  deadlocked write. A failed request is logged and leaves the stamp alone. A 4xx other
+  than 429 drops its rows: the request was the problem. A 5xx, a 429 still sent after
+  the pacer's retries, or no answer at all (an LWA failure) keeps the rows, stops the
+  slice and queues the next a minute later; after ten such slices in a row the chain
+  stops, and the next sync's look-up carries on with the rows. The count is per chain,
+  in the job, not per row: a failure that outlasts ten minutes is Amazon's or the
+  connection's, and a column would only drop rows an outage had kept anyone from asking
+  about (review, 2026-10-28: dropping rows on every failure emptied the queue in an
+  outage).
 - **Availability:** the action needs an OAuth connection with a seller ID and a
-  marketplace; otherwise it is hidden and *Product Catalog* says what to do. A connection
+  marketplace, and Sandbox Mode off (the sandbox holds no seller's listings and answers
+  the search "Could not match input arguments"); otherwise it is hidden and *Product
+  Catalog* says what to do, and a queued look-up skips without asking. A connection
   connected through OAuth is offered the sync once, as Shopify is. The read does not
   require MFA, which the order import requires for buyer data; listings carry none.
 - The first window runs from 1999-01-01 to the run's start.
