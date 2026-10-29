@@ -84,3 +84,5 @@ Without the broker, the notice says to enter the store's own credentials instead
   (`$canCreateAnother = false`) instead of keeping it without the redirect.
 - 2026-10-29: Dropped the Marketplace field from a new Amazon connection that signs in
   through OAuth; discovery sets it.
+- 2026-10-29: Back from the consent screen now returns to the new connection's edit page,
+  fixed with `04`; see its comments.

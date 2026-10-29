@@ -134,7 +134,7 @@ class CarrierAccountForm
                     ->schema([
                         TextEntry::make('usps_oauth_status')
                             ->label('OAuth Status')
-                            ->state(fn (?CarrierAccount $record): HtmlString => static::renderAccountOauthStatus($record))
+                            ->state(fn (?CarrierAccount $record, Get $get): HtmlString => static::renderAccountOauthStatus($record, Carrier::USPS, $get('usps_adv_client_id')))
                             ->visible(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::USPS))
                             ->columnSpanFull(),
                         TextEntry::make('usps_pricing_tier')
@@ -178,7 +178,8 @@ class CarrierAccountForm
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('client_id')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->live(onBlur: true),
                         TextInput::make('usps_adv_client_secret')
                             ->label('Client Secret')
                             ->password()
@@ -304,7 +305,7 @@ class CarrierAccountForm
                     ->schema([
                         TextEntry::make('ups_oauth_status')
                             ->label('OAuth Status')
-                            ->state(fn (?CarrierAccount $record): HtmlString => static::renderAccountOauthStatus($record))
+                            ->state(fn (?CarrierAccount $record, Get $get): HtmlString => static::renderAccountOauthStatus($record, Carrier::UPS, $get('ups_adv_client_id')))
                             ->visible(fn (): bool => self::fields()->offersCarrierOAuth(Carrier::UPS))
                             ->columnSpanFull(),
                         TextInput::make('ups_account_number')
@@ -323,7 +324,8 @@ class CarrierAccountForm
                             ->password()
                             ->placeholder(fn (?CarrierAccount $record): string => filled($record?->secret('client_id')) ? 'Configured (leave empty to keep)' : 'Not configured')
                             ->afterStateHydrated(fn ($component) => $component->state(null))
-                            ->dehydrated(fn ($state): bool => filled($state)),
+                            ->dehydrated(fn ($state): bool => filled($state))
+                            ->live(onBlur: true),
                         TextInput::make('ups_adv_client_secret')
                             ->label('Client Secret')
                             ->password()
@@ -360,10 +362,23 @@ class CarrierAccountForm
         return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not accepted</span> — USPS DDP rates are not offered on this account until an Admin accepts the '.$link.' using the "Accept USPS DDP terms" action above.');
     }
 
-    private static function renderAccountOauthStatus(?CarrierAccount $record): HtmlString
+    /**
+     * On a new account, what creating it will do, by the same rule as the Create
+     * button and the redirect after it.
+     */
+    private static function renderAccountOauthStatus(?CarrierAccount $record, string $carrierName, ?string $ownClientId): HtmlString
     {
         if (! $record?->exists) {
-            return new HtmlString('<span class="text-gray-400 dark:text-gray-500">Save the account first, then connect via OAuth.</span>');
+            $oauth = app(OAuthService::class);
+
+            $message = match (true) {
+                $oauth->providerForNewCarrierAccount($carrierName, $ownClientId) !== null => "After you create this account you will be sent to {$carrierName} to authorize it, and brought back here.",
+                ! $oauth->isBrokerConfigured() => (string) $oauth->brokerlessGuidance("Enter your own {$carrierName} developer app credentials under Advanced / API App Credentials instead."),
+                filled($ownClientId) => 'This account will sign in with the client ID and secret entered under Advanced / API App Credentials.',
+                default => "The hosted OAuth connection issues production credentials only, so it cannot be used against the sandbox. Enter a {$carrierName} developer app's client ID and secret under Advanced / API App Credentials.",
+            };
+
+            return new HtmlString('<span class="text-gray-400 dark:text-gray-500">'.e($message).'</span>');
         }
 
         if (app(OAuthService::class)->isAccountConnected($record)) {

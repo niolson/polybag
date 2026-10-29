@@ -27,6 +27,9 @@ class OAuthCallbackController extends Controller
     {
         abort_unless($request->user()?->role->isAtLeast(Role::Admin), 403);
 
+        // The trip is over, so a create page no longer returns to the record it made.
+        session()->forget(OAuthService::AWAITING_RECORD_SESSION_KEY);
+
         $accountId = session()->pull("oauth_account_id.{$provider}");
         $account = $accountId ? CarrierAccount::find($accountId) : null;
 

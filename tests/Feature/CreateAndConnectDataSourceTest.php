@@ -211,3 +211,18 @@ it('asks for the Amazon marketplace without the broker', function (): void {
         ->call('create')
         ->assertHasFormErrors(['settings.marketplace_id' => 'required']);
 });
+
+it('returns to the new connection when the create page opens again before OAuth finishes', function (): void {
+    Livewire::test(CreateDataSource::class)
+        ->fillForm(newShopifyConnection())
+        ->call('create')
+        ->assertRedirectContains('/oauth/shopify/authorize?');
+
+    Livewire::test(CreateDataSource::class)
+        ->assertNotified('Shopify Store is not connected to Shopify yet.')
+        ->assertRedirect(DataSourceResource::getUrl('edit', [
+            'record' => DataSource::where('name', 'Shopify Store')->firstOrFail(),
+        ]));
+
+    Livewire::test(CreateDataSource::class)->assertNoRedirect();
+});

@@ -2,17 +2,68 @@
 
 namespace App\Filament\Resources\CarrierAccounts\Pages;
 
+use App\Filament\Concerns\ReturnsToRecordAwaitingOAuth;
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
+use App\Models\Carrier;
+use App\Models\CarrierAccount;
 use App\Models\CarrierAccountScope;
+use App\Services\OAuthService;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Database\Eloquent\Model;
+use RuntimeException;
 
 class CreateCarrierAccount extends CreateRecord
 {
+    use ReturnsToRecordAwaitingOAuth;
+
     protected static string $resource = CarrierAccountResource::class;
+
+    /**
+     * A new account is followed by its OAuth trip or its edit page, never a
+     * second blank form.
+     */
+    protected static bool $canCreateAnother = false;
 
     /** @var array<string, string> Secrets entered at create time, applied in afterCreate(). */
     private array $pendingSecrets = [];
+
+    public function mount(): void
+    {
+        parent::mount();
+
+        $this->returnToRecordAwaitingOAuth();
+    }
+
+    protected function isConnectedThroughOAuth(Model $record): bool
+    {
+        return $record instanceof CarrierAccount && app(OAuthService::class)->isAccountConnected($record);
+    }
+
+    /**
+     * Names the OAuth trip when creating leads into one.
+     */
+    protected function getCreateFormAction(): Action
+    {
+        $action = parent::getCreateFormAction();
+        $default = $action->getLabel();
+
+        return $action->label(function () use ($default): string {
+            $carrierName = filled($this->data['carrier_id'] ?? null)
+                ? Carrier::whereKey($this->data['carrier_id'])->value('name')
+                : null;
+            $ownClientId = match ($carrierName) {
+                Carrier::USPS => $this->data['usps_adv_client_id'] ?? null,
+                Carrier::UPS => $this->data['ups_adv_client_id'] ?? null,
+                default => null,
+            };
+
+            return app(OAuthService::class)->providerForNewCarrierAccount($carrierName, $ownClientId) === null
+                ? $default
+                : "Create & connect {$carrierName}";
+        });
+    }
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
@@ -84,5 +135,45 @@ class CreateCarrierAccount extends CreateRecord
                 ->persistent()
                 ->send();
         }
+    }
+
+    /**
+     * A USPS or UPS account that signs in through OAuth goes straight to the
+     * carrier's consent screen; the callback returns to its edit page, where a
+     * notification sent here, such as the global-scope warning, is shown. If
+     * OAuth cannot start, the account is kept and the edit page says why.
+     */
+    protected function getRedirectUrl(): string
+    {
+        $record = $this->getRecord();
+        $editUrl = CarrierAccountResource::getUrl('edit', ['record' => $record]);
+
+        if (! $record instanceof CarrierAccount) {
+            return $editUrl;
+        }
+
+        $carrierName = $record->carrier?->name;
+        $oauth = app(OAuthService::class);
+        $provider = $oauth->providerForNewCarrierAccount($carrierName, $record->secret('client_id'));
+
+        if ($provider === null) {
+            return $editUrl;
+        }
+
+        try {
+            $url = $oauth->initiateAuthorization($provider, $record->id);
+        } catch (RuntimeException $e) {
+            Notification::make()
+                ->danger()
+                ->title("Cannot connect {$carrierName}")
+                ->body($e->getMessage())
+                ->send();
+
+            return $editUrl;
+        }
+
+        $this->rememberRecordAwaitingOAuth($record, (string) $carrierName);
+
+        return $url;
     }
 }
