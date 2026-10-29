@@ -8,8 +8,9 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), *Goal*. Not blocked. `03` found no HS code anywhere in Amazon's listings
-or catalog, so every Amazon Product needs one from elsewhere.
+None: a feature of its own. It started as `product-catalog-sync/05` and moved out on
+2026-10-29 (see *Comments*). Not blocked. `product-catalog-sync/03` found no HS code
+anywhere in Amazon's listings or catalog, so every Amazon Product needs one from elsewhere.
 
 ## Problem
 
@@ -56,7 +57,7 @@ hand before its first EU or GB parcel.
   keystroke. Whatever does the suggesting, this checks what is accepted and shows what it
   means.
 
-- **Amazon's UNSPSC code**, as an input, not an answer. `03` found the catalog's
+- **Amazon's UNSPSC code**, as an input, not an answer. `product-catalog-sync/03` found the catalog's
   `unspsc_code` filled on 98% of one seller's 22,950 ASINs, and on 99–100% in every
   display group of a 5,574-ASIN sample across categories. Codes are mostly class level
   (60%) or commodity level (36%), and consistent within a product kind: men's t-shirts
@@ -74,7 +75,11 @@ For each: inputs (title, description, category, image?), output (6-digit HS, or 
 A suggestion is not a declaration. Whatever the source, a suggested code should be shown
 for a person to accept, never written straight into `hs_tariff_number`: a wrong code on a
 customs declaration is the seller's liability. That points to a *Suggest HS code* action
-on the Products page (and a bulk action under `02`'s *Incomplete Customs Data* filter), storing the
+on the Products page (and a bulk action under the *Incomplete Customs Data* filter from `product-catalog-sync/02`), storing the
 suggestion and its source until someone accepts it.
 
 ## Comments
+
+**Moved 2026-10-29.** Filed as `product-catalog-sync/05`. Suggesting HS codes is a separate
+feature, not part of bringing a catalog in, and nothing in that sync waits on it. So it
+moved to its own directory, and `product-catalog-sync` was archived with `01`–`04` done.
