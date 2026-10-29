@@ -57,7 +57,7 @@ docker compose --profile standalone -f docker-compose.yml -f docker-compose.onpr
 | `app` | PHP 8.4-FPM. Entrypoint: wait for DB → migrate → sync reference data → attempt table encryption → optimize → php-fpm |
 | `nginx` | Serves static assets, proxies PHP to `app:9000` |
 | `queue` | `queue:work --queue=default,low` with its own config cache |
-| `import-queue` | `queue:work imports` — shipment imports, and product catalog syncs in one-minute slices that take turns with them, run on their own queue |
+| `import-queue` | `queue:work imports` — shipment imports, and product catalog syncs (and Amazon's catalog look-up after one) in one-minute slices that take turns with them, run on their own queue |
 | `label-queue` | `queue:work --queue=labels` — Batch Ship's label purchases, `LABEL_WORKERS` processes (default 2) |
 | `scheduler` | `schedule:work` |
 | `mysql`, `redis` | Started only by `--profile standalone` |

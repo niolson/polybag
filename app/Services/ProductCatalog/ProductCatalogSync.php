@@ -2,6 +2,7 @@
 
 namespace App\Services\ProductCatalog;
 
+use App\Contracts\FollowsUpProductCatalogSync;
 use App\Contracts\SyncsProductCatalog;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
@@ -127,8 +128,8 @@ class ProductCatalogSync
             }
 
             foreach ($source->fetchProductCatalogPages($run->cursor) as $page) {
-                $productIds = $this->writePage($dataSource, $runId, $page);
-                $this->queueIndexing($productIds);
+                $productIds = $this->writePage($dataSource, $runId, $page, $source);
+                self::queueIndexing($productIds);
 
                 if ($page->nextCursor === null) {
                     break;
@@ -149,7 +150,20 @@ class ProductCatalogSync
             throw $e;
         }
 
-        $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->finish(ProductCatalogSyncStatus::Complete));
+        $finished = $this->runs->update($dataSource, $runId, fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->finishReading());
+
+        if ($finished !== null && $source instanceof FollowsUpProductCatalogSync) {
+            try {
+                $source->productCatalogSyncFinished($dataSource, $finished);
+            } catch (Throwable $e) {
+                // The run's status is what it read; what follows it is reported on its own.
+                Log::warning('Could not start what follows a product catalog sync', [
+                    'data_source_id' => $dataSource->id,
+                    'run_id' => $runId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
 
         return false;
     }
@@ -161,20 +175,24 @@ class ProductCatalogSync
      *
      * @return list<int> the Products written
      */
-    private function writePage(DataSource $dataSource, string $runId, ProductCatalogPage $page): array
+    private function writePage(DataSource $dataSource, string $runId, ProductCatalogPage $page, SyncsProductCatalog $source): array
     {
         // Product rows are locked before the connection's row, the reverse of
         // an order import; with more than one import worker the two can
         // deadlock. The page is idempotent, so a deadlock retries it.
-        return DB::transaction(function () use ($dataSource, $runId, $page): array {
+        return DB::transaction(function () use ($dataSource, $runId, $page, $source): array {
             [$productIds, $created, $updated, $unchanged] = Product::withoutSyncingToSearch(
                 fn (): array => $this->writeItems($page, $dataSource->client),
             );
 
+            if ($source instanceof FollowsUpProductCatalogSync) {
+                $source->productCatalogPageWritten($dataSource, $page);
+            }
+
             $run = $this->runs->update(
                 $dataSource,
                 $runId,
-                fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor),
+                fn (ProductCatalogSyncRun $current): ProductCatalogSyncRun => $current->withPage($created, $updated, $unchanged, $page->nextCursor, $page->unreadParts, $page->unreadReason),
             ) ?? throw new ProductCatalogSyncSuperseded;
 
             Log::info('Saved a page of a product catalog', [
@@ -223,7 +241,7 @@ class ProductCatalogSync
      *
      * @param  list<int>  $productIds
      */
-    private function queueIndexing(array $productIds): void
+    public static function queueIndexing(array $productIds): void
     {
         if ($productIds === []) {
             return;

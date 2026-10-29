@@ -1564,6 +1564,9 @@ it('preserves an existing buyer email when Amazon omits buyer data', function ()
 
 it('batches Amazon catalog lookups into at most twenty ASINs', function (): void {
     Sleep::fake();
+    // Requests are paced from when the last one started; with the clock
+    // stopped, no latency counts toward the interval, so the wait is all of it.
+    $this->freezeTime();
 
     $order = sampleAmazonOrder();
     $order['orderItems'] = collect(range(1, 21))->map(fn (int $number): array => [

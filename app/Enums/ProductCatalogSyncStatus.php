@@ -15,9 +15,8 @@ enum ProductCatalogSyncStatus: string
     case Running = 'running';
     case Complete = 'complete';
     /**
-     * Reserved for Amazon (`product-catalog-sync/04`): the run read all it
-     * could, but a date window it could not split left listings unread.
-     * Nothing records it yet.
+     * Amazon (`product-catalog-sync/04`): the run read all it could, but a
+     * one-second date window it could not split left listings unread.
      */
     case Incomplete = 'incomplete';
     case Failed = 'failed';

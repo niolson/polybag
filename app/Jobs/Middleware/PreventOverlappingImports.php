@@ -2,6 +2,7 @@
 
 namespace App\Jobs\Middleware;
 
+use App\Jobs\LookUpAmazonCatalogIdentifiersJob;
 use App\Jobs\RunDataSourceImportJob;
 use App\Jobs\SyncProductCatalogJob;
 use App\Listeners\FailQueuedJobOnFatalError;
@@ -51,10 +52,16 @@ class PreventOverlappingImports
         return new self("product-catalog-sync:{$dataSourceId}", releaseAfter: 60, expiresAfter: $expiresAfter);
     }
 
+    /** The catalog look-up after an Amazon catalog sync (`product-catalog-sync/04`). */
+    public static function forAmazonCatalogLookup(int $dataSourceId, int $expiresAfter): self
+    {
+        return new self("amazon-catalog-lookup:{$dataSourceId}", releaseAfter: 60, expiresAfter: $expiresAfter);
+    }
+
     /**
      * @param  Closure(object): void  $next
      */
-    public function handle(RunDataSourceImportJob|SyncProductCatalogJob $job, Closure $next): void
+    public function handle(LookUpAmazonCatalogIdentifiersJob|RunDataSourceImportJob|SyncProductCatalogJob $job, Closure $next): void
     {
         $lock = Cache::lock($this->key, $this->expiresAfter);
 
