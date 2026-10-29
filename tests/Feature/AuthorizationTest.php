@@ -314,7 +314,7 @@ describe('carrier accounts are Admin-only', function (): void {
         $this->actingAs(User::factory()->admin()->create());
 
         Livewire::test(ListCarrierAccounts::class)
-            ->assertActionVisible(TestAction::make(DeleteBulkAction::class)->table()->bulk())
+            ->assertActionDoesNotExist(TestAction::make(DeleteBulkAction::class)->table()->bulk())
             ->assertSuccessful();
         Livewire::test(CreateCarrierAccount::class)->assertSuccessful();
         Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])

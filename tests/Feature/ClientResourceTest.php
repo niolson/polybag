@@ -6,6 +6,8 @@ use App\Filament\Resources\Clients\Pages\EditClient;
 use App\Filament\Resources\Clients\Pages\ListClients;
 use App\Models\Client;
 use App\Models\User;
+use Filament\Actions\DeleteBulkAction;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -18,7 +20,9 @@ beforeEach(function (): void {
 it('can render the list page', function (): void {
     Client::factory()->count(3)->create();
 
-    Livewire::test(ListClients::class)->assertSuccessful();
+    Livewire::test(ListClients::class)
+        ->assertSuccessful()
+        ->assertActionDoesNotExist(TestAction::make(DeleteBulkAction::class)->table()->bulk());
 });
 
 it('can render the create page', function (): void {

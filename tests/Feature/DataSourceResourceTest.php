@@ -22,6 +22,7 @@ use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
 use Illuminate\Contracts\Support\Htmlable;
@@ -1056,6 +1057,14 @@ it('presents data sources as Connections', function (): void {
         ->and(DataSourceResource::getPluralModelLabel())->toBe('connections');
 
     Livewire::test(ListDataSources::class)->assertSee('Connections');
+});
+
+it('offers no bulk delete on the connections list', function (): void {
+    $this->actingAs($this->admin);
+    DataSource::factory()->create();
+
+    Livewire::test(ListDataSources::class)
+        ->assertActionDoesNotExist(TestAction::make(DeleteBulkAction::class)->table()->bulk());
 });
 
 it('imports orders by default on a new connection', function (): void {
