@@ -2,6 +2,7 @@
 
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\CarrierAccounts\Pages\CreateCarrierAccount;
+use App\Filament\Resources\CarrierAccounts\Pages\EditCarrierAccount;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\Setting;
@@ -122,16 +123,45 @@ it('goes to the edit page in Dev with sandbox on, and says why', function (strin
         ->assertRedirect(editPageFor("{$carrierName} Account"));
 })->with([Carrier::USPS, Carrier::UPS]);
 
-it('never sends a new FedEx account into OAuth', function (): void {
+it('opens the Connect FedEx Account wizard on a new FedEx account', function (): void {
     $fedex = seededCarrier(Carrier::FEDEX);
 
     Livewire::test(CreateCarrierAccount::class)
         ->fillForm(newCarrierAccount($fedex))
+        ->assertSee('After you create this account the Connect FedEx Account wizard opens')
+        ->assertActionHasLabel(carrierCreateAction(), 'Create & connect FedEx')
+        ->call('create')
+        ->assertHasNoFormErrors()
+        ->assertRedirect(editPageFor('FedEx Account').'?action=fedex_register');
+
+    $account = CarrierAccount::where('name', 'FedEx Account')->firstOrFail();
+
+    // The page mounts the URL's action from the browser, through wire:init.
+    Livewire::withQueryParams(['action' => 'fedex_register'])
+        ->test(EditCarrierAccount::class, ['record' => $account->id])
+        ->assertSet('defaultAction', 'fedex_register')
+        ->call('mountAction', 'fedex_register')
+        ->assertActionMounted('fedex_register')
+        // Closing it drops the action from the URL, so a reload does not reopen it.
+        ->call('closeFedexRegistrationModal')
+        ->assertSet('defaultAction', []);
+});
+
+it('goes to the FedEx account\'s edit page without the broker', function (array $ownCredentials): void {
+    config(['services.oauth.broker_url' => null]);
+    $fedex = seededCarrier(Carrier::FEDEX);
+
+    Livewire::test(CreateCarrierAccount::class)
+        ->fillForm(newCarrierAccount($fedex, $ownCredentials))
+        ->assertDontSee('After you create this account the Connect FedEx Account wizard opens')
         ->assertActionHasLabel(carrierCreateAction(), 'Create')
         ->call('create')
         ->assertHasNoFormErrors()
         ->assertRedirect(editPageFor('FedEx Account'));
-});
+})->with([
+    'without its own key' => [[]],
+    'with its own key' => [['fedex_adv_api_key' => 'own-key', 'fedex_adv_api_secret' => 'own-secret']],
+]);
 
 it('keeps the account and lands on its edit page when OAuth cannot start', function (): void {
     $carrier = seededCarrier(Carrier::UPS);

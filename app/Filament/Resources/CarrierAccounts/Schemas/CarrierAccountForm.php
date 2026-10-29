@@ -200,9 +200,11 @@ class CarrierAccountForm
                     ->schema([
                         TextEntry::make('fedex_connection_status')
                             ->label('Connection Status')
-                            ->state(fn (?CarrierAccount $record): HtmlString => $record?->connectionStatus() === 'Connected'
-                                ? new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — credentials configured for the active environment')
-                                : new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — configure credentials for the active environment'))
+                            ->state(fn (?CarrierAccount $record): HtmlString => match (true) {
+                                ! $record?->exists && app(OAuthService::class)->opensFedexRegistrationForNewAccount(Carrier::FEDEX) => new HtmlString('<span class="text-gray-400 dark:text-gray-500">After you create this account the Connect FedEx Account wizard opens, to verify it with FedEx and provision its credentials.</span>'),
+                                $record?->connectionStatus() === 'Connected' => new HtmlString('<span class="text-success-600 dark:text-success-400 font-medium">Connected</span> — credentials configured for the active environment'),
+                                default => new HtmlString('<span class="text-gray-400 dark:text-gray-500">Not connected</span> — configure credentials for the active environment'),
+                            })
                             ->columnSpanFull(),
                         TextInput::make('fedex_production_account_number')
                             ->label('Production Account Number')
