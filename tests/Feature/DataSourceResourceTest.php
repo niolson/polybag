@@ -1082,6 +1082,8 @@ it('hides import-only Shopify fields when import is off and keeps write-back', f
 });
 
 it('hides import-only Amazon fields when import is off', function (): void {
+    // With the broker, a new connection leaves its marketplace to OAuth discovery.
+    config(['services.oauth.broker_url' => null]);
     $this->actingAs($this->admin);
 
     Livewire::test(CreateDataSource::class)

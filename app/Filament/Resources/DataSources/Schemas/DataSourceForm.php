@@ -159,6 +159,8 @@ class DataSourceForm
 
             Section::make('Shopify Connection')
                 ->schema([
+                    self::connectNotice('shopify_connect_notice', ShopifySource::class, 'Shopify', 'Enter the store\'s own Shopify app Client ID and Client Secret below.'),
+
                     Placeholder::make('shopify_oauth_status')
                         ->label('OAuth Status')
                         ->content(fn (?DataSource $record): HtmlString => self::renderShopifyOAuthStatus($record))
@@ -180,6 +182,7 @@ class DataSourceForm
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
                         ->helperText('The Shopify app Client ID for this store. Required unless a hosted OAuth broker supplies it.')
+                        ->live(onBlur: true)
                         ->visible(self::showsAppCredentials(...)),
 
                     TextInput::make('settings.client_secret')
@@ -345,9 +348,12 @@ class DataSourceForm
                         ->visible(fn (): bool => ! app(SettingsService::class)->get('require_mfa', false))
                         ->columnSpanFull(),
 
+                    self::connectNotice('amazon_connect_notice', AmazonSource::class, 'Amazon', 'Enter the seller\'s own Amazon Refresh Token and App Client ID and Secret below.', 'Its marketplace is set from the ones Amazon reports for the seller.'),
+
                     Placeholder::make('amazon_oauth_status')
                         ->label('OAuth Status')
                         ->content(fn (?DataSource $record): HtmlString => self::renderAmazonOAuthStatus($record))
+                        ->visible(fn (?DataSource $record): bool => (bool) $record?->exists)
                         ->columnSpanFull(),
 
                     Select::make('settings.marketplace_id')
@@ -356,7 +362,11 @@ class DataSourceForm
                         ->placeholder('Select a marketplace')
                         ->required()
                         ->searchable()
-                        ->helperText('Available marketplaces are discovered after Amazon OAuth. Manual connections may choose from the supported North American marketplaces.'),
+                        ->helperText('Available marketplaces are discovered after Amazon OAuth. Manual connections may choose from the supported North American marketplaces.')
+                        // A new connection signing in through OAuth has none discovered yet. The callback
+                        // selects the seller's only marketplace, or asks for a choice among several.
+                        ->visible(fn (Get $get, ?DataSource $record): bool => $record?->exists
+                            || app(OAuthService::class)->providerForNewDataSource(AmazonSource::class, $get('settings') ?? []) === null),
 
                     TextInput::make('settings.refresh_token')
                         ->label('Refresh Token')
@@ -365,7 +375,8 @@ class DataSourceForm
                         ->afterStateHydrated(fn ($component) => $component->state(null))
                         ->dehydrated(fn ($state): bool => filled($state))
                         ->required(fn (?DataSource $record): bool => ! $record?->exists && ! app(OAuthService::class)->isBrokerConfigured())
-                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise save the connection and use Connect Amazon.')
+                        ->helperText('Required when no hosted OAuth broker is configured. Otherwise leave it empty and connect through Amazon.')
+                        ->live(onBlur: true)
                         ->visible(self::showsAppCredentials(...)),
 
                     TextInput::make('settings.client_id')
@@ -924,6 +935,29 @@ class DataSourceForm
     }
 
     /**
+     * On a new connection, what creating it will do: send the operator to the
+     * store to authorize it, or, with no broker, which credentials to enter.
+     * Follows the same rule as the Create button and the redirect after it.
+     *
+     * @param  class-string  $sourceType
+     * @param  string  $alternative  What to enter without the broker, as a full sentence.
+     * @param  string  $afterwards  What happens once back, as a full sentence, if anything.
+     */
+    private static function connectNotice(string $name, string $sourceType, string $providerName, string $alternative, string $afterwards = ''): Placeholder
+    {
+        $oauth = app(OAuthService::class);
+
+        return Placeholder::make($name)
+            ->hiddenLabel()
+            ->content(fn (Get $get): ?string => $oauth->providerForNewDataSource($sourceType, $get('settings') ?? []) !== null
+                ? trim("After you create this connection you will be sent to {$providerName} to authorize it, and brought back here. {$afterwards}")
+                : $oauth->brokerlessGuidance($alternative))
+            ->visible(fn (Get $get, ?DataSource $record): bool => ! $record?->exists
+                && (! $oauth->isBrokerConfigured() || $oauth->providerForNewDataSource($sourceType, $get('settings') ?? []) !== null))
+            ->columnSpanFull();
+    }
+
+    /**
      * Shopify's and Amazon's own app credentials, and Amazon's refresh token: the
      * way in only without the broker, or in Dev.
      */
@@ -1313,7 +1347,7 @@ class DataSourceForm
     private static function renderAmazonOAuthStatus(?DataSource $record): HtmlString
     {
         if (! $record?->exists) {
-            return new HtmlString('Save the connection, then use Connect Amazon.');
+            return new HtmlString('');
         }
 
         $connected = app(OAuthService::class)->isDataSourceConnected($record);

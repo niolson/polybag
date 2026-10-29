@@ -118,6 +118,27 @@ class OAuthService
     }
 
     /**
+     * The provider a new Shopify or Amazon connection signs in through: the broker
+     * is configured and none of the connection's own credentials were entered — a
+     * Shopify app Client ID, or an Amazon refresh token. Null when the connection
+     * will use what was entered, or has no OAuth path.
+     *
+     * @param  array<string, mixed>  $settings  The submitted settings, secrets included.
+     */
+    public function providerForNewDataSource(?string $sourceType, array $settings): ?string
+    {
+        if (! $this->isBrokerConfigured()) {
+            return null;
+        }
+
+        return match ($sourceType) {
+            ShopifySource::class => blank($settings['client_id'] ?? null) ? 'shopify' : null,
+            AmazonSource::class => blank($settings['refresh_token'] ?? null) ? 'sp-api' : null,
+            default => null,
+        };
+    }
+
+    /**
      * Generate the broker authorization URL for a specific DataSource.
      * Stores the DataSource ID in session so the callback can route back to it.
      */
