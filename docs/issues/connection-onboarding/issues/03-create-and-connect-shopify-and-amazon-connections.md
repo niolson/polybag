@@ -1,6 +1,6 @@
 # Create and connect Shopify and Amazon connections
 
-Status: ready-for-agent
+Status: done — 2026-10-29
 Category: enhancement
 Repo: `polybag`
 
@@ -33,7 +33,8 @@ When the broker is configured and the connection will sign in through OAuth:
 - **If OAuth cannot start** (for example, `RuntimeException` for a shop domain that
   is not `*.myshopify.com`), the record is kept and the redirect goes to the edit page
   with a danger notification carrying the message.
-- **"Create & create another" does not redirect,** and the button keeps its label.
+- **There is no "Create & create another".** It was removed 2026-10-29: a new connection
+  is followed by its OAuth trip or its edit page, never a second blank form.
 
 "Will sign in through OAuth" means: broker configured, and the operator did not fill
 direct credentials. That is no `settings.client_id` for Shopify, no
@@ -47,20 +48,39 @@ Without the broker, the notice says to enter the store's own credentials instead
 
 - Amazon's MFA check (`validateMfaRequiredForAmazon`) runs before create and still halts
   it. No redirect happens for a halted create.
-- `settings.marketplace_id` is required on create, before OAuth has discovered the
-  seller's marketplaces. The supported North American list is offered, as today.
-  Discovery after the callback may adjust it. Check the callback does not fail when the
-  chosen marketplace is not among those discovered.
+- A new Amazon connection that will sign in through OAuth has no Marketplace field: none
+  has been discovered yet. Discovery after the callback selects the seller's only
+  marketplace, or leaves the choice to the edit page, where the field is required.
+  Imports and catalog syncs refuse until one is set. With its own refresh token, or with
+  no broker, a new connection still chooses from the supported North American list.
+  *(Decided 2026-10-29.)*
+- The callback does not fail when a chosen marketplace is not among those discovered: it
+  keeps the selection and warns "the selected marketplace was not returned".
+- The form's `settings.shop_domain` rule is the same pattern
+  `getBrokerParamsForDataSource()` checks, so an invalid domain cannot reach OAuth through
+  the form. The failure path is covered by a test that makes OAuth start throw.
 - `CreateRecord::create()` redirects with `navigate: FilamentView::hasSpaMode($url)`,
   which is false for the broker's host, so a full redirect happens without an override.
 
 ## Acceptance
 
-- [ ] With the broker configured, creating a Shopify connection redirects to the broker's
+- [x] With the broker configured, creating a Shopify connection redirects to the broker's
       `/oauth/shopify/authorize` with the record's shop domain, and stores
       `oauth_data_source_id.shopify` in the session
-- [ ] Same for Amazon with `/oauth/sp-api/authorize`
-- [ ] An invalid shop domain lands on the edit page with the error, record saved
-- [ ] Without the broker, or with direct credentials filled in Dev, create goes to the
+- [x] Same for Amazon with `/oauth/sp-api/authorize`
+- [x] An invalid shop domain lands on the edit page with the error, record saved
+- [x] Without the broker, or with direct credentials filled in Dev, create goes to the
       edit page as today
-- [ ] The notice and the button label follow the same condition
+- [x] The notice and the button label follow the same condition
+
+## Comments
+
+- 2026-10-29: Done. `OAuthService::providerForNewDataSource()` holds the rule (broker
+  configured, no Shopify `client_id` or Amazon `refresh_token` entered), and the form
+  notice, the Create button label and `CreateDataSource::getRedirectUrl()` all use it. On
+  the create form the Amazon OAuth status line is hidden, like Shopify's, because the
+  notice replaces it. Tests: `tests/Feature/CreateAndConnectDataSourceTest.php`.
+- 2026-10-29: Removed "Create & create another" from the create page
+  (`$canCreateAnother = false`) instead of keeping it without the redirect.
+- 2026-10-29: Dropped the Marketplace field from a new Amazon connection that signs in
+  through OAuth; discovery sets it.

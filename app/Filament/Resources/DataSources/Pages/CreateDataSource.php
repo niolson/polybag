@@ -5,18 +5,51 @@ namespace App\Filament\Resources\DataSources\Pages;
 use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Models\DataSource;
+use App\Services\OAuthService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Support\Exceptions\Halt;
 use Illuminate\Database\Eloquent\Model;
+use RuntimeException;
 
 class CreateDataSource extends CreateRecord
 {
     use SetsUpOffAmazonShipping;
 
     protected static string $resource = DataSourceResource::class;
+
+    /**
+     * A new connection is followed by its OAuth trip or its edit page, never a
+     * second blank form.
+     */
+    protected static bool $canCreateAnother = false;
+
+    /** @var array<string, string> */
+    private const array PROVIDER_NAMES = [
+        'shopify' => 'Shopify',
+        'sp-api' => 'Amazon',
+    ];
+
+    /**
+     * Names the OAuth trip when creating leads into one.
+     */
+    protected function getCreateFormAction(): Action
+    {
+        $action = parent::getCreateFormAction();
+        $default = $action->getLabel();
+
+        return $action->label(function () use ($default): string {
+            $provider = app(OAuthService::class)->providerForNewDataSource(
+                $this->data['source_type'] ?? null,
+                $this->data['settings'] ?? [],
+            );
+
+            return $provider === null ? $default : 'Create & connect '.self::PROVIDER_NAMES[$provider];
+        });
+    }
 
     /**
      * @param  array<string, mixed>  $data
@@ -69,6 +102,40 @@ class CreateDataSource extends CreateRecord
 
         if ($record instanceof DataSource && $record->isAmazon() && $record->offers_off_amazon_shipping) {
             $this->setUpOffAmazonShipping($record);
+        }
+    }
+
+    /**
+     * A connection that signs in through OAuth goes straight to the store's
+     * consent screen; the callback returns to its edit page. If OAuth cannot
+     * start, the connection is kept and the edit page says why.
+     */
+    protected function getRedirectUrl(): string
+    {
+        $record = $this->getRecord();
+        $editUrl = DataSourceResource::getUrl('edit', ['record' => $record]);
+
+        if (! $record instanceof DataSource) {
+            return $editUrl;
+        }
+
+        $oauth = app(OAuthService::class);
+        $provider = $oauth->providerForNewDataSource($record->source_type, $record->secret_settings ?? []);
+
+        if ($provider === null) {
+            return $editUrl;
+        }
+
+        try {
+            return $oauth->initiateAuthorizationForDataSource($provider, $record);
+        } catch (RuntimeException $e) {
+            Notification::make()
+                ->danger()
+                ->title('Cannot connect '.self::PROVIDER_NAMES[$provider])
+                ->body($e->getMessage())
+                ->send();
+
+            return $editUrl;
         }
     }
 
