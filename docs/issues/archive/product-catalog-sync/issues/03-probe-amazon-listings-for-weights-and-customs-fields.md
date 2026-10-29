@@ -8,7 +8,7 @@ Repo: `polybag`
 
 ## Parent
 
-[PRD](../PRD.md), *Amazon*. Blocks `04`. Informs `05`.
+[PRD](../PRD.md), *Amazon*. Blocks `04`. Informs `hs-code-suggestions/01` (filed as `05`).
 
 ## Problem
 

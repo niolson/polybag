@@ -41,7 +41,7 @@ So a synced Shopify Product can be customs-ready. A synced Amazon Product will n
 still need an HS code and an origin. The existing *Missing Customs Data* filter cannot
 find them: it lists only Products on an unshipped international Package, and a synced
 Product is on none. `02` adds an **Incomplete Customs Data** filter over every Product (no
-weight, origin or HS code) for this. Filling HS codes automatically is a separate concern ([`05`](issues/05-suggest-hs-codes.md)).
+weight, origin or HS code) for this. Filling HS codes automatically is a separate feature, [`hs-code-suggestions/01`](../../hs-code-suggestions/issues/01-suggest-hs-codes.md).
 
 Keeping PolyBag in step with the store *automatically* is not a goal (see *Out of scope*):
 each sync is started by hand.
@@ -237,7 +237,7 @@ not fixed here:
 - Deactivating Products that leave the store, and the `active` behaviors above.
 - Database connections, which already map any column through their item query.
 - Reading the catalog's weights.
-- HS code classification ([`05`](issues/05-suggest-hs-codes.md)).
+- HS code classification, now [`hs-code-suggestions/01`](../../hs-code-suggestions/issues/01-suggest-hs-codes.md).
 - Inventory, prices and images.
 
 ## Issues
@@ -248,9 +248,9 @@ not fixed here:
 | [02](issues/02-sync-a-shopify-product-catalog.md) | Sync a Shopify product catalog | `done` | `01` |
 | [03](issues/03-probe-amazon-listings-for-weights-and-customs-fields.md) | Probe Amazon listings for weights and customs fields | `done` | — |
 | [04](issues/04-sync-an-amazon-product-catalog.md) | Sync an Amazon product catalog | `done` | `01`, `02` |
-| [05](issues/05-suggest-hs-codes.md) | Suggest HS codes for Products without one | `needs-triage` | — |
 
-About four to five days for `01`–`04`. `05` is unsized.
+About four to five days for `01`–`04`. `05`, *Suggest HS codes*, moved out on 2026-10-29 to
+[`hs-code-suggestions/01`](../../hs-code-suggestions/issues/01-suggest-hs-codes.md).
 
 ## Comments
 

@@ -83,8 +83,8 @@ line's `productTitle`.
 (`Product::scopeMissingCustomsData()`) lists only Products on an unshipped international
 Package. That is a packing worklist, and it stays as it is. A Product the sync brought in
 is on no Package, so it never appears there. Add a second filter, **Incomplete Customs
-Data**, over every Product: no weight, no country of origin, or no HS code. `05`'s bulk
-action uses this one.
+Data**, over every Product: no weight, no country of origin, or no HS code. A bulk action in
+`hs-code-suggestions/01` (filed as `05`) would use this one.
 
 **Overwrite, except the name.** The store's non-blank values overwrite PolyBag's, as an
 order import's do: PolyBag is not the source of truth for product data, and a
