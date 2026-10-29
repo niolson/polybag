@@ -59,7 +59,10 @@ class CreateCarrierAccount extends CreateRecord
                 default => null,
             };
 
-            return app(OAuthService::class)->providerForNewCarrierAccount($carrierName, $ownClientId) === null
+            $oauth = app(OAuthService::class);
+
+            return $oauth->providerForNewCarrierAccount($carrierName, $ownClientId) === null
+                && ! $oauth->opensFedexRegistrationForNewAccount($carrierName)
                 ? $default
                 : "Create & connect {$carrierName}";
         });
@@ -141,7 +144,9 @@ class CreateCarrierAccount extends CreateRecord
      * A USPS or UPS account that signs in through OAuth goes straight to the
      * carrier's consent screen; the callback returns to its edit page, where a
      * notification sent here, such as the global-scope warning, is shown. If
-     * OAuth cannot start, the account is kept and the edit page says why.
+     * OAuth cannot start, the account is kept and the edit page says why. A
+     * FedEx account registered through the broker lands on its edit page with
+     * the Connect FedEx Account wizard open.
      */
     protected function getRedirectUrl(): string
     {
@@ -154,6 +159,10 @@ class CreateCarrierAccount extends CreateRecord
 
         $carrierName = $record->carrier?->name;
         $oauth = app(OAuthService::class);
+
+        if ($oauth->opensFedexRegistrationForNewAccount($carrierName)) {
+            return CarrierAccountResource::getUrl('edit', ['record' => $record, 'action' => 'fedex_register']);
+        }
         $provider = $oauth->providerForNewCarrierAccount($carrierName, $record->secret('client_id'));
 
         if ($provider === null) {

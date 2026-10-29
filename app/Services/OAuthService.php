@@ -151,6 +151,17 @@ class OAuthService
     }
 
     /**
+     * Whether a new account opens the Connect FedEx Account wizard. The wizard
+     * drives FedEx's Account Registration API, which only the broker's parent
+     * key can authorize, so it needs the broker; an ordinary developer key
+     * cannot, and works with its own API key and secret instead.
+     */
+    public function opensFedexRegistrationForNewAccount(?string $carrierName): bool
+    {
+        return $carrierName === Carrier::FEDEX && $this->isBrokerConfigured();
+    }
+
+    /**
      * The provider a new Shopify or Amazon connection signs in through: the broker
      * is configured and none of the connection's own credentials were entered — a
      * Shopify app Client ID, or an Amazon refresh token. Null when the connection

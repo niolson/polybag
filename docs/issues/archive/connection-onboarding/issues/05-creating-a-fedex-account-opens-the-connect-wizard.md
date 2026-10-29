@@ -1,6 +1,6 @@
 # Creating a FedEx account opens the Connect FedEx wizard
 
-Status: ready-for-agent
+Status: done — 2026-10-29
 Category: enhancement
 Repo: `polybag`
 
@@ -46,7 +46,25 @@ find the action.
 
 ## Acceptance
 
-- [ ] Creating a FedEx account with the broker configured redirects to
+- [x] Creating a FedEx account with the broker configured redirects to
       `carrier-accounts.edit` with `action=fedex_register`, and the action is mounted
-- [ ] Without the broker, create goes to the edit page with no action, whether or not
+- [x] Without the broker, create goes to the edit page with no action, whether or not
       the account's own API key and secret were entered
+
+## Comments
+
+- 2026-10-29: Done. `OAuthService::opensFedexRegistrationForNewAccount()` holds the rule (a
+  FedEx account, with the broker configured), and the create form's FedEx connection
+  status, the Create button label ("Create & connect FedEx") and
+  `CreateCarrierAccount::getRedirectUrl()` all use it. The redirect is the edit page with
+  `?action=fedex_register`. Tests: `tests/Feature/CreateAndConnectCarrierAccountTest.php`.
+- 2026-10-29: "Create & create another" was already removed from this page in `04`, so
+  that bullet needed nothing.
+- 2026-10-29: The page mounts the URL's action from the browser (`wire:init`), not in
+  `mount()`. Closing the wizard with its own controls unmounts it, and Filament then
+  clears `defaultAction`, so `action` leaves the URL and a reload does not reopen it.
+  Reloading while the wizard is still open reopens it, which is wanted: the registration
+  has not finished. No code was needed to drop the parameter.
+- 2026-10-29: Unlike `03` and `04`, Create never leaves the app, so the create page needs
+  no `ReturnsToRecordAwaitingOAuth` marker: Back from the edit page returns to a create
+  page that has nothing to resend.

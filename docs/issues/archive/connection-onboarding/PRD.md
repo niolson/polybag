@@ -74,9 +74,9 @@ against a real store is [`live-store-demo`](../archive/live-store-demo/PRD.md).
 |---|---|---|
 | [01](issues/01-one-app-mode-decides-sandbox-and-dev-settings.md) | One `AppMode` decides sandbox and Dev Settings; multi-client and multi-location are `.env`-only | done |
 | [02](issues/02-show-only-the-credential-fields-this-install-can-use.md) | Show only the credential fields this install can use | done |
-| [03](issues/03-create-and-connect-shopify-and-amazon-connections.md) | Create and connect Shopify and Amazon connections | ready-for-agent |
-| [04](issues/04-create-and-connect-usps-and-ups-accounts.md) | Create and connect USPS and UPS accounts | ready-for-agent |
-| [05](issues/05-creating-a-fedex-account-opens-the-connect-wizard.md) | Creating a FedEx account opens the Connect FedEx wizard | ready-for-agent |
+| [03](issues/03-create-and-connect-shopify-and-amazon-connections.md) | Create and connect Shopify and Amazon connections | done |
+| [04](issues/04-create-and-connect-usps-and-ups-accounts.md) | Create and connect USPS and UPS accounts | done |
+| [05](issues/05-creating-a-fedex-account-opens-the-connect-wizard.md) | Creating a FedEx account opens the Connect FedEx wizard | done |
 
 `01` first; `02` reads its modes. `03`–`05` are independent of each other and of `02`.
 
