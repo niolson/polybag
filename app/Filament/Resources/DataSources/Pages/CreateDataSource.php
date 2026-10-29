@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DataSources\Pages;
 
+use App\Filament\Concerns\ReturnsToRecordAwaitingOAuth;
 use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Models\DataSource;
@@ -17,6 +18,7 @@ use RuntimeException;
 
 class CreateDataSource extends CreateRecord
 {
+    use ReturnsToRecordAwaitingOAuth;
     use SetsUpOffAmazonShipping;
 
     protected static string $resource = DataSourceResource::class;
@@ -32,6 +34,18 @@ class CreateDataSource extends CreateRecord
         'shopify' => 'Shopify',
         'sp-api' => 'Amazon',
     ];
+
+    public function mount(): void
+    {
+        parent::mount();
+
+        $this->returnToRecordAwaitingOAuth();
+    }
+
+    protected function isConnectedThroughOAuth(Model $record): bool
+    {
+        return $record instanceof DataSource && app(OAuthService::class)->isDataSourceConnected($record);
+    }
 
     /**
      * Names the OAuth trip when creating leads into one.
@@ -127,7 +141,7 @@ class CreateDataSource extends CreateRecord
         }
 
         try {
-            return $oauth->initiateAuthorizationForDataSource($provider, $record);
+            $url = $oauth->initiateAuthorizationForDataSource($provider, $record);
         } catch (RuntimeException $e) {
             Notification::make()
                 ->danger()
@@ -137,6 +151,10 @@ class CreateDataSource extends CreateRecord
 
             return $editUrl;
         }
+
+        $this->rememberRecordAwaitingOAuth($record, self::PROVIDER_NAMES[$provider]);
+
+        return $url;
     }
 
     /**

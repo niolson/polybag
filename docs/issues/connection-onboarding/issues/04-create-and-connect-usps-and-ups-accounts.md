@@ -1,6 +1,6 @@
 # Create and connect USPS and UPS accounts
 
-Status: ready-for-agent
+Status: done — 2026-10-29
 Category: enhancement
 Repo: `polybag`
 
@@ -18,8 +18,9 @@ create, the OAuth status reads "Save the account first, then connect via OAuth."
 
 ## Desired behavior
 
-When the broker is configured, the mode is Production or Dev, the carrier is USPS or UPS,
-and no direct app credentials were filled (`usps_adv_client_id` / `ups_adv_client_id`):
+When the broker is configured, the carrier is USPS or UPS, its broker OAuth works in the
+active environment, and no direct app credentials were filled (`usps_adv_client_id` /
+`ups_adv_client_id`):
 
 - The create form's OAuth status says the operator will be sent to the carrier to
   authorize, and brought back.
@@ -28,27 +29,50 @@ and no direct app credentials were filled (`usps_adv_client_id` / `ups_adv_clien
   `OAuthService::initiateAuthorization('usps' | 'ups', $record->id)`. The callback already
   returns to `carrier-accounts.edit`.
 - A failure to start OAuth lands on the edit page with the message, record kept.
-- "Create & create another" does not redirect.
+- There is no "Create & create another". It was removed 2026-10-29, as on the connection
+  create page in `03`: a new account is followed by its OAuth trip or its edit page.
 
 Without the broker, the status shows `brokerlessGuidance()`, as the edit page's tooltip
 does today.
 
 In Demo, create never redirects to OAuth: the broker's USPS and UPS credentials work
-against production only, and Demo forces sandbox. The account is saved with the sandbox
+against production only, and Demo forces sandbox. The same holds in Dev with sandbox on,
+so the condition is the environment (`CarrierRegistry::connectsThroughBroker()`), not the
+mode; there the OAuth status says to enter a developer app's credentials instead. The account is saved with the sandbox
 developer app credentials `02` leaves visible there, and create goes to the edit page.
 
 ## Notes
 
 - `afterCreate()` assigns the global scope, or warns that another account holds it. The
-  warning is a persistent notification and must still reach the operator after they
-  come back from OAuth. Check it survives the round trip, or flash it to the session so
-  `EditCarrierAccount` shows it on return.
+  warning survives the round trip with no change: Filament leaves notifications sent
+  during a redirecting Livewire response in the session, and the next full page, the edit
+  page the callback redirects to, shows them.
+- FedEx is in `CarrierRegistry`'s broker list but registers through its wizard (`05`), so
+  the rule names USPS and UPS.
+- Livewire's test hooks run only in the `testing` environment, so a form cannot be filled
+  in a test that switches the app to `demo`. The Demo case is tested at
+  `OAuthService::providerForNewCarrierAccount()`; Dev with sandbox on covers the page.
 - The carrier select is `live()`, so the button label can follow it.
 
 ## Acceptance
 
-- [ ] With the broker configured, creating a USPS account redirects to the broker's
+- [x] With the broker configured, creating a USPS account redirects to the broker's
       `/oauth/usps/authorize` and stores `oauth_account_id.usps`; same for UPS
-- [ ] With direct credentials filled, without the broker, or in Demo, create goes to the
+- [x] With direct credentials filled, without the broker, or in Demo, create goes to the
       edit page
-- [ ] The no-global-scope warning is still shown to the operator after the round trip
+- [x] The no-global-scope warning is still shown to the operator after the round trip
+
+## Comments
+
+- 2026-10-29: Done. `OAuthService::providerForNewCarrierAccount()` holds the rule, and the
+  create form's OAuth status, the Create button label and
+  `CreateCarrierAccount::getRedirectUrl()` all use it.
+- 2026-10-29: Removed "Create & create another" from the create page
+  (`$canCreateAnother = false`), matching the connection create page.
+  Tests: `tests/Feature/CreateAndConnectCarrierAccountTest.php`.
+- 2026-10-29: Back from the provider's consent screen reloaded the create page with
+  inputs the browser refilled but the form did not hold, the "Created" toast meant for
+  the edit page, and a Create that failed as if the fields were empty. Both create pages
+  now remember the record they sent into OAuth (`ReturnsToRecordAwaitingOAuth`); opened
+  again before the callback, and while the record is unconnected, the page redirects to
+  its edit page once, saying it is not connected yet. The callback clears the marker.

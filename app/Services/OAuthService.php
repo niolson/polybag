@@ -4,8 +4,10 @@ namespace App\Services;
 
 use App\DataTransferObjects\AmazonMarketplaceDiscoveryResult;
 use App\Http\Integrations\Shopify\ShopifyConnector;
+use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\DataSource;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Support\Facades\Cache;
@@ -16,6 +18,12 @@ use RuntimeException;
 
 class OAuthService
 {
+    /**
+     * The record a create page sent into OAuth, until the callback arrives.
+     * Written and read by the ReturnsToRecordAwaitingOAuth page concern.
+     */
+    public const string AWAITING_RECORD_SESSION_KEY = 'oauth_awaiting_record';
+
     public function __construct(
         private readonly OAuthProviderRegistry $registry,
         private readonly AmazonMarketplaceDiscoveryService $amazonMarketplaceDiscovery,
@@ -115,6 +123,31 @@ class OAuthService
         ];
 
         return rtrim($brokerUrl, '/')."/oauth/{$provider}/authorize?".http_build_query($params);
+    }
+
+    /**
+     * The provider a new USPS or UPS account signs in through: the broker is
+     * configured, its OAuth works in the active environment, and the operator
+     * entered no client ID of the account's own. The broker's USPS and UPS
+     * credentials work against production only, so never in sandbox, which Demo
+     * forces. FedEx registers through its own wizard instead, so is never one.
+     */
+    public function providerForNewCarrierAccount(?string $carrierName, ?string $ownClientId): ?string
+    {
+        $provider = match ($carrierName) {
+            Carrier::USPS => 'usps',
+            Carrier::UPS => 'ups',
+            default => null,
+        };
+
+        if ($provider === null
+            || filled($ownClientId)
+            || ! $this->isBrokerConfigured()
+            || ! CarrierRegistry::connectsThroughBroker($carrierName, app(SettingsService::class)->isSandboxMode())) {
+            return null;
+        }
+
+        return $provider;
     }
 
     /**
