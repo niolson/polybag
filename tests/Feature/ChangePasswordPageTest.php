@@ -20,7 +20,7 @@ it('allows required MFA setup before changing an expired password without openin
     require base_path('vendor/filament/filament/routes/web.php');
     app('router')->getRoutes()->refreshNameLookups();
 
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user)->withSession(['password_expired' => true]);
     $setupUrl = Filament::getSetUpRequiredMultiFactorAuthenticationUrl();
 

@@ -254,7 +254,7 @@ it('notifies operational users when a package enters exception or is stuck in pr
 
     $admin = User::factory()->create(['role' => Role::Admin, 'active' => true]);
     $manager = User::factory()->create(['role' => Role::Manager, 'active' => true]);
-    User::factory()->create(['role' => Role::User, 'active' => true]);
+    User::factory()->create(['role' => Role::Packer, 'active' => true]);
 
     $package = Package::factory()->fedex()->create([
         'tracking_status' => TrackingStatus::InTransit,

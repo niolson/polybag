@@ -18,7 +18,7 @@ use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
-    $this->shipper = User::factory()->create(['role' => Role::User]);
+    $this->shipper = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($this->shipper);
 });
 
@@ -85,7 +85,7 @@ it('prints the next N, and the Shipments leave the list only once the receipt is
 });
 
 it('remembers the batch size per user', function (): void {
-    $other = User::factory()->create(['role' => Role::User]);
+    $other = User::factory()->create(['role' => Role::Packer]);
 
     Livewire::test(PrintPackSlips::class)
         ->callAction('batchSize', data: ['pack_slip_batch_size' => 40])
@@ -255,7 +255,7 @@ it('puts a printed run at the top of the Printed tab, and a reprint records the 
         ->assertTableColumnVisible('pack_slip_printed_at')
         ->assertTableColumnVisible('packSlipPrintedBy.name');
 
-    $other = User::factory()->create(['role' => Role::User]);
+    $other = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($other);
     $this->travel(5)->minutes();
 

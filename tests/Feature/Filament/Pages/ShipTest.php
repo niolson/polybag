@@ -352,7 +352,7 @@ it('does not link package items to the product page for users who cannot edit pr
     $package = createShippablePackage();
     $url = ProductResource::getUrl('edit', ['record' => $package->packageItems->first()->product]);
 
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(Ship::class, ['package_id' => $package->id])->assertDontSeeHtml('href="'.$url.'"');
 });

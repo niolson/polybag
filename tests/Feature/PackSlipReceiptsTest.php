@@ -11,7 +11,7 @@ use App\Services\PackSlips\PackSlipReceipts;
 use App\Services\PackSlips\PackSlipRenderer;
 
 beforeEach(function (): void {
-    $this->user = User::factory()->create(['role' => Role::User]);
+    $this->user = User::factory()->create(['role' => Role::Packer]);
     $this->receipts = app(PackSlipReceipts::class);
 });
 

@@ -63,8 +63,8 @@ it('requires authentication', function (): void {
 });
 
 it('lets a shipper record a print for a package another user shipped, auditing the printer', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
-    $otherPacker = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
+    $otherPacker = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $shipper->id,
         'label_printed_at' => null,
@@ -85,7 +85,7 @@ it('lets a shipper record a print for a package another user shipped, auditing t
 it('lets a manager record a print for a package someone else shipped', function (): void {
     $manager = User::factory()->create(['role' => Role::Manager]);
     $package = Package::factory()->shipped()->create([
-        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::Packer])->id,
         'label_printed_at' => null,
     ]);
 
@@ -97,7 +97,7 @@ it('lets a manager record a print for a package someone else shipped', function 
 });
 
 it('lets the shipping operator record their own print', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $shipper->id,
         'label_printed_at' => null,

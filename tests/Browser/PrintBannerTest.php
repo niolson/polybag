@@ -10,7 +10,7 @@ use App\Services\PackSlips\PackSlipReceipts;
  * browser shows whether a Livewire re-render wipes it.
  */
 it('keeps the print banner and its Mark as printed button through the refresh after pack slips are recorded', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user);
     $shipment = Shipment::factory()->create();
 

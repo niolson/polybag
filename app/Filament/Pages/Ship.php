@@ -72,7 +72,7 @@ class Ship extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->role->isAtLeast(Role::User) ?? false;
+        return auth()->user()?->role->isAtLeast(Role::Packer) ?? false;
     }
 
     protected string $view = 'filament.pages.ship';

@@ -20,8 +20,10 @@ and access to commercial information may vary between companies.
 
 ## Established direction
 
-- Retain the existing `User`, `Manager`, and `Admin` roles initially. In this issue,
-  **shipper** means the existing `User` role; a code or UI rename is not yet decided.
+- Retain the existing three roles initially. The floor role was renamed from `User` to
+  **Packer** (`Role::Packer`, 2026-10-29); this issue predates that and calls it
+  **shipper**, which means the same role. "Shipper" was not used for the rename because
+  carrier APIs use it for the sending party, the 3PL or its Client.
 - Manual Ship should require Manager or Admin access. Prefer Label purchases in the
   context of an existing Shipment/order wherever possible.
 - Carrier Accounts and Special Services should not be exposed to shippers. **Done**:
@@ -142,3 +144,8 @@ Document any future expansion and migration in a separate decision once requirem
 
 This issue captures product decisions to resolve; it does not authorize implementation
 of every proposed restriction or new workflow.
+
+## Comments
+
+- 2026-10-29: the `User` role is now `Packer`. Client-facing accounts are a separate axis
+  from this ladder and are tracked in `client-portal/01`.

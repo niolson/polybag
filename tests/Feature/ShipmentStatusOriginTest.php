@@ -148,7 +148,7 @@ describe('a cancelled order', function (): void {
             ->assertNotified('Shipment Cancelled')
             ->assertSet('shipment', null)
             ->assertRedirect('/pack');
-    })->with([Role::User, Role::Manager]);
+    })->with([Role::Packer, Role::Manager]);
 });
 
 describe('a manager changing the status', function (): void {
@@ -203,7 +203,7 @@ describe('a manager changing the status', function (): void {
     });
 
     it('is not open to a shipper', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
         $shipment = Shipment::factory()->closedBySource()->create();
 
         Livewire::test(EditShipment::class, ['record' => $shipment->id])->assertForbidden();

@@ -411,9 +411,9 @@ it('keeps a sold label recoverable when recording it fails, rather than buying a
     $adapter->shouldReceive('recoverPurchase')->once()->andReturn($sold);
     app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
 
-    $buyer = User::factory()->create(['role' => Role::User]);
+    $buyer = User::factory()->create(['role' => Role::Packer]);
     $manager = User::factory()->create(['role' => Role::Manager]);
-    $otherShipper = User::factory()->create(['role' => Role::User]);
+    $otherShipper = User::factory()->create(['role' => Role::Packer]);
 
     $workflow = app(PackageShippingWorkflow::class);
     $first = $workflow->ship($package, new PackageShippingRequest(selectedRate: quotedDirectly($package, $rate), userId: $buyer->id));
@@ -457,7 +457,7 @@ it('reports a recorded label as shipped when post-ship work fails after the comm
     // throwing used to be reported as "label not recorded", with no print.
     $log = Log::spy();
     $package = createWorkflowPackage();
-    $buyer = User::factory()->create(['role' => Role::User]);
+    $buyer = User::factory()->create(['role' => Role::Packer]);
     Schema::drop('audit_logs');
     $rate = new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days');
 

@@ -57,7 +57,7 @@ it('restricts access when multi_client_enabled is false', function (): void {
 });
 
 it('restricts access for non-manager roles', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(ClientBillingReport::canAccess())->toBeFalse();
 });

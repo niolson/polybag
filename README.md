@@ -46,7 +46,7 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 - Product weights, special services, and hazmat metadata
 - Shipping, billing, rate-comparison, and packing-validation reports
 - Tracking exception monitoring, audit logs, and configurable data retention
-- User, Manager, and Admin roles with optional MFA and Google or Entra SSO
+- Packer, Manager, and Admin roles with optional MFA and Google or Entra SSO
 
 ## Hardware
 

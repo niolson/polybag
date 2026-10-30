@@ -10,7 +10,7 @@ use App\Models\User;
  * is at the top of the page, so the failure also raises a toast that stays put.
  */
 it('raises a persistent toast when a label fails to print', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visit('/shipments/'.$shipment->id);
@@ -42,7 +42,7 @@ it('raises a persistent toast when a label fails to print', function (): void {
 });
 
 it('gives up on a printer that never answers and says so', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visit('/shipments/'.$shipment->id);
@@ -107,7 +107,7 @@ function visitWithReportingPrinter(Shipment $shipment, string $initialStatus, st
 }
 
 it('refuses to print to a printer the OS reports offline, without waiting', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visitWithReportingPrinter($shipment, 'OFFLINE', 'FATAL');
@@ -128,7 +128,7 @@ it('refuses to print to a printer the OS reports offline, without waiting', func
 });
 
 it('fails a waiting print the moment its printer goes offline', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visitWithReportingPrinter($shipment, 'OK', 'INFO');
@@ -149,7 +149,7 @@ it('fails a waiting print the moment its printer goes offline', function (): voi
 });
 
 it('warns as soon as a printer goes offline, before anything is printed', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visitWithReportingPrinter($shipment, 'OK', 'INFO');
@@ -171,7 +171,7 @@ it('warns as soon as a printer goes offline, before anything is printed', functi
 });
 
 it('does not auto ship from Pack while the label printer is offline', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User, 'auto_ship_enabled' => true]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer, 'auto_ship_enabled' => true]));
     $shipment = Shipment::factory()->create();
 
     $page = visit('/pack/'.$shipment->id);
@@ -198,7 +198,7 @@ it('does not auto ship from Pack while the label printer is offline', function (
 });
 
 it('names printers that go offline together in one message', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visitWithReportingPrinter($shipment, 'OK', 'INFO');
@@ -229,7 +229,7 @@ it('names printers that go offline together in one message', function (): void {
 });
 
 it('keeps the Ship page told whether its label printer is offline', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     // No shipping method: the page renders without quoting any carrier.
     $package = Package::factory()->for(Shipment::factory()->create(['shipping_method_id' => null]))->create();
 
@@ -258,7 +258,7 @@ it('keeps the Ship page told whether its label printer is offline', function ():
 });
 
 it('stays blocked while an offline printer also reports a lesser status, until a snapshot without offline', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     $page = visitWithReportingPrinter($shipment, 'OK', 'INFO');

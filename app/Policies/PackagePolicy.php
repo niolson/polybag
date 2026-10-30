@@ -49,7 +49,7 @@ class PackagePolicy
 
     public function ship(User $user, Package $package): Response|bool
     {
-        if (! $user->role->isAtLeast(Role::User)) {
+        if (! $user->role->isAtLeast(Role::Packer)) {
             return false;
         }
 
@@ -69,7 +69,7 @@ class PackagePolicy
      */
     public function printLabel(User $user, Package $package): bool
     {
-        return $user->role->isAtLeast(Role::User);
+        return $user->role->isAtLeast(Role::Packer);
     }
 
     /**

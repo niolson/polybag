@@ -543,7 +543,7 @@ it('preserves shipped packages when creating a new one', function (): void {
 
 it('uses the shipper account setting instead of a browser supplied auto-ship value', function (): void {
     $this->actingAs(User::factory()->create([
-        'role' => Role::User,
+        'role' => Role::Packer,
         'auto_ship_enabled' => false,
     ]));
 
@@ -580,7 +580,7 @@ it('uses the shipper account setting instead of a browser supplied auto-ship val
 
 it('auto ships for a shipper whose account enables it even when the browser sends false', function (): void {
     $this->actingAs(User::factory()->create([
-        'role' => Role::User,
+        'role' => Role::Packer,
         'auto_ship_enabled' => true,
     ]));
 
@@ -617,7 +617,7 @@ it('auto ships for a shipper whose account enables it even when the browser send
 
 it('keeps the shipment on screen when a bought label could not be recorded', function (): void {
     $this->actingAs(User::factory()->create([
-        'role' => Role::User,
+        'role' => Role::Packer,
         'auto_ship_enabled' => true,
     ]));
 
@@ -676,7 +676,7 @@ it('lets a manager toggle their own auto-ship setting from the pack page', funct
 })->with([Role::Manager, Role::Admin]);
 
 it('does not let a shipper toggle their own auto-ship setting', function (): void {
-    $user = User::factory()->create(['role' => Role::User, 'auto_ship_enabled' => true]);
+    $user = User::factory()->create(['role' => Role::Packer, 'auto_ship_enabled' => true]);
     $this->actingAs($user);
 
     Livewire::test(Pack::class)
@@ -1044,9 +1044,9 @@ it('does not let a shipper cancel the last label when someone else shipped it', 
 
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
-        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::Packer])->id,
     ]);
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     app(SessionLastLabel::class)->remember($package);
 
     Livewire::test(Pack::class)
@@ -1061,7 +1061,7 @@ it('lets the shipper cancel the last label they shipped', function (): void {
     $adapter->shouldReceive('cancelShipment')->once()->andReturn(CancelResponse::success('voided'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'shipped_by_user_id' => $shipper->id,
@@ -1236,7 +1236,7 @@ it('saves an unpacked line, and the Transparency code it gave up, over the draft
 });
 
 it('turns a shipper away from a shipment that has already shipped', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
@@ -1256,7 +1256,7 @@ it('lets a manager pack a shipment that has already shipped, with a warning', fu
 });
 
 it('stops a shipper saving or shipping once another station has shipped the shipment', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $boxSize = BoxSize::factory()->create();
     $shipment = Shipment::factory()->create();
     $item = ShipmentItem::factory()->create(['shipment_id' => $shipment->id, 'quantity' => 1, 'transparency' => false]);

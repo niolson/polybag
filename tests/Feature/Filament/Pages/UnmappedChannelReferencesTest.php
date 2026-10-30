@@ -21,7 +21,7 @@ it('renders the page for managers', function (): void {
 });
 
 it('denies access to regular users', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(UnmappedChannelReferences::class)->assertForbidden();
 });

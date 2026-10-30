@@ -108,16 +108,16 @@ it('accepts a well-formed value of each customs format on the Shipment form', fu
 ]);
 
 it('does not let a user below manager edit the Shipment customs fields', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create();
 
     Livewire::test(EditShipment::class, ['record' => $shipment->getRouteKey()])->assertForbidden();
 
-    expect(User::factory()->create(['role' => Role::User])->can('update', $shipment))->toBeFalse();
+    expect(User::factory()->create(['role' => Role::Packer])->can('update', $shipment))->toBeFalse();
 });
 
 it('shows the order\'s customs terms on the Shipment view', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->withCustomsTerms()->create();
 
     Livewire::test(ViewShipment::class, ['record' => $shipment->getRouteKey()])
@@ -130,7 +130,7 @@ it('shows the order\'s customs terms on the Shipment view', function (): void {
 });
 
 it('leaves the Customs section off the view of a domestic Shipment with none', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create(['country' => 'US']);
 
     Livewire::test(ViewShipment::class, ['record' => $shipment->getRouteKey()])

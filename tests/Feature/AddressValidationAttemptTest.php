@@ -359,7 +359,7 @@ it('re-runs validation from View Shipment on an exhausted Shipment', function ()
 });
 
 it('limits how often View Shipment re-runs validation', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Saloon::fake([
         '*oauth*' => uspsToken(),

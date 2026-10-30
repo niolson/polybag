@@ -45,7 +45,7 @@ beforeEach(function (): void {
 // ── Access control ────────────────────────────────────────────────────────────
 
 it('blocks non-admin users from accessing import sources', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user);
 
     expect(DataSourceResource::canAccess())->toBeFalse();

@@ -524,7 +524,7 @@ it('can create a User', function (): void {
             'name' => 'Jane Doe',
             'username' => 'janedoe',
             'password' => 'SecurePass123!456',
-            'role' => Role::User->value,
+            'role' => Role::Packer->value,
         ])
         ->call('create')
         ->assertHasNoFormErrors();
@@ -532,7 +532,7 @@ it('can create a User', function (): void {
     $this->assertDatabaseHas(User::class, [
         'name' => 'Jane Doe',
         'username' => 'janedoe',
-        'role' => 'user',
+        'role' => 'packer',
     ]);
 });
 
@@ -555,7 +555,7 @@ it('turns auto ship on by default for a new User', function (): void {
             'name' => 'Jane Doe',
             'username' => 'janedoe',
             'password' => 'SecurePass123!456',
-            'role' => Role::User->value,
+            'role' => Role::Packer->value,
         ])
         ->call('create')
         ->assertHasNoFormErrors();
@@ -584,7 +584,7 @@ it('enforces the password policy when an admin sets a User password', function (
             'name' => 'Jane Doe',
             'username' => 'janedoe',
             'password' => 'weakpass',
-            'role' => Role::User->value,
+            'role' => Role::Packer->value,
         ])
         ->call('create')
         ->assertHasFormErrors(['password']);

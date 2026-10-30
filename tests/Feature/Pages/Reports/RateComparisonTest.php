@@ -45,7 +45,7 @@ it('calculates total potential savings', function (): void {
 });
 
 it('restricts access to managers and above', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user);
 
     expect(RateComparison::canAccess())->toBeFalse();

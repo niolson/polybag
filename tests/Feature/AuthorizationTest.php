@@ -60,7 +60,7 @@ it('restricts special services to admins', function (Role $role): void {
     expect(SpecialServiceResource::canViewAny())->toBe($isAdmin);
 
     Livewire::test(ListSpecialServices::class)->assertStatus($isAdmin ? 200 : 403);
-})->with([Role::User, Role::Manager, Role::Admin]);
+})->with([Role::Packer, Role::Manager, Role::Admin]);
 
 it('shows reporting widgets to managers and admins but not shippers', function (Role $role): void {
     $this->actingAs(User::factory()->create(['role' => $role]));
@@ -69,11 +69,11 @@ it('shows reporting widgets to managers and admins but not shippers', function (
     foreach ([CarrierBreakdownChart::class, CostPerPackageTrend::class, ExceptionsWidget::class, ShippedShipmentsChart::class] as $widget) {
         expect($widget::canView())->toBe($isManager);
     }
-})->with([Role::User, Role::Manager, Role::Admin]);
+})->with([Role::Packer, Role::Manager, Role::Admin]);
 
 describe('user role access', function (): void {
     beforeEach(function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     });
 
     // Resources accessible to all roles
@@ -293,7 +293,7 @@ describe('carrier accounts are Admin-only', function (): void {
         Livewire::test(ListCarrierAccounts::class)->assertForbidden();
         Livewire::test(CreateCarrierAccount::class)->assertForbidden();
         Livewire::test(EditCarrierAccount::class, ['record' => $this->account->id])->assertForbidden();
-    })->with(['User' => Role::User, 'Manager' => Role::Manager]);
+    })->with(['Packer' => Role::Packer, 'Manager' => Role::Manager]);
 
     it('does not let a :dataset change the billing account', function (Role $role): void {
         $this->actingAs(User::factory()->create(['role' => $role]));
@@ -308,7 +308,7 @@ describe('carrier accounts are Admin-only', function (): void {
         }
 
         expect($this->account->fresh()->credentials['account_number'])->toBe('A1B2C3');
-    })->with(['User' => Role::User, 'Manager' => Role::Manager]);
+    })->with(['Packer' => Role::Packer, 'Manager' => Role::Manager]);
 
     it('lets an Admin manage carrier accounts', function (): void {
         $this->actingAs(User::factory()->admin()->create());
@@ -385,7 +385,7 @@ describe('voiding a label', function (): void {
         $adapter->shouldReceive('cancelShipment')->andReturn(CancelResponse::success('voided'));
         app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-        $this->shipper = User::factory()->create(['role' => Role::User]);
+        $this->shipper = User::factory()->create(['role' => Role::Packer]);
         $this->package = Package::factory()->shipped()->for(Shipment::factory())->create([
             'carrier' => 'USPS',
             'shipped_by_user_id' => $this->shipper->id,
@@ -397,7 +397,7 @@ describe('voiding a label', function (): void {
     });
 
     it('does not let a user void a label someone else shipped from the packages table', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
         $component = Livewire::test(ListPackages::class)->assertActionExists(TestAction::make('void')->table($this->package));
 
@@ -411,14 +411,14 @@ describe('voiding a label', function (): void {
     });
 
     it('hides the void action from a user who did not ship the package', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
         Livewire::test(ListPackages::class)->assertActionHidden(TestAction::make('void')->table($this->package));
         Livewire::test(ViewPackage::class, ['record' => $this->package->id])->assertActionHidden('void');
     });
 
     it('does not let a user void a label someone else shipped from View Package', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
         $component = Livewire::test(ViewPackage::class, ['record' => $this->package->id])->assertActionExists('void');
 

@@ -111,7 +111,7 @@ it('leaves recording a Shopify void to the fulfillment synchronizer', function (
 });
 
 it('hides recording a void from a user who is not a manager', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = Package::factory()->shipped()->create(['carrier' => 'USPS']);
 
     Livewire::test(ListPackages::class)
@@ -320,7 +320,7 @@ it('shows void action on view page for shipped packages', function (): void {
 });
 
 it('shows a shipper reprint but not void or edit, even on a package they shipped', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($shipper);
     $package = Package::factory()->shipped()->for(Shipment::factory())->create([
         'shipped_by_user_id' => $shipper->id,

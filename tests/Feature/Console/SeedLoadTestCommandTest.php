@@ -36,7 +36,7 @@ it('seeds packers with their own open Shipments and prints the plan', function (
         ->and($plan['packers'][0]['shipments'])->toHaveCount(3);
 
     $user = User::where('username', 'loadtest-1')->sole();
-    expect($user->role)->toBe(Role::User)
+    expect($user->role)->toBe(Role::Packer)
         ->and(auth()->attempt(['username' => 'loadtest-1', 'password' => 'secret-pass']))->toBeTrue();
 
     $shipment = Shipment::where('shipment_reference', $plan['packers'][1]['shipments'][2])->sole();
