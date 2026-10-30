@@ -39,7 +39,7 @@ it('returns 503 for non-admin users while setup is incomplete', function (): voi
     setSetupComplete(false);
 
     $request = Request::create('/', 'GET');
-    $request->setUserResolver(fn (): User => User::factory()->create(['role' => Role::User]));
+    $request->setUserResolver(fn (): User => User::factory()->create(['role' => Role::Packer]));
 
     expect(fn () => app(EnsureSetupComplete::class)->handle(
         $request,
@@ -65,7 +65,7 @@ it('allows requests through once setup is complete', function (): void {
     setSetupComplete(true);
 
     $request = Request::create('/', 'GET');
-    $request->setUserResolver(fn (): User => User::factory()->create(['role' => Role::User]));
+    $request->setUserResolver(fn (): User => User::factory()->create(['role' => Role::Packer]));
 
     $response = app(EnsureSetupComplete::class)->handle(
         $request,

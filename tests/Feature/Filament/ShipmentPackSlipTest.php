@@ -15,7 +15,7 @@ use Filament\Actions\Action;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
-    $this->shipper = User::factory()->create(['role' => Role::User, 'name' => 'Pat Packer']);
+    $this->shipper = User::factory()->create(['role' => Role::Packer, 'name' => 'Pat Packer']);
     $this->actingAs($this->shipper);
 });
 

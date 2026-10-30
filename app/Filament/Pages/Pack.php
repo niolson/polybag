@@ -62,7 +62,7 @@ class Pack extends Page
 
     public static function canAccess(): bool
     {
-        return auth()->user()?->role->isAtLeast(Role::User) ?? false;
+        return auth()->user()?->role->isAtLeast(Role::Packer) ?? false;
     }
 
     /**

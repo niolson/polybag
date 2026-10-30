@@ -52,7 +52,7 @@ class CreateUser extends Command
         $role = select(
             label: 'Role',
             options: collect(Role::cases())->mapWithKeys(fn (Role $role): array => [$role->value => $role->name]),
-            default: Role::User->value,
+            default: Role::Packer->value,
         );
 
         User::create(array_filter([

@@ -122,7 +122,7 @@ it('keeps the connection when its locations cannot be read on connect', function
 });
 
 it('forbids non-admin users from receiving oauth callbacks', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
 
     Http::fake();
 

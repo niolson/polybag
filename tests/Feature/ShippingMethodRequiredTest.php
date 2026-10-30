@@ -129,7 +129,7 @@ describe('the Ship page', function (): void {
     });
 
     it('offers no picker to someone who may not edit the shipment', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
         $package = unmethodedPackage();
         $method = ShippingMethod::factory()->create();
 

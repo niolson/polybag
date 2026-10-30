@@ -75,7 +75,7 @@ it('offers only Pack for a measured draft with items still to pack', function ()
 });
 
 it('offers a shipper Pack and the unattended purchase for a ready draft', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
@@ -123,7 +123,7 @@ it('offers none of the purchase actions for a shipped package', function (): voi
 });
 
 it('shows the stored weight and when it was saved before buying', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
@@ -132,7 +132,7 @@ it('shows the stored weight and when it was saved before buying', function (): v
 });
 
 it('buys unattended with the workstation printer settings and keeps the package on failure', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     $mock = Mockery::mock(PackageShippingWorkflow::class);
@@ -156,7 +156,7 @@ it('buys unattended with the workstation printer settings and keeps the package 
 });
 
 it('buys a PDF at the default DPI when the browser sends something unknown', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     $mock = Mockery::mock(PackageShippingWorkflow::class);
@@ -173,7 +173,7 @@ it('buys a PDF at the default DPI when the browser sends something unknown', fun
 });
 
 it('sends the packer to the Ship page when the purchase needs a person to choose', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     $mock = Mockery::mock(PackageShippingWorkflow::class);
@@ -187,7 +187,7 @@ it('sends the packer to the Ship page when the purchase needs a person to choose
 });
 
 it('prints the label it bought', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
 
     $response = new ShipResponse(
@@ -212,7 +212,7 @@ it('prints the label it bought', function (): void {
 });
 
 it('does not let a shipper buy for a shipment that has already shipped', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = viewPackageReadyDraft();
     Package::factory()->shipped()->for($package->shipment)->create();
     $package->shipment->update(['status' => ShipmentStatus::Shipped]);
@@ -223,7 +223,7 @@ it('does not let a shipper buy for a shipment that has already shipped', functio
 });
 
 it('shows a draft the same status badge as the Packages list', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(ViewPackage::class, ['record' => viewPackageEmptyDraft()->id])
         ->assertSee(PackageDraftState::Empty->getLabel());

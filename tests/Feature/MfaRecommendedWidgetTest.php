@@ -25,7 +25,7 @@ it('hides the MFA nudge once require_mfa is on', function (): void {
 });
 
 it('hides the MFA nudge from non-admins', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(MfaRecommendedWidget::canView())->toBeFalse();
 });

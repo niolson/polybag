@@ -6,14 +6,14 @@ use Filament\Support\Contracts\HasLabel;
 
 enum Role: string implements HasLabel
 {
-    case User = 'user';
+    case Packer = 'packer';
     case Manager = 'manager';
     case Admin = 'admin';
 
     public function getLabel(): string
     {
         return match ($this) {
-            self::User => 'User',
+            self::Packer => 'Packer',
             self::Manager => 'Manager',
             self::Admin => 'Admin',
         };
@@ -27,7 +27,7 @@ enum Role: string implements HasLabel
     private function level(): int
     {
         return match ($this) {
-            self::User => 1,
+            self::Packer => 1,
             self::Manager => 2,
             self::Admin => 3,
         };

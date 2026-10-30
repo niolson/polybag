@@ -75,7 +75,7 @@ class SeedLoadTest extends Command
                 $user->fill([
                     'name' => "Load Test Packer {$p}",
                     'password' => $this->option('password'),
-                    'role' => Role::User,
+                    'role' => Role::Packer,
                     'auto_ship_enabled' => false,
                     'active' => true,
                 ])->save();

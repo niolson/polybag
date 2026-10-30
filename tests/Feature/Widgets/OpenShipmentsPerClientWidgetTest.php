@@ -37,7 +37,7 @@ it('is visible when multi_client_enabled is true', function (): void {
 it('is hidden from shippers even when multi_client_enabled is true', function (): void {
     config()->set('features.multi_client_enabled', true);
 
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(OpenShipmentsPerClientWidget::canView())->toBeFalse();
 });

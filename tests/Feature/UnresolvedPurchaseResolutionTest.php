@@ -246,7 +246,7 @@ it('tells a shipper a manager has to settle it, and offers them neither step', f
     $package = unshippedPackage();
     strandedDirectOffer($package);
 
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(ViewPackage::class, ['record' => $package->id])
         ->assertSee('A manager needs to settle this')

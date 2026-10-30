@@ -22,7 +22,7 @@ it('lets a manager who can start a batch open the batch it started', function ()
 });
 
 it('keeps batches from users below manager', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(ListShipments::class)->assertTableBulkActionHidden('batch-ship');
     $this->get(LabelBatchResource::getUrl('view', ['record' => LabelBatch::factory()->create()]))->assertForbidden();

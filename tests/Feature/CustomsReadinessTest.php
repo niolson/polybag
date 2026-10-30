@@ -394,7 +394,7 @@ describe('export ITN', function (): void {
     });
 
     it('sends a user who cannot edit the Shipment to a manager instead of a link', function (): void {
-        $this->actingAs(User::factory()->create(['role' => Role::User]));
+        $this->actingAs(User::factory()->create(['role' => Role::Packer]));
         $package = readinessPackage('JP', [['value' => 3000.0]]);
 
         $finding = findingNamed(readinessFor($package), 'export_itn_required');

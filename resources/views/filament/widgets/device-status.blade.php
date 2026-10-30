@@ -3,7 +3,7 @@
         x-data="{
             printer: null,
             scaleConfigured: false,
-            isShipper: @js(auth()->user()?->role === \App\Enums\Role::User),
+            isPacker: @js(auth()->user()?->role === \App\Enums\Role::Packer),
 
             init() {
                 this.printer = PrinterSettings.labelPrinterFor(PrinterSettings.labelFormat())
@@ -32,7 +32,7 @@
                 return this.printerOk && this.scaleOk
             }
         }"
-        x-show="!allOk || isShipper"
+        x-show="!allOk || isPacker"
         x-cloak
         class="fi-wi-stats-overview-stat relative rounded-xl bg-white p-4 shadow-sm ring-1 ring-gray-950/5 dark:bg-gray-900 dark:ring-white/10"
     >
@@ -64,7 +64,7 @@
             </div>
 
             <div class="flex items-center gap-4">
-                @if(auth()->user()?->role === \App\Enums\Role::User)
+                @if(auth()->user()?->role === \App\Enums\Role::Packer)
                     <a
                         href="{{ \App\Filament\Pages\Pack::getUrl() }}"
                         class="inline-flex items-center rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-primary-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-600"

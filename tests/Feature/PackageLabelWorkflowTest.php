@@ -50,7 +50,7 @@ it('voids a shipped package label and clears shipping data', function (): void {
 });
 
 it('records the operator who voided the label on the label record', function (): void {
-    $operator = User::factory()->create(['role' => Role::User]);
+    $operator = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111899223456789012',
@@ -73,14 +73,14 @@ it('records the operator who voided the label on the label record', function ():
 it('refuses to void a label for a user who neither shipped the package nor is a manager', function (): void {
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
-        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::Packer])->id,
     ]);
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
     $adapter->shouldReceive('cancelShipment')->never()->andReturn(CancelResponse::success('voided'));
     app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
 
-    $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, User::factory()->create(['role' => Role::User]));
+    $result = app(PackageLabelWorkflow::class)->voidOwnLabel($package, User::factory()->create(['role' => Role::Packer]));
 
     expect($result->success)->toBeFalse()
         ->and($result->title)->toBe('Access Denied')
@@ -88,7 +88,7 @@ it('refuses to void a label for a user who neither shipped the package nor is a 
 });
 
 it('limits voiding from the Packages pages to managers, even for the shipper who bought the label', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'shipped_by_user_id' => $shipper->id,
@@ -109,7 +109,7 @@ it('lets a manager void a label another user bought through the own-label comman
     $package = Package::factory()->shipped()->create([
         'carrier' => 'USPS',
         'tracking_number' => '9400111899223456789012',
-        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::Packer])->id,
     ]);
 
     $adapter = Mockery::mock(DirectCarrierAdapter::class);
@@ -226,7 +226,7 @@ it('reports a generic error when voiding hits an unexpected exception', function
 });
 
 it('refuses label reprint when the package is not shipped', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->create();
 
     $result = app(PackageLabelWorkflow::class)->labelForReprint($package, $user);
@@ -236,7 +236,7 @@ it('refuses label reprint when the package is not shipped', function (): void {
 });
 
 it('refuses label reprint when the shipped package has no stored label file', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $user->id,
         'label_data' => null,
@@ -249,7 +249,7 @@ it('refuses label reprint when the shipped package has no stored label file', fu
 });
 
 it('allows a manager to reprint a label for a package shipped by someone else', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $manager = User::factory()->create(['role' => Role::Manager]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $shipper->id,
@@ -264,7 +264,7 @@ it('allows a manager to reprint a label for a package shipped by someone else', 
 });
 
 it('returns a print request for label reprint when the user can access the package', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $user->id,
         'tracking_number' => 'TRACK123',
@@ -286,7 +286,7 @@ it('returns a print request for label reprint when the user can access the packa
 });
 
 it('describes the action as a reprint once the label has already been printed', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $user->id,
         'tracking_number' => 'TRACK123',
@@ -360,8 +360,8 @@ it('clears the printed timestamp when a label is voided', function (): void {
 });
 
 it('lets a shipper reprint a label another shipper bought', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
-    $otherUser = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
+    $otherUser = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create([
         'shipped_by_user_id' => $shipper->id,
         'label_data' => 'base64-label',
@@ -418,7 +418,7 @@ it('says a label was voided but not recorded, and lets a manager record it witho
 });
 
 it('limits recording a void to managers', function (): void {
-    $shipper = User::factory()->create(['role' => Role::User]);
+    $shipper = User::factory()->create(['role' => Role::Packer]);
     $package = Package::factory()->shipped()->create(['carrier' => 'USPS', 'shipped_by_user_id' => $shipper->id]);
 
     $result = app(PackageLabelWorkflow::class)->recordVoid($package, $shipper);

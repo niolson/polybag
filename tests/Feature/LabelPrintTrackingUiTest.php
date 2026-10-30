@@ -217,10 +217,10 @@ it('interleaves each customs form with its own label in a batch print', function
 });
 
 it('lets a shipper print a label another shipper bought', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     $package = Package::factory()->shipped()->create([
-        'shipped_by_user_id' => User::factory()->create(['role' => Role::User])->id,
+        'shipped_by_user_id' => User::factory()->create(['role' => Role::Packer])->id,
         'label_data' => 'base64-label',
     ]);
 

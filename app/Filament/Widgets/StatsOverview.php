@@ -28,9 +28,9 @@ class StatsOverview extends BaseWidget
 
     protected function getStats(): array
     {
-        if (auth()->user()?->role === Role::User) {
+        if (auth()->user()?->role === Role::Packer) {
             $pending = Cache::remember(
-                'widget:stats_overview:shipper:v1',
+                'widget:stats_overview:packer:v1',
                 60,
                 fn (): int => Shipment::query()->where('status', ShipmentStatus::Open)->count(),
             );

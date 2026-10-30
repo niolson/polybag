@@ -32,7 +32,7 @@ class DatabaseSeeder extends Seeder
         User::firstOrCreate(['username' => 'user'], [
             'name' => 'Test User',
             'password' => 'user',
-            'role' => 'user',
+            'role' => 'packer',
         ]);
 
         $this->call([

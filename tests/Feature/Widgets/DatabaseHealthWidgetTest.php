@@ -17,7 +17,7 @@ it('is visible to admin users', function (): void {
 });
 
 it('canView returns false for non-admin', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
 
     $this->actingAs($user);
 

@@ -3,7 +3,7 @@
 use App\Enums\Role;
 
 it('has the expected backing values', function (): void {
-    expect(Role::User->value)->toBe('user')
+    expect(Role::Packer->value)->toBe('packer')
         ->and(Role::Manager->value)->toBe('manager')
         ->and(Role::Admin->value)->toBe('admin');
 });
@@ -14,19 +14,19 @@ it('has three cases', function (): void {
 
 describe('isAtLeast', function (): void {
     it('user is at least user', function (): void {
-        expect(Role::User->isAtLeast(Role::User))->toBeTrue();
+        expect(Role::Packer->isAtLeast(Role::Packer))->toBeTrue();
     });
 
     it('user is not at least manager', function (): void {
-        expect(Role::User->isAtLeast(Role::Manager))->toBeFalse();
+        expect(Role::Packer->isAtLeast(Role::Manager))->toBeFalse();
     });
 
     it('user is not at least admin', function (): void {
-        expect(Role::User->isAtLeast(Role::Admin))->toBeFalse();
+        expect(Role::Packer->isAtLeast(Role::Admin))->toBeFalse();
     });
 
     it('manager is at least user', function (): void {
-        expect(Role::Manager->isAtLeast(Role::User))->toBeTrue();
+        expect(Role::Manager->isAtLeast(Role::Packer))->toBeTrue();
     });
 
     it('manager is at least manager', function (): void {
@@ -38,7 +38,7 @@ describe('isAtLeast', function (): void {
     });
 
     it('admin is at least user', function (): void {
-        expect(Role::Admin->isAtLeast(Role::User))->toBeTrue();
+        expect(Role::Admin->isAtLeast(Role::Packer))->toBeTrue();
     });
 
     it('admin is at least manager', function (): void {

@@ -69,7 +69,7 @@ it('counts batch failures', function (): void {
 });
 
 it('restricts access to managers and above', function (): void {
-    $user = User::factory()->create(['role' => Role::User]);
+    $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user);
 
     expect(PackingValidationReport::canAccess())->toBeFalse();

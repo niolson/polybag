@@ -225,7 +225,7 @@ it('endShippingDay advances the ship date', function (): void {
 });
 
 it('denies access to users with User role', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     Livewire::test(EndOfDay::class)->assertForbidden();
 });

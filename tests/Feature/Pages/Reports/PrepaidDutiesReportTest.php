@@ -160,7 +160,7 @@ it('sorts by ship date', function (): void {
 });
 
 it('restricts access to managers and above', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(PrepaidDutiesReport::canAccess())->toBeFalse();
 

@@ -214,7 +214,7 @@ it('ship sends a package with unpacked items back to the Pack page', function ()
 });
 
 it('ship refuses a shipper another package for a shipment that has already shipped', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = createShippablePackageForErrorTest();
     $package->shipment->update(['status' => ShipmentStatus::Shipped]);
 
@@ -223,7 +223,7 @@ it('ship refuses a shipper another package for a shipment that has already shipp
 });
 
 it('ship refuses a shipper whose shipment shipped from another station after the page opened', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $package = createShippablePackageForErrorTest();
     registerThrowingAdapterForErrorTest(new RuntimeException('must not be asked to buy'));
 
@@ -238,7 +238,7 @@ it('ship refuses a shipper whose shipment shipped from another station after the
 });
 
 it('ship still tells a shipper a bought package has shipped, rather than forbidding it', function (): void {
-    $this->actingAs(User::factory()->create(['role' => Role::User]));
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     $shipment = Shipment::factory()->create(['status' => ShipmentStatus::Shipped]);
     $package = Package::factory()->shipped()->for($shipment)->create();
 
