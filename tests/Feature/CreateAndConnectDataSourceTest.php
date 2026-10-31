@@ -133,7 +133,7 @@ it('goes to the edit page when Dev enters the connection\'s own credentials', fu
     ]), 'shopify'],
     'Amazon refresh token' => fn (): array => [newAmazonConnection([
         'settings.refresh_token' => 'Atzr|own-token',
-        'settings.marketplace_id' => 'ATVPDKIKX0DER',
+        'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
     ]), 'sp-api'],
 ]);
 
@@ -184,23 +184,23 @@ it('says which credentials to enter without the broker', function (): void {
 it('leaves the Amazon marketplace to OAuth discovery', function (): void {
     Livewire::test(CreateDataSource::class)
         ->fillForm(newAmazonConnection())
-        ->assertFormFieldHidden('settings.marketplace_id')
-        ->assertSee('Its marketplace is set from the ones Amazon reports for the seller.')
+        ->assertFormFieldHidden('settings.marketplace_ids')
+        ->assertSee('Its marketplaces are set from the ones Amazon reports for the seller.')
         ->call('create')
         ->assertHasNoFormErrors()
         ->assertRedirectContains('/oauth/sp-api/authorize?');
 
     $source = DataSource::where('name', 'Amazon Seller')->firstOrFail();
 
-    expect($source->settings['marketplace_id'] ?? null)->toBeNull();
+    expect($source->settings['marketplace_ids'] ?? null)->toBeNull();
 });
 
 it('asks for the Amazon marketplace when Dev enters its own refresh token', function (): void {
     Livewire::test(CreateDataSource::class)
         ->fillForm(newAmazonConnection(['settings.refresh_token' => 'Atzr|own-token']))
-        ->assertFormFieldVisible('settings.marketplace_id')
+        ->assertFormFieldVisible('settings.marketplace_ids')
         ->call('create')
-        ->assertHasFormErrors(['settings.marketplace_id' => 'required']);
+        ->assertHasFormErrors(['settings.marketplace_ids' => 'required']);
 });
 
 it('asks for the Amazon marketplace without the broker', function (): void {
@@ -209,7 +209,7 @@ it('asks for the Amazon marketplace without the broker', function (): void {
     Livewire::test(CreateDataSource::class)
         ->fillForm(newAmazonConnection(['settings.refresh_token' => 'Atzr|own-token']))
         ->call('create')
-        ->assertHasFormErrors(['settings.marketplace_id' => 'required']);
+        ->assertHasFormErrors(['settings.marketplace_ids' => 'required']);
 });
 
 it('returns to the new connection when the create page opens again before OAuth finishes', function (): void {

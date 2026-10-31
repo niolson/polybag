@@ -26,9 +26,7 @@ class AmazonMarketplaceDiscoveryService
             return new AmazonMarketplaceDiscoveryResult(
                 succeeded: false,
                 marketplaces: [],
-                selectedMarketplaceId: is_string($dataSource->settings['marketplace_id'] ?? null)
-                    ? $dataSource->settings['marketplace_id']
-                    : null,
+                selectedMarketplaceIds: $dataSource->amazonMarketplaceIds(),
                 selectionRequired: false,
                 error: 'Disable sandbox mode before refreshing Amazon marketplaces.',
             );
@@ -56,20 +54,25 @@ class AmazonMarketplaceDiscoveryService
 
             $marketplaces = $this->normalizeMarketplaces($participations);
             $settings = $dataSource->settings ?? [];
-            $existingMarketplaceId = $settings['marketplace_id'] ?? null;
+            $existingMarketplaceIds = DataSource::amazonMarketplaceIdsIn($settings);
             $availableIds = array_column($marketplaces, 'id');
-            $hasExistingMarketplace = is_string($existingMarketplaceId) && $existingMarketplaceId !== '';
-            $selectedMarketplaceUnavailable = $hasExistingMarketplace
-                && ! in_array($existingMarketplaceId, $availableIds, true);
 
-            $selectedMarketplaceId = $hasExistingMarketplace
-                ? $existingMarketplaceId
-                : (count($marketplaces) === 1 ? $marketplaces[0]['id'] : null);
+            // A selection is kept, and what Amazon no longer reports is
+            // flagged rather than dropped. With none, only a seller's sole
+            // marketplace is chosen for them: an order from another country
+            // is an international shipment, so nobody imports one unasked.
+            $selectedMarketplaceIds = $existingMarketplaceIds !== []
+                ? $existingMarketplaceIds
+                : (count($marketplaces) === 1 ? [$marketplaces[0]['id']] : []);
 
-            if ($selectedMarketplaceId === null) {
-                unset($settings['marketplace_id']);
+            if ($selectedMarketplaceIds === []) {
+                unset($settings['marketplace_ids'], $settings['primary_marketplace_id']);
             } else {
-                $settings['marketplace_id'] = $selectedMarketplaceId;
+                $settings['primary_marketplace_id'] = DataSource::primaryAmazonMarketplaceIdIn([
+                    ...$settings,
+                    'marketplace_ids' => $selectedMarketplaceIds,
+                ]);
+                $settings['marketplace_ids'] = $selectedMarketplaceIds;
             }
 
             $settings['amazon_marketplaces'] = $marketplaces;
@@ -82,9 +85,9 @@ class AmazonMarketplaceDiscoveryService
             return new AmazonMarketplaceDiscoveryResult(
                 succeeded: true,
                 marketplaces: $marketplaces,
-                selectedMarketplaceId: $selectedMarketplaceId,
-                selectionRequired: count($marketplaces) > 1 && ! $hasExistingMarketplace,
-                selectedMarketplaceUnavailable: $selectedMarketplaceUnavailable,
+                selectedMarketplaceIds: $selectedMarketplaceIds,
+                selectionRequired: count($marketplaces) > 1 && $existingMarketplaceIds === [],
+                unavailableMarketplaceIds: array_values(array_diff($existingMarketplaceIds, $availableIds)),
             );
         } catch (Throwable $exception) {
             Log::warning('Amazon marketplace discovery failed.', [
@@ -146,7 +149,7 @@ class AmazonMarketplaceDiscoveryService
         return new AmazonMarketplaceDiscoveryResult(
             succeeded: false,
             marketplaces: $settings['amazon_marketplaces'] ?? [],
-            selectedMarketplaceId: is_string($settings['marketplace_id'] ?? null) ? $settings['marketplace_id'] : null,
+            selectedMarketplaceIds: DataSource::amazonMarketplaceIdsIn($settings),
             selectionRequired: false,
             error: $message,
         );

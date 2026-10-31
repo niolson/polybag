@@ -43,7 +43,7 @@ function amazonConnection(array $attributes = [], bool $unassigned = true): Data
     $factory = DataSource::factory()->amazon()->importDisabled();
 
     return ($unassigned ? $factory->unassigned() : $factory)->create(array_merge([
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => ['refresh_token' => 'form-refresh-token'],
     ], $attributes));
 }
@@ -162,7 +162,7 @@ describe('turning the opt-in on', function (): void {
                 'active' => true,
                 'import_enabled' => false,
                 'offers_off_amazon_shipping' => true,
-                'settings.marketplace_id' => 'ATVPDKIKX0DER',
+                'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
                 'settings.refresh_token' => 'form-refresh-token',
             ])
             ->call('create')
@@ -331,7 +331,7 @@ describe('a connection shared across clients', function (): void {
                 'active' => true,
                 'import_enabled' => false,
                 'offers_off_amazon_shipping' => true,
-                'settings.marketplace_id' => 'ATVPDKIKX0DER',
+                'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
                 'settings.refresh_token' => 'form-refresh-token',
             ])
             ->call('create')
@@ -355,7 +355,7 @@ describe('a connection shared across clients', function (): void {
                 'active' => true,
                 'import_enabled' => false,
                 'offers_off_amazon_shipping' => true,
-                'settings.marketplace_id' => 'ATVPDKIKX0DER',
+                'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
                 'settings.refresh_token' => 'form-refresh-token',
             ])
             ->call('create')

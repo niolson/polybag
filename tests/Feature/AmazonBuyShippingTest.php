@@ -297,7 +297,7 @@ function amazonBuyShippingSource(): DataSource
         'active' => true,
         'settings' => [
             'channel_name' => 'Amazon',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'tracking_number' => 'tracking_number',
@@ -466,6 +466,27 @@ it('tags every rate with the discovered service it is an offer of', function ():
         ->and($identity->externalServiceId)->toBe('ONTRAC_MFN_GROUND')
         ->and($rates->every(fn (RateResponse $rate): bool => $rate->observedService !== null))->toBeTrue();
 });
+
+it('records observed services under the order\'s marketplace, else the connection\'s primary', function (?string $orderMarketplace, string $recorded): void {
+    $this->source->update(['settings' => [
+        ...$this->source->settings,
+        'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2'],
+        'primary_marketplace_id' => 'ATVPDKIKX0DER',
+    ]]);
+    $this->package->shipment->update(['metadata' => [
+        ...$this->package->shipment->metadata,
+        ...($orderMarketplace === null ? [] : ['amazon_sales_channel' => ['channelName' => 'Amazon.ca', 'marketplaceId' => $orderMarketplace]]),
+    ]]);
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), []);
+
+    expect(ObservedService::pluck('marketplace')->unique()->values()->all())->toBe([$recorded])
+        ->and(app(AmazonBuyShippingService::class)->marketplaceIdFor($this->package->fresh(), $this->source->fresh()))->toBe($recorded);
+})->with([
+    'the order\'s own' => ['A2EUQ1WTGCTBG2', 'A2EUQ1WTGCTBG2'],
+    'none recorded' => [null, 'ATVPDKIKX0DER'],
+]);
 
 it('records the ineligible catalog alongside what was on offer, and authors nothing', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);

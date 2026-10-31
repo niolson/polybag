@@ -231,14 +231,14 @@ it('creates an amazon DataSource record from the import source step with an auto
     $component = Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
         ->set('data.import_source', 'amazon')
-        ->set('data.amazon_marketplace_id', 'ATVPDKIKX0DER');
+        ->set('data.amazon_marketplace_ids', ['ATVPDKIKX0DER']);
 
     invokePrivateMethod($component->instance(), 'saveImportSource');
 
     $record = DataSource::where('source_type', AmazonSource::class)->firstOrFail();
     $channel = Channel::where('name', 'Amazon')->firstOrFail();
 
-    expect($record->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+    expect($record->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($record->settings['channel_name'])->toBe($channel->id);
 });
 
@@ -248,7 +248,7 @@ it('creates an amazon DataSource record using the selected channel', function ()
     $component = Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
         ->set('data.import_source', 'amazon')
-        ->set('data.amazon_marketplace_id', 'ATVPDKIKX0DER')
+        ->set('data.amazon_marketplace_ids', ['ATVPDKIKX0DER'])
         ->set('data.amazon_channel_id', $channel->id);
 
     invokePrivateMethod($component->instance(), 'saveImportSource');
@@ -301,13 +301,48 @@ it('turns import on for the connection it configures', function (): void {
     $component = Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
         ->set('data.import_source', 'amazon')
-        ->set('data.amazon_marketplace_id', 'ATVPDKIKX0DER');
+        ->set('data.amazon_marketplace_ids', ['ATVPDKIKX0DER']);
 
     invokePrivateMethod($component->instance(), 'saveImportSource');
 
     expect(DataSource::count())->toBe(1)
         ->and($existing->refresh()->active)->toBeTrue()
         ->and($existing->import_enabled)->toBeTrue();
+});
+
+it('does not activate a Shopify connection another active connection reads the store of', function (): void {
+    // Postage only, so the wizard picks the inactive importer beside it.
+    DataSource::factory()->shopify()->importDisabled()->create(['name' => 'Acme Main', 'settings' => ['shop_domain' => 'acme.myshopify.com']]);
+    $history = DataSource::factory()->shopify()->create(['name' => 'Acme History', 'active' => false, 'settings' => ['shop_domain' => 'acme.myshopify.com']]);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'shopify')
+        ->set('data.shopify_shop_domain', 'ACME.myshopify.com');
+
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    $component->assertNotified('Acme History was saved inactive');
+
+    expect($history->refresh()->active)->toBeFalse()
+        ->and($history->import_enabled)->toBeTrue();
+});
+
+it('does not activate an Amazon connection another active connection reads the seller of', function (): void {
+    $settings = ['auth_mode' => 'authorization_code', 'amazon_selling_partner_id' => 'A1SELLER', 'marketplace_ids' => ['ATVPDKIKX0DER']];
+    DataSource::factory()->amazon()->importDisabled()->create(['name' => 'Seller Main', 'settings' => $settings]);
+    $deactivated = DataSource::factory()->amazon()->create(['name' => 'Seller Again', 'active' => false, 'settings' => $settings]);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'amazon')
+        ->set('data.amazon_marketplace_ids', ['ATVPDKIKX0DER']);
+
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    $component->assertNotified('Seller Again was saved inactive');
+
+    expect($deactivated->refresh()->active)->toBeFalse();
 });
 
 it('configures the importing connection rather than a postage-only one of the same driver', function (): void {
@@ -317,11 +352,11 @@ it('configures the importing connection rather than a postage-only one of the sa
     $component = Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
         ->set('data.import_source', 'amazon')
-        ->set('data.amazon_marketplace_id', 'A2EUQ1WTGCTBG2');
+        ->set('data.amazon_marketplace_ids', ['A2EUQ1WTGCTBG2']);
 
     invokePrivateMethod($component->instance(), 'saveImportSource');
 
-    expect($importer->refresh()->settings['marketplace_id'])->toBe('A2EUQ1WTGCTBG2')
+    expect($importer->refresh()->settings['marketplace_ids'])->toBe(['A2EUQ1WTGCTBG2'])
         ->and($postageOnly->refresh()->import_enabled)->toBeFalse();
 });
 

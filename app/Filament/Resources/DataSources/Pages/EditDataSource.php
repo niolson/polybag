@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DataSources\Pages;
 
+use App\Enums\AmazonMarketplace;
 use App\Filament\Resources\DataSources\Concerns\SetsUpOffAmazonShipping;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
@@ -41,6 +42,9 @@ class EditDataSource extends EditRecord
     private ?array $pendingOffAmazonShippingScopes = null;
 
     private bool $offeredOffAmazonShippingBeforeSave = false;
+
+    /** @var list<string> The Amazon marketplaces the connection imported from before this save. */
+    private array $amazonMarketplaceIdsBeforeSave = [];
 
     public function mount(int|string $record): void
     {
@@ -241,11 +245,11 @@ class EditDataSource extends EditRecord
                             ->title('Amazon marketplace refresh failed')
                             ->body($result->error)
                             ->send();
-                    } elseif ($result->selectedMarketplaceUnavailable) {
+                    } elseif ($result->unavailableMarketplaceIds !== []) {
                         Notification::make()
                             ->warning()
                             ->title('Selected Amazon marketplace was not returned')
-                            ->body('The existing marketplace selection was preserved. Review it before changing imports.')
+                            ->body('Not returned: '.AmazonMarketplace::names($result->unavailableMarketplaceIds).'. The marketplace selection was preserved. Review it before changing imports.')
                             ->send();
                     } elseif ($result->marketplaces === []) {
                         Notification::make()
@@ -257,7 +261,7 @@ class EditDataSource extends EditRecord
                         Notification::make()
                             ->warning()
                             ->title('Amazon marketplaces refreshed')
-                            ->body('Choose a marketplace before importing.')
+                            ->body('Choose its marketplaces before importing.')
                             ->send();
                     } else {
                         Notification::make()
@@ -266,7 +270,7 @@ class EditDataSource extends EditRecord
                             ->send();
                     }
 
-                    $this->refreshFormData(['settings.marketplace_id']);
+                    $this->refreshFormData(['settings.marketplace_ids', 'settings.primary_marketplace_id']);
                 }),
 
             Action::make('sync_shopify_locations')
@@ -329,6 +333,7 @@ class EditDataSource extends EditRecord
         $record = $this->getRecord();
 
         $this->offeredOffAmazonShippingBeforeSave = $this->dataSource()->offers_off_amazon_shipping;
+        $this->amazonMarketplaceIdsBeforeSave = $this->dataSource()->amazonMarketplaceIds();
         $this->pendingOffAmazonShippingScopes = array_key_exists('off_amazon_shipping_scopes', $data)
             ? array_values((array) $data['off_amazon_shipping_scopes'])
             : null;
@@ -398,6 +403,8 @@ class EditDataSource extends EditRecord
      */
     private function afterAmazonSave(DataSource $dataSource): void
     {
+        $this->warnOfOpenShipmentsInRemovedMarketplaces($dataSource);
+
         if ($this->pendingOffAmazonShippingScopes !== null) {
             $dataSource->syncOffAmazonShippingScopes($this->pendingOffAmazonShippingScopes);
         }
@@ -425,6 +432,30 @@ class EditDataSource extends EditRecord
         }
     }
 
+    /**
+     * A marketplace removed from the connection is no longer searched, so an
+     * order cancelled there would stay open here: Amazon closes a Shipment
+     * only from the orders its own search returns closed
+     * (`order-reconciliation/07`). Its open Shipments can still be packed,
+     * shipped and confirmed, so the save goes ahead, with a count.
+     */
+    private function warnOfOpenShipmentsInRemovedMarketplaces(DataSource $dataSource): void
+    {
+        $removed = array_values(array_diff($this->amazonMarketplaceIdsBeforeSave, $dataSource->amazonMarketplaceIds()));
+        $open = $dataSource->openShipmentsInAmazonMarketplacesCount($removed);
+
+        if ($open === 0) {
+            return;
+        }
+
+        Notification::make()
+            ->warning()
+            ->title($open.' open '.Str::plural('shipment', $open).' from a removed marketplace')
+            ->body('Orders from '.AmazonMarketplace::names($removed).' are no longer imported. Their open shipments stay open and can still be packed and shipped, but one cancelled on Amazon will not be closed here. Close those by hand.')
+            ->persistent()
+            ->send();
+    }
+
     private function dataSource(): DataSource
     {
         $record = $this->getRecord();
@@ -441,7 +472,7 @@ class EditDataSource extends EditRecord
         $dataSource = $this->dataSource();
 
         return $dataSource->source_type === AmazonSource::class
-            && blank($dataSource->settings['marketplace_id'] ?? null);
+            && $dataSource->amazonMarketplaceIds() === [];
     }
 
     /**

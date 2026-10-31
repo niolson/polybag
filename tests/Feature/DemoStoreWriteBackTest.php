@@ -311,7 +311,7 @@ it('sends an Amazon connection no confirmation in demo', function (): void {
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'name' => 'Amazon Export',
-        'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER', 'export_enabled' => true],
+        'settings' => ['channel_name' => 'Amazon', 'marketplace_ids' => ['ATVPDKIKX0DER'], 'export_enabled' => true],
         'secret_settings' => ['client_id' => 'id', 'client_secret' => 'secret', 'refresh_token' => 'token'],
     ]);
     $shipment = Shipment::factory()->create([

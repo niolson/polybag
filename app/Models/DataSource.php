@@ -4,8 +4,10 @@ namespace App\Models;
 
 use App\Contracts\SyncsProductCatalog;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
+use App\Enums\AmazonMarketplace;
 use App\Enums\OffAmazonShippingStatus;
 use App\Enums\ScheduleInterval;
+use App\Enums\ShipmentStatus;
 use App\Http\Integrations\Amazon\AmazonSpApiEnvironment;
 use App\Http\Integrations\Amazon\Requests\SearchListingsItems;
 use App\Models\Concerns\HasDefaultClient;
@@ -74,6 +76,24 @@ class DataSource extends Model
 
     protected static function booted(): void
     {
+        // The primary is always one of the chosen marketplaces: a form that
+        // hides it, or a marketplace removed, never leaves a stale one.
+        static::saving(function (DataSource $source): void {
+            $settings = $source->settings ?? [];
+
+            if (! $source->isAmazon() || ! array_key_exists('marketplace_ids', $settings)) {
+                return;
+            }
+
+            $settings['marketplace_ids'] = self::amazonMarketplaceIdsIn($settings);
+            $settings['primary_marketplace_id'] = self::primaryAmazonMarketplaceIdIn($settings);
+            $source->settings = $settings;
+
+            if ($source->exists) {
+                $source->sweepAddedAmazonMarketplaces();
+            }
+        });
+
         static::saved(function (DataSource $source): void {
             if ($source->wasChanged('client_id') && $source->client_id !== null) {
                 $source->dropScopesOutsideClient();
@@ -138,7 +158,7 @@ class DataSource extends Model
 
         return match (true) {
             ($settings['auth_mode'] ?? null) !== 'authorization_code' || blank($settings['amazon_selling_partner_id'] ?? null) => 'Connect this Amazon account through OAuth (Connect Amazon) to sync its product catalog: listing search needs the seller ID that OAuth records, and a connection with its own credentials has none.',
-            blank($settings['marketplace_id'] ?? null) => 'Choose an Amazon marketplace to sync this connection\'s product catalog.',
+            $this->primaryAmazonMarketplaceId() === null => 'Choose an Amazon marketplace to sync this connection\'s product catalog.',
             // The sandbox holds no seller's listings, and answers a listing search
             // with an error that says nothing about why.
             app(AmazonSpApiEnvironment::class)->usesSandbox(SearchListingsItems::class) => 'The Amazon product catalog sync reads the seller\'s live listings, so it needs Sandbox Mode (Dev Settings) off.',
@@ -282,11 +302,12 @@ class DataSource extends Model
     }
 
     /**
-     * The seller account and marketplace an Amazon import reads, for telling
-     * whether what it has read so far (`import_updated_through`,
-     * `import_swept_at`, `import_reads`) came from them. A connection
-     * reconnected to another seller account, or pointed at another
-     * marketplace, starts over.
+     * The seller account an Amazon import reads, for telling whether what it
+     * has read so far (`import_updated_through`, `import_swept_at`,
+     * `import_reads`) came from it. A connection reconnected to another seller
+     * account starts over. Its marketplaces play no part: ticking another one
+     * does not restart the import, because the daily sweep reads every open
+     * order in the lookback whatever the cursor says (`connection-identity/01`).
      *
      * The account is the selling partner ID Amazon reports on an OAuth
      * connection, whose refresh token can rotate. A connection with its own
@@ -312,7 +333,183 @@ class DataSource extends Model
             ? 'partner:'.($config['amazon_selling_partner_id'] ?? '')
             : 'token:'.hash_hmac('sha256', (string) ($config['refresh_token'] ?? ''), (string) config('app.key'));
 
-        return hash('sha256', $account.'|'.($config['marketplace_id'] ?? ''));
+        return hash('sha256', $account);
+    }
+
+    /**
+     * Make the next import read every open order again when a marketplace was
+     * added, rather than waiting up to a day for the next sweep
+     * ({@see AmazonSource::SWEEP_HOURS}): the added marketplace's open orders
+     * changed before the cursor, so no search for changes returns them. A
+     * sweep in progress is dropped too, since it carries on with the
+     * marketplaces it started with.
+     *
+     * A search for changes in progress is kept. It reads orders that changed,
+     * and the added marketplace has none imported here to close; its open
+     * orders are the sweep's, and the next search for changes, started from
+     * where this one began, includes the added marketplace.
+     */
+    private function sweepAddedAmazonMarketplaces(): void
+    {
+        $before = self::amazonMarketplaceIdsIn((array) ($this->getOriginal('settings') ?? []));
+
+        if (array_diff($this->amazonMarketplaceIds(), $before) === []) {
+            return;
+        }
+
+        $reads = $this->import_reads ?? [];
+        unset($reads['sweep']);
+
+        $this->import_swept_at = null;
+        $this->import_reads = array_filter($reads) === [] ? null : $reads;
+    }
+
+    /**
+     * The Amazon marketplaces this connection imports from.
+     *
+     * @return list<string>
+     */
+    public function amazonMarketplaceIds(): array
+    {
+        return self::amazonMarketplaceIdsIn($this->settings ?? []);
+    }
+
+    /**
+     * The marketplace used where there is no order to take one from: the
+     * product catalog sync, and Amazon Shipping sold to other channels'
+     * orders. Null when no marketplace is chosen.
+     */
+    public function primaryAmazonMarketplaceId(): ?string
+    {
+        return self::primaryAmazonMarketplaceIdIn($this->settings ?? []);
+    }
+
+    /**
+     * {@see amazonMarketplaceIds()} from a source's settings.
+     *
+     * @param  array<string, mixed>  $settings
+     * @return list<string>
+     */
+    public static function amazonMarketplaceIdsIn(array $settings): array
+    {
+        $marketplaceIds = $settings['marketplace_ids'] ?? null;
+
+        if (! is_array($marketplaceIds)) {
+            return [];
+        }
+
+        return array_values(array_unique(array_filter(
+            $marketplaceIds,
+            fn (mixed $marketplaceId): bool => is_string($marketplaceId) && $marketplaceId !== '',
+        )));
+    }
+
+    /**
+     * {@see primaryAmazonMarketplaceId()} from a source's settings: the stored
+     * primary while it is one of the chosen marketplaces, else
+     * {@see defaultPrimaryAmazonMarketplaceId()}.
+     *
+     * @param  array<string, mixed>  $settings
+     */
+    public static function primaryAmazonMarketplaceIdIn(array $settings): ?string
+    {
+        $marketplaceIds = self::amazonMarketplaceIdsIn($settings);
+        $primary = $settings['primary_marketplace_id'] ?? null;
+
+        return is_string($primary) && in_array($primary, $marketplaceIds, true)
+            ? $primary
+            : self::defaultPrimaryAmazonMarketplaceId($marketplaceIds);
+    }
+
+    /**
+     * The primary of these marketplaces when none is chosen: the US when it is
+     * one of them, otherwise the first.
+     *
+     * @param  list<string>  $marketplaceIds
+     */
+    public static function defaultPrimaryAmazonMarketplaceId(array $marketplaceIds): ?string
+    {
+        return in_array(AmazonMarketplace::UnitedStates->value, $marketplaceIds, true)
+            ? AmazonMarketplace::UnitedStates->value
+            : ($marketplaceIds[0] ?? null);
+    }
+
+    /**
+     * How many of this connection's open Shipments came from these Amazon
+     * marketplaces. A marketplace removed from the connection is no longer
+     * searched, so Amazon closing one of its orders would go unseen here.
+     *
+     * @param  list<string>  $marketplaceIds
+     */
+    public function openShipmentsInAmazonMarketplacesCount(array $marketplaceIds): int
+    {
+        if ($marketplaceIds === [] || ! $this->exists) {
+            return 0;
+        }
+
+        return $this->shipments()
+            ->where('status', ShipmentStatus::Open)
+            ->whereIn('metadata->amazon_sales_channel->marketplaceId', $marketplaceIds)
+            ->count();
+    }
+
+    /**
+     * What this connection reads orders from, for telling whether two
+     * connections read the same orders: a Shopify store's domain, in lower
+     * case, or the Amazon seller ID OAuth records. Null when there is nothing
+     * to compare: an Amazon connection with its own refresh token never
+     * learns its seller ID.
+     */
+    public function accountIdentity(): ?string
+    {
+        $settings = $this->settings ?? [];
+
+        $identity = match (true) {
+            $this->isShopify() => $settings['shop_domain'] ?? null,
+            $this->isAmazon() => $settings['amazon_selling_partner_id'] ?? null,
+            default => null,
+        };
+
+        if (! is_string($identity) || trim($identity) === '') {
+            return null;
+        }
+
+        return $this->isShopify() ? mb_strtolower(trim($identity)) : trim($identity);
+    }
+
+    /**
+     * Another active connection that reads the same account as this one, or
+     * null (`connection-identity/01`). Two would each import their own copy of
+     * every order. An inactive connection may share an account, so an old one
+     * can be kept for history; whether this one is active is the caller's to
+     * weigh. A unique index cannot say this: the identity is a JSON setting,
+     * and only active rows count.
+     */
+    public function conflictingConnection(): ?self
+    {
+        $identity = $this->accountIdentity();
+
+        if ($identity === null) {
+            return null;
+        }
+
+        return static::query()
+            ->where('source_type', $this->source_type)
+            ->where('active', true)
+            ->when($this->getKey() !== null, fn (Builder $query) => $query->whereKeyNot($this->getKey()))
+            ->orderBy('id')
+            ->get()
+            ->first(fn (DataSource $other): bool => $other->accountIdentity() === $identity);
+    }
+
+    /**
+     * What an operator is told when {@see conflictingConnection()} names one.
+     */
+    public function accountConflictMessage(DataSource $other): string
+    {
+        return $this->isAmazon()
+            ? "Another active connection, {$other->name}, already reads this seller account. Add marketplaces to it instead."
+            : "Another active connection, {$other->name}, already reads this store.";
     }
 
     /**

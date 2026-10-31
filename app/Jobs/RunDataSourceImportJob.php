@@ -85,7 +85,7 @@ class RunDataSourceImportJob implements ShouldQueue
             return;
         }
 
-        if ($source->source_type === AmazonSource::class && blank($source->settings['marketplace_id'] ?? null)) {
+        if ($source->source_type === AmazonSource::class && $source->amazonMarketplaceIds() === []) {
             $this->refuse($source, 'Choose an Amazon marketplace before running imports.');
 
             return;

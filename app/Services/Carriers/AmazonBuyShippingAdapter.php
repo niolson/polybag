@@ -641,7 +641,7 @@ class AmazonBuyShippingAdapter implements AsyncRateQuoting, DiscoversServices, R
      */
     private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request, DataSource $source): Collection
     {
-        $marketplace = app(AmazonBuyShippingService::class)->marketplaceIdFor($source);
+        $marketplace = app(AmazonBuyShippingService::class)->marketplaceIdFor($package, $source);
 
         $observations = $this->record($quote, $marketplace);
         $this->recordAdditionalInputsSchemas($quote, $source, $observations);

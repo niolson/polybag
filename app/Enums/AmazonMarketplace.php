@@ -40,4 +40,20 @@ enum AmazonMarketplace: string
 
         return $options;
     }
+
+    /**
+     * These marketplaces by label and country code, as the connection form
+     * names them; an unsupported ID as itself.
+     *
+     * @param  list<string>  $marketplaceIds
+     */
+    public static function names(array $marketplaceIds): string
+    {
+        return implode(', ', array_map(
+            fn (string $marketplaceId): string => ($marketplace = self::tryFrom($marketplaceId)) === null
+                ? $marketplaceId
+                : "{$marketplace->label()} ({$marketplace->countryCode()})",
+            $marketplaceIds,
+        ));
+    }
 }

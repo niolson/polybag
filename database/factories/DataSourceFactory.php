@@ -47,7 +47,8 @@ class DataSourceFactory extends Factory
         return $this->state([
             'source_type' => AmazonSource::class,
             'settings' => [
-                'marketplace_id' => 'ATVPDKIKX0DER',
+                'marketplace_ids' => ['ATVPDKIKX0DER'],
+                'primary_marketplace_id' => 'ATVPDKIKX0DER',
                 'channel_name' => 'Amazon',
             ],
         ]);

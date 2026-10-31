@@ -59,7 +59,7 @@ function amazonSourceForTest(array $overrides = []): AmazonSource
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -78,7 +78,7 @@ function amazonExportDestination(): DataSource
         'name' => 'Amazon Export',
         'settings' => [
             'channel_name' => 'Amazon',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'tracking_number' => 'tracking_number',
@@ -263,7 +263,7 @@ beforeEach(function (): void {
     $this->dataSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'name' => 'Amazon',
-        'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['channel_name' => 'Amazon', 'marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -286,7 +286,7 @@ it('imports amazon orders into shipments table with metadata', function (): void
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -520,7 +520,7 @@ it('exports package to amazon as shipment confirmation', function (): void {
         'name' => 'Amazon Export',
         'settings' => [
             'channel_name' => 'Amazon',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'tracking_number' => 'tracking_number',
@@ -702,7 +702,7 @@ it('retries amazon shipment confirmation authentication failures', function (int
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'settings' => [
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
         ],
         'secret_settings' => [
@@ -749,7 +749,7 @@ it('retries amazon shipment confirmation authentication failures', function (int
 it('treats an already shipped amazon response as idempotent success', function (): void {
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'export_enabled' => true],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'export_enabled' => true],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -796,7 +796,7 @@ it('reports a safe amazon package reference when shipment reference is not mappe
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'settings' => [
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'amazon_order_id' => 'amazon_order_id',
@@ -846,7 +846,7 @@ it('handles package without amazon metadata gracefully in export', function (): 
         'name' => 'Amazon Export',
         'settings' => [
             'channel_name' => 'Amazon',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'tracking_number' => 'tracking_number',
@@ -890,7 +890,7 @@ it('does not send an amazon confirmation without packed order item identifiers',
         'source_type' => AmazonSource::class,
         'name' => 'Amazon Export',
         'settings' => [
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
         ],
         'secret_settings' => [
@@ -930,7 +930,7 @@ it('exports legacy amazon packages in sandbox without production item context', 
     app(SettingsService::class)->set('sandbox_mode', true, 'boolean');
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'export_enabled' => true],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'export_enabled' => true],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -992,7 +992,7 @@ it('sends a sandbox order search to the Far East host', function (): void {
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -1007,7 +1007,7 @@ it('sends a sandbox order search to the Far East host', function (): void {
 it('does not send a partial amazon shipment confirmation', function (): void {
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'export_enabled' => true],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'export_enabled' => true],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -1057,7 +1057,7 @@ it('does not send a partial amazon shipment confirmation', function (): void {
 it('omits zero quantity package rows from amazon shipment confirmation', function (): void {
     $exportSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'export_enabled' => true],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'export_enabled' => true],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -1131,7 +1131,7 @@ it('imports multiple pages of amazon orders', function (): void {
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -1589,7 +1589,7 @@ it('batches Amazon catalog lookups into at most twenty ASINs', function (): void
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
     ]);
 
     expect($source->fetchShipments())->toHaveCount(1);
@@ -1631,7 +1631,7 @@ it('continues an Amazon order import when the catalog lookup fails', function ()
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
     ]);
 
     $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
@@ -1674,7 +1674,7 @@ it('backs off and recovers when Amazon rate limits a catalog lookup', function (
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
     ]);
 
     $result = ShipmentImportService::forSource($source, $this->dataSource)->import();
@@ -1756,7 +1756,7 @@ it('imports sandbox order with full quantities even when already fulfilled', fun
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -1809,7 +1809,7 @@ it('calculates item unit prices correctly from proceeds breakdowns', function ()
         'client_id' => 'test-client-id',
         'client_secret' => 'test-client-secret',
         'refresh_token' => 'test-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'shipping_method' => null,
         'lookback_days' => 30,
         'export' => ['enabled' => false, 'field_mapping' => []],
@@ -1833,7 +1833,7 @@ it('validates when per-source client_id and client_secret are present without te
         'client_id' => 'per_source_client_id',
         'client_secret' => 'per_source_client_secret',
         'refresh_token' => 'per_source_refresh_token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'channel_name' => 'Amazon',
         'export' => ['enabled' => false, 'field_mapping' => []],
     ]);
@@ -1863,7 +1863,7 @@ it('refreshes an OAuth-connected Amazon source through polybag-connect', functio
     $source = new AmazonSource([
         'auth_mode' => 'authorization_code',
         'refresh_token' => 'oauth-refresh-token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'channel_name' => 'Amazon',
         'lookback_days' => 30,
     ]);
@@ -1889,7 +1889,7 @@ it('persists a rotated Amazon refresh token returned by polybag-connect', functi
         'source_type' => AmazonSource::class,
         'settings' => [
             'auth_mode' => 'authorization_code',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'channel_name' => 'Amazon',
         ],
         'secret_settings' => ['refresh_token' => 'old-refresh-token'],
@@ -1958,7 +1958,7 @@ it('fails validation when only per-source client_id but no client_secret and no 
     $source = new AmazonSource([
         'client_id' => 'per_source_client_id',
         'refresh_token' => 'per_source_refresh_token',
-        'marketplace_id' => 'ATVPDKIKX0DER',
+        'marketplace_ids' => ['ATVPDKIKX0DER'],
         'channel_name' => 'Amazon',
         'export' => ['enabled' => false, 'field_mapping' => []],
     ]);
@@ -2022,7 +2022,7 @@ function amazonFbaPackageForExport(array $sourceSettings = []): Package
         'name' => 'Amazon Export',
         'settings' => array_merge([
             'channel_name' => 'Amazon',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'export_enabled' => true,
             'export_field_mapping' => [
                 'tracking_number' => 'tracking_number',
@@ -2122,3 +2122,103 @@ it('refuses an FBA order rather than silently passing it as a Buy Shipping label
         ->and($result->errors[0])->toContain('fulfilled by Amazon (FBA)')
         ->and($package->fresh()->exported)->toBeFalse();
 });
+
+// ── One connection, several marketplaces (`connection-identity/01`) ─────────────
+
+/**
+ * An order placed in a marketplace, as Orders v2026-01-01 reports it.
+ */
+function amazonOrderInMarketplace(string $orderId, string $marketplaceId, ?string $asin = null): array
+{
+    $order = sampleAmazonOrder($orderId);
+    $order['salesChannel'] = ['channelName' => 'Amazon', 'marketplaceId' => $marketplaceId];
+
+    if ($asin !== null) {
+        $order['orderItems'][0]['product']['asin'] = $asin;
+    }
+
+    return $order;
+}
+
+it('imports every selected marketplace in one search and records each order\'s marketplace', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+    $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2']]]);
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([
+            amazonOrderInMarketplace('111-0000000-0000001', 'ATVPDKIKX0DER'),
+            amazonOrderInMarketplace('702-0000000-0000002', 'A2EUQ1WTGCTBG2'),
+        ]),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource->fresh())->import();
+
+    expect(Shipment::where('source_record_id', '111-0000000-0000001')->sole()->amazonMarketplaceId())->toBe('ATVPDKIKX0DER')
+        ->and(Shipment::where('source_record_id', '702-0000000-0000002')->sole()->amazonMarketplaceId())->toBe('A2EUQ1WTGCTBG2');
+
+    Saloon::assertSentCount(1);
+    Saloon::assertSent(fn (SearchOrders $request): bool => $request->query()->all()['marketplaceIds'] === 'ATVPDKIKX0DER,A2EUQ1WTGCTBG2');
+});
+
+it('looks each ASIN up in the catalog of the marketplace its order was placed in', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+    $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2']]]);
+    $us = amazonOrderInMarketplace('111-0000000-0000001', 'ATVPDKIKX0DER', 'B000USONLY');
+    $canada = amazonOrderInMarketplace('702-0000000-0000002', 'A2EUQ1WTGCTBG2', 'B000CAONLY');
+    $canada['orderItems'][0]['product']['sellerSku'] = 'SKU-CA';
+
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([$us, $canada]),
+        SearchCatalogItems::class => amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource->fresh())->import();
+
+    foreach (['B000USONLY' => 'ATVPDKIKX0DER', 'B000CAONLY' => 'A2EUQ1WTGCTBG2'] as $asin => $marketplaceId) {
+        Saloon::assertSent(fn (mixed $request): bool => $request instanceof SearchCatalogItems
+            && $request->query()->all()['identifiers'] === $asin
+            && $request->query()->all()['marketplaceIds'] === $marketplaceId);
+    }
+});
+
+it('looks an ASIN ordered in two marketplaces up once, in the primary, keeping its barcode', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($channel) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $channel->id]));
+    $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2']]]);
+
+    // The Canadian order comes first; Canada's catalog has nothing for the ASIN.
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([
+            amazonOrderInMarketplace('702-0000000-0000002', 'A2EUQ1WTGCTBG2', 'B000TEST01'),
+            amazonOrderInMarketplace('111-0000000-0000001', 'ATVPDKIKX0DER', 'B000TEST01'),
+        ]),
+        SearchCatalogItems::class => fn (mixed $pendingRequest): MockResponse => $pendingRequest->getRequest()->query()->all()['marketplaceIds'] === 'ATVPDKIKX0DER'
+            ? amazonCatalogResponse([amazonCatalogItem('B000TEST01', '012345678905')])
+            : amazonCatalogResponse(),
+    ]);
+
+    ShipmentImportService::forRecord($this->dataSource->fresh())->import();
+
+    expect(Product::where('sku', 'SKU-100')->sole()->barcode)->toBe('012345678905');
+    Saloon::assertSent(fn (mixed $request): bool => $request instanceof SearchCatalogItems
+        && $request->query()->all()['marketplaceIds'] === 'ATVPDKIKX0DER');
+    Saloon::assertNotSent(fn (mixed $request): bool => $request instanceof SearchCatalogItems
+        && $request->query()->all()['marketplaceIds'] === 'A2EUQ1WTGCTBG2');
+});
+
+it('confirms a shipment to its order\'s marketplace, even one the connection no longer imports, else to the primary', function (?string $orderMarketplace, string $confirmedTo): void {
+    $exportSource = amazonExportDestination();
+    $package = amazonExportPackage($exportSource);
+    $package->shipment->update(['metadata' => [
+        ...$package->shipment->metadata,
+        ...($orderMarketplace === null ? [] : ['amazon_sales_channel' => ['channelName' => 'Amazon.ca', 'marketplaceId' => $orderMarketplace]]),
+    ]]);
+
+    Saloon::fake([ConfirmShipment::class => amazonConfirmShipmentResponse()]);
+
+    expect((new PackageExportService)->exportPackage($package->fresh())->success)->toBeTrue();
+
+    Saloon::assertSent(fn (ConfirmShipment $request): bool => $request->body()->all()['marketplaceId'] === $confirmedTo);
+})->with([
+    'the order\'s own' => ['A2EUQ1WTGCTBG2', 'A2EUQ1WTGCTBG2'],
+    'none recorded' => [null, 'ATVPDKIKX0DER'],
+]);

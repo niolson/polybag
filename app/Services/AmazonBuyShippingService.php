@@ -171,11 +171,14 @@ class AmazonBuyShippingService
         return $origin !== null && $this->orderItems->orderIdFor($package) !== null ? $origin : null;
     }
 
-    public function marketplaceIdFor(DataSource $source): ?string
+    /**
+     * The marketplace this package's Amazon order was placed in, falling back
+     * to the connection's primary when the order has none recorded. One
+     * connection reads several marketplaces (`connection-identity/01`).
+     */
+    public function marketplaceIdFor(Package $package, DataSource $source): ?string
     {
-        $marketplace = $source->settings['marketplace_id'] ?? null;
-
-        return filled($marketplace) ? (string) $marketplace : null;
+        return $package->shipment?->amazonMarketplaceId() ?? $source->primaryAmazonMarketplaceId();
     }
 
     /**

@@ -39,7 +39,7 @@ beforeEach(function (): void {
 
     $this->connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create([
         'name' => 'Amazon Shipping (3PL)',
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => ['refresh_token' => 'external-refresh-token'],
     ]);
     CarrierAccountScope::create(['data_source_id' => $this->connection->id]);

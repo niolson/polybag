@@ -126,7 +126,7 @@ it('sets up Amazon Shipping on our sandbox app, selling postage and importing no
         ->and($connection->global_export)->toBeFalse()
         ->and($connection->settings['export_enabled'])->toBeFalse()
         ->and($connection->settings['auth_mode'])->toBe('manual')
-        ->and($connection->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($connection->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($connection->secret('refresh_token'))->toBe('Atzr|demo-refresh')
         ->and($connection->offersOffAmazonShipping())->toBeTrue()
         ->and(DataSource::resolveOffAmazonShipping(null, $connection->client_id)?->is($connection))->toBeTrue();

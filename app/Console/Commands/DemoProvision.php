@@ -228,7 +228,8 @@ class DemoProvision extends Command
             'settings' => array_merge($connection->settings ?? [], [
                 // A channel ID, as the connection form stores it.
                 'channel_name' => Channel::query()->where('name', StoreChannelSeeder::AMAZON)->value('id'),
-                'marketplace_id' => $values['marketplace_id'],
+                'marketplace_ids' => [$values['marketplace_id']],
+                'primary_marketplace_id' => $values['marketplace_id'],
                 'auth_mode' => 'manual',
                 'export_enabled' => false,
                 self::DEMO_CONNECTION_SETTING => true,
