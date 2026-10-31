@@ -576,13 +576,13 @@ class SetupWizard extends Page
                 Section::make('Amazon')
                     ->visible(fn (Get $get): bool => $get('import_source') === 'amazon')
                     ->schema([
-                        Forms\Components\Select::make('amazon_marketplace_id')
-                            ->label('Marketplace')
+                        Forms\Components\Select::make('amazon_marketplace_ids')
+                            ->label('Marketplaces')
                             ->options(AmazonMarketplace::options())
-                            ->default('ATVPDKIKX0DER')
+                            ->multiple()
+                            ->default([AmazonMarketplace::UnitedStates->value])
                             ->required()
-                            ->searchable()
-                            ->helperText('Additional marketplaces are discovered after Amazon OAuth.'),
+                            ->helperText('The marketplaces to import orders from. The seller\'s marketplaces are discovered after Amazon OAuth.'),
                         Forms\Components\Select::make('amazon_channel_id')
                             ->label('Channel')
                             ->options(fn () => Channel::query()->where('active', true)->orderBy('name')->pluck('name', 'id'))
@@ -1011,6 +1011,7 @@ class SetupWizard extends Page
             'import_enabled' => true,
             'settings' => array_merge($record->settings ?? [], $newSettings),
         ]);
+        $this->keepInactiveIfAnotherConnectionReadsTheAccount($record);
         $record->save();
     }
 
@@ -1027,8 +1028,14 @@ class SetupWizard extends Page
                 ?? Channel::firstOrCreate(['name' => 'Amazon'], ['active' => true])->id,
         ];
 
-        if (! empty($data['amazon_marketplace_id'])) {
-            $newSettings['marketplace_id'] = $data['amazon_marketplace_id'];
+        $marketplaceIds = DataSource::amazonMarketplaceIdsIn(['marketplace_ids' => $data['amazon_marketplace_ids'] ?? []]);
+
+        if ($marketplaceIds !== []) {
+            $newSettings['marketplace_ids'] = $marketplaceIds;
+            $newSettings['primary_marketplace_id'] = DataSource::primaryAmazonMarketplaceIdIn([
+                'marketplace_ids' => $marketplaceIds,
+                'primary_marketplace_id' => $record->settings['primary_marketplace_id'] ?? null,
+            ]);
         }
 
         $record->fill([
@@ -1037,7 +1044,32 @@ class SetupWizard extends Page
             'import_enabled' => true,
             'settings' => array_merge($record->settings ?? [], $newSettings),
         ]);
+        $this->keepInactiveIfAnotherConnectionReadsTheAccount($record);
         $record->save();
+    }
+
+    /**
+     * The wizard turns its connection on, but never beside another active one
+     * reading the same store or seller ({@see DataSource::conflictingConnection()}):
+     * it may have picked one OAuth deactivated for that. Such a connection
+     * keeps the active state it had, and the operator is told why.
+     */
+    private function keepInactiveIfAnotherConnectionReadsTheAccount(DataSource $record): void
+    {
+        $other = $record->conflictingConnection();
+
+        if ($other === null) {
+            return;
+        }
+
+        $record->active = $record->exists && (bool) $record->getOriginal('active');
+
+        Notification::make()
+            ->warning()
+            ->title($record->active ? "{$record->name} reads the same account as another connection" : "{$record->name} was saved inactive")
+            ->body($record->accountConflictMessage($other))
+            ->persistent()
+            ->send();
     }
 
     private function advanceStep(int $next): void

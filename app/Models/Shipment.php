@@ -490,6 +490,20 @@ class Shipment extends Model
     }
 
     /**
+     * The Amazon marketplace this order was placed in, from its imported
+     * `salesChannel`, or null when it has none recorded. One Amazon
+     * connection reads several marketplaces, so a call about one order uses
+     * the order's own (`connection-identity/01`).
+     */
+    public function amazonMarketplaceId(): ?string
+    {
+        $salesChannel = $this->metadata['amazon_sales_channel'] ?? null;
+        $marketplaceId = is_array($salesChannel) ? ($salesChannel['marketplaceId'] ?? null) : null;
+
+        return is_string($marketplaceId) && $marketplaceId !== '' ? $marketplaceId : null;
+    }
+
+    /**
      * Whether this address was imported withheld: no street, name, phone or
      * email, so no validator checks it and a carrier is told only where it
      * is going ({@see self::WITHHELD_ADDRESS_LINE}). Only a Demo install

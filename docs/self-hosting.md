@@ -268,8 +268,10 @@ Shopify fulfillment rather than through one of your direct carrier accounts.
    addresses — so the application needs the roles that cover personally identifiable
    information. Amazon approves those separately.
 4. Create an Amazon Connection and fill in **Refresh Token**, **App Client ID**, **App
-   Client Secret**, and the **Marketplace**. Marketplace discovery only runs after an
-   OAuth connection, so pick from the listed North American marketplaces manually.
+   Client Secret**, and the **Marketplaces** to import from. Marketplace discovery only
+   runs after an OAuth connection, so pick from the listed North American marketplaces
+   manually. One connection reads every marketplace you pick; with more than one, the
+   **Primary Marketplace** is the one the product catalog sync reads.
 
 The app refuses to activate an Amazon source until **Require MFA** is enabled in App
 Settings. That is deliberate — these sources expose customer PII — and it is another

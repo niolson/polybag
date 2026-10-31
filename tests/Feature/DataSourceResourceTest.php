@@ -167,7 +167,7 @@ it('offers no historical import on an Amazon connection', function (): void {
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'active' => true,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
     ]);
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
@@ -784,7 +784,7 @@ it('blocks creating an active Amazon data source when MFA is not required', func
             'name' => 'Amazon Import',
             'source_type' => AmazonSource::class,
             'active' => true,
-            'settings.marketplace_id' => 'ATVPDKIKX0DER',
+            'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
             'settings.refresh_token' => 'Atzr|test-refresh-token',
             'settings.channel_name' => $channel->id,
         ])
@@ -804,7 +804,7 @@ it('allows creating an active Amazon data source once MFA is required', function
             'name' => 'Amazon Import',
             'source_type' => AmazonSource::class,
             'active' => true,
-            'settings.marketplace_id' => 'ATVPDKIKX0DER',
+            'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
             'settings.refresh_token' => 'Atzr|test-refresh-token',
             'settings.channel_name' => $channel->id,
         ])
@@ -823,7 +823,7 @@ it('allows creating an inactive Amazon data source even when MFA is not required
             'name' => 'Amazon Import',
             'source_type' => AmazonSource::class,
             'active' => false,
-            'settings.marketplace_id' => 'ATVPDKIKX0DER',
+            'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
             'settings.refresh_token' => 'Atzr|test-refresh-token',
             'settings.channel_name' => $channel->id,
         ])
@@ -847,7 +847,7 @@ it('allows creating an Amazon data source without manual credentials when the br
             'name' => 'Amazon OAuth Import',
             'source_type' => AmazonSource::class,
             'active' => false,
-            'settings.marketplace_id' => 'ATVPDKIKX0DER',
+            'settings.marketplace_ids' => ['ATVPDKIKX0DER'],
             'settings.channel_name' => $channel->id,
         ])
         ->call('create')
@@ -882,7 +882,7 @@ it('shows discovered Amazon marketplaces in the marketplace selector', function 
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'settings' => [
-            'marketplace_id' => 'A2Q3Y263D00KWC',
+            'marketplace_ids' => ['A2Q3Y263D00KWC'],
             'amazon_marketplaces' => [
                 [
                     'id' => 'ATVPDKIKX0DER',
@@ -903,7 +903,7 @@ it('shows discovered Amazon marketplaces in the marketplace selector', function 
     ]);
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertFormFieldExists('settings.marketplace_id', function ($field): bool {
+        ->assertFormFieldExists('settings.marketplace_ids', function ($field): bool {
             if (! $field instanceof Select) {
                 return false;
             }
@@ -924,7 +924,7 @@ it('falls back to supported Amazon marketplaces when discovery returns none', fu
     ]);
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertFormFieldExists('settings.marketplace_id', function ($field): bool {
+        ->assertFormFieldExists('settings.marketplace_ids', function ($field): bool {
             return $field instanceof Select && $field->getOptions() === AmazonMarketplace::options();
         });
 });
@@ -936,7 +936,7 @@ it('preserves an existing Amazon marketplace outside the supported defaults when
         'source_type' => AmazonSource::class,
         'active' => false,
         'settings' => [
-            'marketplace_id' => 'A1F83G8C2ARO7P',
+            'marketplace_ids' => ['A1F83G8C2ARO7P'],
             'channel_name' => $channel->id,
             'amazon_marketplaces' => [],
         ],
@@ -944,14 +944,14 @@ it('preserves an existing Amazon marketplace outside the supported defaults when
     ]);
 
     Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertFormFieldExists('settings.marketplace_id', function ($field): bool {
+        ->assertFormFieldExists('settings.marketplace_ids', function ($field): bool {
             return $field instanceof Select
                 && $field->getOptions()['A1F83G8C2ARO7P'] === 'A1F83G8C2ARO7P (existing selection)';
         })
         ->call('save')
         ->assertHasNoFormErrors();
 
-    expect($source->fresh()->settings['marketplace_id'])->toBe('A1F83G8C2ARO7P');
+    expect($source->fresh()->settings['marketplace_ids'])->toBe(['A1F83G8C2ARO7P']);
 });
 
 it('refreshes Amazon marketplaces from the edit page', function (): void {
@@ -984,9 +984,9 @@ it('refreshes Amazon marketplaces from the edit page', function (): void {
     Livewire::test(EditDataSource::class, ['record' => $source->id])
         ->callAction('amazon_refresh_marketplaces')
         ->assertNotified('Amazon marketplaces refreshed')
-        ->assertFormSet(['settings.marketplace_id' => 'ATVPDKIKX0DER']);
+        ->assertFormSet(['settings.marketplace_ids' => ['ATVPDKIKX0DER']]);
 
-    expect($source->fresh()->settings['marketplace_id'])->toBe('ATVPDKIKX0DER');
+    expect($source->fresh()->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER']);
 });
 
 it('disables Amazon marketplace refresh while sandbox mode is enabled', function (): void {
@@ -994,7 +994,7 @@ it('disables Amazon marketplace refresh while sandbox mode is enabled', function
     $this->actingAs($this->admin);
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['auth_mode' => 'authorization_code', 'marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['auth_mode' => 'authorization_code', 'marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => ['refresh_token' => 'amazon-refresh-token'],
     ]);
 
@@ -1022,7 +1022,7 @@ it('blocks saving an Amazon data source as active on edit when MFA is not requir
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'active' => false,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'channel_name' => $channel->id],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'channel_name' => $channel->id],
         'secret_settings' => ['refresh_token' => 'Atzr|existing-token'],
     ]);
 
@@ -1100,7 +1100,7 @@ it('hides import-only Amazon fields when import is off', function (): void {
         ->assertFormFieldHidden('settings.channel_name')
         ->assertFormFieldHidden('settings.lookback_days')
         ->assertFormFieldHidden('settings.import_fba_orders')
-        ->assertFormFieldVisible('settings.marketplace_id')
+        ->assertFormFieldVisible('settings.marketplace_ids')
         ->assertFormFieldVisible('settings.export_enabled');
 });
 

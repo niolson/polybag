@@ -78,17 +78,28 @@ class OAuthCallbackController extends Controller
 
         try {
             if ($importSource) {
+                $wasActive = $importSource->active;
                 $discoveryResult = $this->oauthService->handleReceiveForDataSource($provider, $transferCode, $importSource);
-                $notification = $provider === 'shopify'
-                    ? $this->synchronizeShopifyLocations($importSource)
-                    : $this->dataSourceNotification($provider, $discoveryResult);
+                $conflictingConnection = $provider === 'sp-api' ? $importSource->conflictingConnection() : null;
+
+                $notification = match (true) {
+                    $conflictingConnection !== null => [
+                        'status' => 'warning',
+                        'title' => $wasActive
+                            ? 'Amazon connected, but this connection was made inactive.'
+                            : 'Amazon connected, but this connection stays inactive.',
+                        'body' => $importSource->accountConflictMessage($conflictingConnection).' Delete this connection, or deactivate the other one.',
+                    ],
+                    $provider === 'shopify' => $this->synchronizeShopifyLocations($importSource),
+                    default => $this->dataSourceNotification($provider, $discoveryResult),
+                };
 
                 return redirect()
                     ->route('filament.app.resources.data-sources.edit', $importSource->id)
                     ->with('oauth_notification', $notification)
                     // A newly connected store or seller account is offered a catalog
                     // sync once (`product-catalog-sync/02`, `04`).
-                    ->with('offer_product_catalog_sync', in_array($provider, ['shopify', 'sp-api'], true) ? $importSource->id : null);
+                    ->with('offer_product_catalog_sync', $conflictingConnection === null && in_array($provider, ['shopify', 'sp-api'], true) ? $importSource->id : null);
             }
 
             if ($account) {
@@ -218,11 +229,11 @@ class OAuthCallbackController extends Controller
             ];
         }
 
-        if ($discoveryResult->selectedMarketplaceUnavailable) {
+        if ($discoveryResult->unavailableMarketplaceIds !== []) {
             return [
                 'status' => 'warning',
-                'title' => 'Amazon connected, but the selected marketplace was not returned.',
-                'body' => 'The existing marketplace selection was preserved. Review it before changing imports.',
+                'title' => 'Amazon connected, but a selected marketplace was not returned.',
+                'body' => 'Not returned: '.AmazonMarketplace::names($discoveryResult->unavailableMarketplaceIds).'. The marketplace selection was preserved. Review it before changing imports.',
             ];
         }
 
@@ -237,11 +248,11 @@ class OAuthCallbackController extends Controller
         if ($discoveryResult->selectionRequired) {
             return [
                 'status' => 'warning',
-                'title' => 'Amazon connected. Choose a marketplace before importing.',
+                'title' => 'Amazon connected. Choose its marketplaces before importing.',
             ];
         }
 
-        $marketplace = AmazonMarketplace::tryFrom((string) $discoveryResult->selectedMarketplaceId);
+        $marketplace = AmazonMarketplace::tryFrom((string) ($discoveryResult->selectedMarketplaceIds[0] ?? ''));
 
         if (count($discoveryResult->marketplaces) === 1 && $marketplace !== null) {
             return [

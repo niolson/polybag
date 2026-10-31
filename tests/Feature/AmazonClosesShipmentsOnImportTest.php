@@ -39,7 +39,7 @@ beforeEach(function (): void {
     $this->dataSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'name' => 'Amazon',
-        'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER', 'lookback_days' => 30],
+        'settings' => ['channel_name' => 'Amazon', 'marketplace_ids' => ['ATVPDKIKX0DER'], 'lookback_days' => 30],
         'secret_settings' => [
             'client_id' => 'test-client-id',
             'client_secret' => 'test-client-secret',
@@ -447,7 +447,7 @@ describe('a read Amazon throttles', function (): void {
     });
 });
 
-describe('another seller account or marketplace', function (): void {
+describe('another seller account, or another marketplace', function (): void {
     beforeEach(function (): void {
         $this->dataSource->update(['settings' => [
             ...$this->dataSource->settings,
@@ -489,10 +489,41 @@ describe('another seller account or marketplace', function (): void {
             ->and($run['queries'][1]['paginationToken'])->toBe('sweep:4');
     });
 
-    it('starts over in a new marketplace', function (): void {
-        $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_id' => 'A2EUQ1WTGCTBG2']]);
+    it('keeps its cursor when a marketplace is added, and sweeps every marketplace on the next run', function (): void {
+        $updatedThrough = $this->dataSource->fresh()->import_updated_through;
 
-        expectStartedOver($this->dataSource, runAmazonSyncImport($this->dataSource, open: [amazonSyncOrder(1)]), 'A2EUQ1WTGCTBG2');
+        $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2']]]);
+
+        $saved = $this->dataSource->fresh();
+        expect($saved->import_swept_at)->toBeNull()
+            ->and($saved->import_reads)->toBeNull()
+            ->and($saved->import_updated_through->equalTo($updatedThrough))->toBeTrue();
+
+        $run = runAmazonSyncImport($this->dataSource, open: [amazonSyncOrder(1)]);
+
+        // The search for changes carries on from the cursor; the sweep starts
+        // afresh, over the whole lookback, in both marketplaces.
+        expect($run['queries'])->toHaveCount(2)
+            ->and($run['queries'][0]['marketplaceIds'])->toBe('ATVPDKIKX0DER,A2EUQ1WTGCTBG2')
+            ->and($run['queries'][0]['fulfillmentStatuses'])->toContain('CANCELLED')
+            ->and($run['queries'][0]['lastUpdatedAfter'])->toBe($updatedThrough->copy()->subMinutes(10)->toIso8601String())
+            ->and($run['queries'][1]['marketplaceIds'])->toBe('ATVPDKIKX0DER,A2EUQ1WTGCTBG2')
+            ->and($run['queries'][1]['fulfillmentStatuses'])->toBe('UNSHIPPED,PARTIALLY_SHIPPED')
+            ->and($run['queries'][1]['lastUpdatedAfter'])->toBe(now()->subDays(30)->toIso8601String())
+            ->and($run['queries'][1])->not->toHaveKey('paginationToken')
+            ->and($run['result']->shipmentsCreated)->toBe(1)
+            ->and($this->dataSource->fresh()->import_account_key)->toBe($this->dataSource->fresh()->importAccountKey());
+    });
+
+    it('keeps a sweep in progress when a marketplace is removed', function (): void {
+        $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2']]]);
+        amazonSyncReadThrough($this->dataSource);
+        $this->dataSource->forceFill(['import_reads' => ['sweep' => ['query' => [], 'token' => 'sweep:4', 'token_at' => now()->toIso8601String(), 'started_at' => now()->toIso8601String()]]])->save();
+
+        $this->dataSource->update(['settings' => [...$this->dataSource->settings, 'marketplace_ids' => ['ATVPDKIKX0DER']]]);
+
+        expect($this->dataSource->fresh()->import_swept_at)->not->toBeNull()
+            ->and($this->dataSource->fresh()->import_reads['sweep']['token'])->toBe('sweep:4');
     });
 
     it('starts over when reconnected to another seller account in the same marketplace', function (): void {
@@ -538,18 +569,18 @@ describe('another seller account or marketplace', function (): void {
         expectStartedOver($this->dataSource, runAmazonSyncImport($this->dataSource, open: [amazonSyncOrder(1)]));
     });
 
-    it('starts over after a run that was reading the old marketplace when it changed', function (): void {
+    it('starts over after a run that was reading the old seller account when it changed', function (): void {
         $sent = 0;
 
-        // Someone picks a new marketplace while the run is reading; Amazon
-        // then throttles it, so it stores where it stopped.
+        // The connection is reconnected to another seller while the run is
+        // reading; Amazon then throttles it, so it stores where it stopped.
         Saloon::fake([SearchOrders::class => function () use (&$sent): MockResponse {
             if (++$sent > 1) {
                 return MockResponse::make(['errors' => [['code' => 'QuotaExceeded', 'message' => 'You exceeded your quota']]], 429);
             }
 
             $record = DataSource::query()->findOrFail($this->dataSource->id);
-            $record->update(['settings' => [...$record->settings, 'marketplace_id' => 'A2EUQ1WTGCTBG2']]);
+            $record->update(['settings' => [...$record->settings, 'amazon_selling_partner_id' => 'A2SELLERTWO']]);
 
             return MockResponse::make(['orders' => [amazonSyncOrder(1)], 'pagination' => ['nextToken' => 'changes:1']]);
         }]);
@@ -558,7 +589,7 @@ describe('another seller account or marketplace', function (): void {
 
         $this->travel(5)->minutes();
 
-        expectStartedOver($this->dataSource, runAmazonSyncImport($this->dataSource, open: [amazonSyncOrder(2)]), 'A2EUQ1WTGCTBG2');
+        expectStartedOver($this->dataSource, runAmazonSyncImport($this->dataSource, open: [amazonSyncOrder(2)]));
     });
 });
 

@@ -106,7 +106,10 @@ class DataSourceForm
 
                     Toggle::make('active')
                         ->default(true)
-                        ->helperText('Whether this connection may be used at all.'),
+                        ->helperText('Whether this connection may be used at all.')
+                        // An Amazon seller ID is known only once OAuth records it,
+                        // so the form can only refuse it on activation.
+                        ->rules([fn (Get $get, ?DataSource $record): Closure => self::accountIdentityRule($get, $record, AmazonSource::class)]),
 
                     Toggle::make('import_enabled')
                         ->label('Import Orders')
@@ -173,7 +176,8 @@ class DataSourceForm
                         ->helperText('Must be your store\'s .myshopify.com domain — this is where the store\'s API credentials are sent.')
                         ->required()
                         ->maxLength(255)
-                        ->rule('regex:'.ShopifyConnector::SHOP_DOMAIN_PATTERN),
+                        ->rule('regex:'.ShopifyConnector::SHOP_DOMAIN_PATTERN)
+                        ->rules([fn (Get $get, ?DataSource $record): Closure => self::accountIdentityRule($get, $record, ShopifySource::class)]),
 
                     TextInput::make('settings.client_id')
                         ->label('App Client ID')
@@ -348,7 +352,7 @@ class DataSourceForm
                         ->visible(fn (): bool => ! app(SettingsService::class)->get('require_mfa', false))
                         ->columnSpanFull(),
 
-                    self::connectNotice('amazon_connect_notice', AmazonSource::class, 'Amazon', 'Enter the seller\'s own Amazon Refresh Token and App Client ID and Secret below.', 'Its marketplace is set from the ones Amazon reports for the seller.'),
+                    self::connectNotice('amazon_connect_notice', AmazonSource::class, 'Amazon', 'Enter the seller\'s own Amazon Refresh Token and App Client ID and Secret below.', 'Its marketplaces are set from the ones Amazon reports for the seller.'),
 
                     Placeholder::make('amazon_oauth_status')
                         ->label('OAuth Status')
@@ -356,17 +360,35 @@ class DataSourceForm
                         ->visible(fn (?DataSource $record): bool => (bool) $record?->exists)
                         ->columnSpanFull(),
 
-                    Select::make('settings.marketplace_id')
-                        ->label('Marketplace')
+                    Select::make('settings.marketplace_ids')
+                        ->label('Marketplaces')
+                        ->multiple()
                         ->options(fn (?DataSource $record): array => self::amazonMarketplaceOptions($record))
-                        ->placeholder('Select a marketplace')
+                        ->placeholder('Select marketplaces')
                         ->required()
-                        ->searchable()
-                        ->helperText('Available marketplaces are discovered after Amazon OAuth. Manual connections may choose from the supported North American marketplaces.')
+                        ->live()
+                        ->afterStateUpdated(fn (Get $get, Set $set, mixed $state): mixed => $set(
+                            'settings.primary_marketplace_id',
+                            DataSource::primaryAmazonMarketplaceIdIn([
+                                'marketplace_ids' => is_array($state) ? $state : [],
+                                'primary_marketplace_id' => $get('settings.primary_marketplace_id'),
+                            ]),
+                        ))
+                        ->helperText('The marketplaces this connection imports orders from. Available marketplaces are discovered after Amazon OAuth. Manual connections may choose from the supported North American marketplaces.')
                         // A new connection signing in through OAuth has none discovered yet. The callback
                         // selects the seller's only marketplace, or asks for a choice among several.
-                        ->visible(fn (Get $get, ?DataSource $record): bool => $record?->exists
-                            || app(OAuthService::class)->providerForNewDataSource(AmazonSource::class, $get('settings') ?? []) === null),
+                        ->visible(fn (Get $get, ?DataSource $record): bool => self::choosesAmazonMarketplaces($get, $record)),
+
+                    Select::make('settings.primary_marketplace_id')
+                        ->label('Primary Marketplace')
+                        ->options(fn (Get $get, ?DataSource $record): array => array_intersect_key(
+                            self::amazonMarketplaceOptions($record),
+                            array_flip(DataSource::amazonMarketplaceIdsIn(['marketplace_ids' => $get('settings.marketplace_ids')])),
+                        ))
+                        ->required()
+                        ->helperText('Used where there is no order to take a marketplace from: the product catalog sync, and Amazon Shipping for orders from other channels.')
+                        ->visible(fn (Get $get, ?DataSource $record): bool => self::choosesAmazonMarketplaces($get, $record)
+                            && count(DataSource::amazonMarketplaceIdsIn(['marketplace_ids' => $get('settings.marketplace_ids')])) > 1),
 
                     TextInput::make('settings.refresh_token')
                         ->label('Refresh Token')
@@ -1362,13 +1384,67 @@ class DataSourceForm
         );
     }
 
-    /** @return array<string, string> */
+    /**
+     * Whether the form chooses the Amazon marketplaces: always on an existing
+     * connection, and on a new one that does not sign in through OAuth.
+     */
+    private static function choosesAmazonMarketplaces(Get $get, ?DataSource $record): bool
+    {
+        return $record?->exists
+            || app(OAuthService::class)->providerForNewDataSource(AmazonSource::class, $get('settings') ?? []) === null;
+    }
+
+    /**
+     * Refuses a connection made active, or a Shopify store domain entered,
+     * when another active connection reads the same account
+     * ({@see DataSource::conflictingConnection()}). Asked of the field the
+     * conflict shows on: the store domain for Shopify, `active` for Amazon.
+     *
+     * @param  class-string  $sourceType  the driver this field's rule applies to
+     */
+    private static function accountIdentityRule(Get $get, ?DataSource $record, string $sourceType): Closure
+    {
+        return function (string $attribute, mixed $value, Closure $fail) use ($get, $record, $sourceType): void {
+            $submittedType = $record->source_type ?? $get('source_type');
+
+            if ($submittedType !== $sourceType || ! $get('active')) {
+                return;
+            }
+
+            $candidate = $record !== null ? clone $record : new DataSource;
+            $settings = $record->settings ?? [];
+
+            if ($sourceType === ShopifySource::class) {
+                $settings['shop_domain'] = $get('settings.shop_domain');
+            }
+
+            $candidate->forceFill(['source_type' => $submittedType, 'settings' => $settings]);
+
+            $other = $candidate->conflictingConnection();
+
+            if ($other !== null) {
+                $fail($candidate->accountConflictMessage($other));
+            }
+        };
+    }
+
+    /**
+     * The marketplaces an Amazon connection may choose from: those discovery
+     * reports for an OAuth connection's seller, else every supported one, as a
+     * connection with its own refresh token has. A selected marketplace
+     * discovery no longer reports stays, flagged.
+     *
+     * @return array<string, string>
+     */
     private static function amazonMarketplaceOptions(?DataSource $record): array
     {
         $settings = $record->settings ?? [];
         $marketplaces = $settings['amazon_marketplaces'] ?? null;
+        $usesDiscovery = ($settings['auth_mode'] ?? null) === 'authorization_code'
+            && is_array($marketplaces)
+            && $marketplaces !== [];
 
-        $options = AmazonMarketplace::options();
+        $options = $usesDiscovery ? [] : AmazonMarketplace::options();
 
         if (is_array($marketplaces)) {
             foreach ($marketplaces as $marketplace) {
@@ -1398,10 +1474,16 @@ class DataSourceForm
             }
         }
 
-        $currentMarketplaceId = $settings['marketplace_id'] ?? null;
+        foreach (DataSource::amazonMarketplaceIdsIn($settings) as $selectedMarketplaceId) {
+            if (array_key_exists($selectedMarketplaceId, $options)) {
+                continue;
+            }
 
-        if (is_string($currentMarketplaceId) && $currentMarketplaceId !== '' && ! array_key_exists($currentMarketplaceId, $options)) {
-            $options[$currentMarketplaceId] = "{$currentMarketplaceId} (existing selection)";
+            $knownMarketplace = AmazonMarketplace::tryFrom($selectedMarketplaceId);
+
+            $options[$selectedMarketplaceId] = $knownMarketplace === null
+                ? "{$selectedMarketplaceId} (existing selection)"
+                : "{$knownMarketplace->label()} ({$knownMarketplace->countryCode()}) — Not returned by Amazon";
         }
 
         return $options;

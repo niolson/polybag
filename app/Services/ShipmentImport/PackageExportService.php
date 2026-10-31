@@ -601,12 +601,16 @@ class PackageExportService
     }
 
     /**
-     * @return array{_package_reference_id: string, _shipped_at: ?string, _shipping_method: ?string, _order_items: list<array{orderItemId: string, quantity: int, transparencyCodes?: array<string>}>}
+     * The order's marketplace goes with it: one connection reads several, and
+     * a confirmation is sent to the marketplace the order was placed in.
+     *
+     * @return array{_package_reference_id: string, _shipped_at: ?string, _shipping_method: ?string, _amazon_marketplace_id: ?string, _order_items: list<array{orderItemId: string, quantity: int, transparencyCodes?: array<string>}>}
      */
     private function buildAmazonExportContext(Package $package): array
     {
         return [
             '_package_reference_id' => (string) $package->getKey(),
+            '_amazon_marketplace_id' => $package->shipment?->amazonMarketplaceId(),
             '_shipped_at' => $package->shipped_at?->toIso8601String(),
             '_shipping_method' => $package->confirmedService(),
             '_order_items' => app(AmazonOrderItems::class)->forPackage($package),

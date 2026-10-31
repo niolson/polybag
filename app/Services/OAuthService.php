@@ -219,6 +219,12 @@ class OAuthService
     /**
      * Handle the broker redirect for a per-DataSource OAuth connection.
      * Tokens are stored in the DataSource settings JSON.
+     *
+     * An Amazon grant for a seller another active connection already reads is
+     * kept, but the connection is made inactive and its marketplaces are not
+     * discovered, so the two never import the same orders. The caller asks
+     * {@see DataSource::conflictingConnection()} to say which connection that
+     * is. A reconnect to a different seller is checked the same way.
      */
     public function handleReceiveForDataSource(string $providerKey, string $transferCode, DataSource $importSource): ?AmazonMarketplaceDiscoveryResult
     {
@@ -282,6 +288,13 @@ class OAuthService
         $settings['oauth_scopes'] = $data['extra']['scope'] ?? $data['scope'] ?? '';
         $settings['auth_mode'] = 'authorization_code';
         $importSource->settings = $settings;
+
+        $readsAnotherConnectionsSeller = $providerKey === 'sp-api' && $importSource->conflictingConnection() !== null;
+
+        if ($readsAnotherConnectionsSeller) {
+            $importSource->active = false;
+        }
+
         $importSource->save();
 
         if ($providerKey === 'sp-api') {
@@ -293,7 +306,7 @@ class OAuthService
                 Cache::put('amazon_sp_api_access_token_'.md5($refreshToken), $accessToken, $cacheSeconds);
             }
 
-            return $this->amazonMarketplaceDiscovery->discover($importSource);
+            return $readsAnotherConnectionsSeller ? null : $this->amazonMarketplaceDiscovery->discover($importSource);
         }
 
         // Bust the per-shop token cache so the new token is picked up immediately.

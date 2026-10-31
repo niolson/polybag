@@ -54,7 +54,7 @@ function amazonCatalogConnection(array $settings = [], array $attributes = []): 
     return DataSource::factory()->amazon()->create([
         'name' => 'Synthetic Seller',
         'settings' => [
-            'marketplace_id' => AMAZON_CATALOG_MARKETPLACE,
+            'marketplace_ids' => [AMAZON_CATALOG_MARKETPLACE],
             'channel_name' => 'Amazon',
             'auth_mode' => 'authorization_code',
             'amazon_selling_partner_id' => AMAZON_CATALOG_SELLER,
@@ -311,6 +311,18 @@ describe('listings', function (): void {
         Saloon::assertSent(fn (SearchListingsItems $request): bool => $request->resolveEndpoint() === '/listings/2021-08-01/items/'.AMAZON_CATALOG_SELLER);
         // Paced at the listings rate Amazon reported, 5 a second.
         Sleep::assertSlept(fn ($duration): bool => $duration->totalMilliseconds === 200.0, times: 1);
+    });
+
+    it('reads the listings of the primary marketplace only', function (): void {
+        $dataSource = amazonCatalogConnection(['marketplace_ids' => ['ATVPDKIKX0DER', 'A2EUQ1WTGCTBG2'], 'primary_marketplace_id' => 'A2EUQ1WTGCTBG2']);
+        $requests = [];
+
+        fakeAmazonCatalog(amazonCatalogListings(2), $requests);
+
+        amazonSyncCatalog($dataSource);
+
+        expect($requests)->not->toBeEmpty()
+            ->and(collect($requests)->pluck('marketplaceIds')->unique()->all())->toBe(['A2EUQ1WTGCTBG2']);
     });
 
     it('syncs a listing whatever its status', function (): void {
@@ -1005,7 +1017,7 @@ describe('the action', function (): void {
     });
 
     it('is not shown before a marketplace is chosen', function (): void {
-        $dataSource = amazonCatalogConnection(['marketplace_id' => null]);
+        $dataSource = amazonCatalogConnection(['marketplace_ids' => []]);
 
         Livewire::test(EditDataSource::class, ['record' => $dataSource->id])
             ->assertActionHidden('sync_product_catalog')

@@ -38,7 +38,7 @@ it('switches off every store the prospect connected and clears all of its secret
         'name' => 'Prospect Amazon',
         'active' => true,
         'import_enabled' => true,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'channel_name' => 'Amazon', 'auth_mode' => 'authorization_code', 'amazon_selling_partner_id' => 'A1SELLER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'channel_name' => 'Amazon', 'auth_mode' => 'authorization_code', 'amazon_selling_partner_id' => 'A1SELLER'],
         'secret_settings' => ['refresh_token' => 'Atzr|prospect'],
     ]);
 
@@ -59,7 +59,7 @@ it('leaves our own Amazon Shipping connection and any Database connection alone'
     $ours = DataSource::factory()->amazon()->create([
         'active' => true,
         'import_enabled' => false,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER', 'auth_mode' => 'manual', DemoProvision::DEMO_CONNECTION_SETTING => true],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER'], 'auth_mode' => 'manual', DemoProvision::DEMO_CONNECTION_SETTING => true],
         'secret_settings' => ['client_id' => 'sandbox-app', 'client_secret' => 'sandbox-secret', 'refresh_token' => 'Atzr|ours'],
     ]);
     $database = DataSource::factory()->create([

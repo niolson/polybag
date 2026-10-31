@@ -28,7 +28,7 @@ beforeEach(function (): void {
     $this->dataSource = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'name' => 'Amazon',
-        'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER', 'lookback_days' => 30],
+        'settings' => ['channel_name' => 'Amazon', 'marketplace_ids' => ['ATVPDKIKX0DER'], 'lookback_days' => 30],
         'secret_settings' => ['client_id' => 'id', 'client_secret' => 'secret', 'refresh_token' => 'test-refresh-token'],
     ]);
 

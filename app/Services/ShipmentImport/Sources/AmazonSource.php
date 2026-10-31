@@ -10,6 +10,7 @@ use App\Contracts\SyncsProductCatalog;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogSyncRun;
 use App\DataTransferObjects\ShipmentImport\SourceClosureResult;
+use App\Enums\AmazonMarketplace;
 use App\Exceptions\CatalogReadMustStartOver;
 use App\Exceptions\PermanentExportException;
 use App\Http\Integrations\Amazon\AmazonRequestPacer;
@@ -138,7 +139,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             throw new InvalidArgumentException('Amazon SP-API refresh token is not configured for this source.');
         }
 
-        if (empty($this->config['marketplace_id'] ?? null)) {
+        if (DataSource::amazonMarketplaceIdsIn($this->config) === []) {
             throw new InvalidArgumentException('Amazon SP-API marketplace ID is not configured for this source.');
         }
 
@@ -156,7 +157,6 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         $this->closedOrders = [];
         $this->pendingReadState = null;
         $sandbox = $this->readsFromSandbox();
-        $marketplaceId = (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER');
 
         if ($sandbox) {
             // v2026-01-01 sandbox test cases only exist for JP/UK/BR marketplaces.
@@ -173,7 +173,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 'includedData' => 'BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES',
             ], sandbox: true);
         } else {
-            $rawOrders = $this->searchChangedOrders($marketplaceId);
+            $rawOrders = $this->searchChangedOrders(implode(',', DataSource::amazonMarketplaceIdsIn($this->config)));
         }
 
         // Barcodes and part numbers come from the catalog, not the order, and
@@ -185,12 +185,17 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         // skipped, so a scheduled run over open orders costs a catalog call only
         // for what is new. With product updates off nothing the lookup found
         // could be written, so it is not made; the sandbox catalog has nothing
-        // to say either way.
+        // to say either way. An ASIN is looked up in a marketplace one of its
+        // orders was placed in, so one listed only in Canada is found.
         if (! $sandbox && config('shipment-import.behavior.auto_update_products', true)) {
             $this->catalogCheckedAt = now()->toDateTimeString();
-            $this->catalogIdentifiers = $this->catalogIdentifiers(
-                'Amazon SP-API catalog lookup failed; continuing order import without those barcodes and part numbers',
-            )->fetch($this->asinsNeedingCatalogLookup($rawOrders));
+
+            foreach ($this->asinsNeedingCatalogLookup($rawOrders) as $marketplaceId => $asins) {
+                $this->catalogIdentifiers = array_replace($this->catalogIdentifiers, $this->catalogIdentifiers(
+                    'Amazon SP-API catalog lookup failed; continuing order import without those barcodes and part numbers',
+                    $marketplaceId,
+                )->fetch($asins));
+            }
         }
 
         return collect($rawOrders)->map(function (array $order): array {
@@ -224,9 +229,13 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * finished read records when it started, so an order updated while it was
      * spread over several runs is read again by the next search for changes.
      *
+     * Every selected marketplace is read in the one search: `marketplaceIds`
+     * takes up to 50.
+     *
+     * @param  string  $marketplaceIds  comma-separated
      * @return list<array<string, mixed>>
      */
-    private function searchChangedOrders(string $marketplaceId): array
+    private function searchChangedOrders(string $marketplaceIds): array
     {
         $now = now()->toImmutable();
         $lookbackStart = $now->subDays((int) ($this->config['lookback_days'] ?? 30));
@@ -239,7 +248,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         $accountKey = DataSource::importAccountKeyFor($this->config);
         $state = ['import_account_key' => $accountKey];
 
-        // Read from another seller account or marketplace: start over. An
+        // Read from another seller account: start over. An
         // in-flight run that read the old one also records its key, so the
         // run after it starts over too.
         if ($dataSource !== null && $dataSource->import_account_key !== $accountKey) {
@@ -266,7 +275,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
 
         if (($reads['changes'] ?? null) === null && $readsChanges) {
             $reads['changes'] = $this->newRead([
-                'marketplaceIds' => $marketplaceId,
+                'marketplaceIds' => $marketplaceIds,
                 'fulfillmentStatuses' => 'UNSHIPPED,PARTIALLY_SHIPPED,SHIPPED,CANCELLED',
                 'lastUpdatedAfter' => $updatedThrough->copy()->subMinutes(self::READ_OVERLAP_MINUTES)->toIso8601String(),
                 'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT,PACKAGES',
@@ -276,7 +285,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         if (($reads['sweep'] ?? null) === null
             && (! $readsChanges || $sweptAt === null || $sweptAt->lessThan($now->subHours(self::SWEEP_HOURS)))) {
             $reads['sweep'] = $this->newRead([
-                'marketplaceIds' => $marketplaceId,
+                'marketplaceIds' => $marketplaceIds,
                 'fulfillmentStatuses' => 'UNSHIPPED,PARTIALLY_SHIPPED',
                 'lastUpdatedAfter' => $lookbackStart->toIso8601String(),
                 'includedData' => 'RECIPIENT,PROCEEDS,FULFILLMENT',
@@ -695,7 +704,10 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
 
             $orderId = $amazonOrderId;
             $body = [
-                'marketplaceId' => (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER'),
+                // The order's own marketplace: one connection reads several.
+                'marketplaceId' => filled($data['_amazon_marketplace_id'] ?? null)
+                    ? (string) $data['_amazon_marketplace_id']
+                    : $this->primaryMarketplaceId(),
                 'packageDetail' => [
                     'packageReferenceId' => (string) $data['_package_reference_id'],
                     'carrierCode' => $carrierCode,
@@ -795,7 +807,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             throw new InvalidArgumentException('Amazon SP-API credentials are not configured for this source.');
         }
 
-        if (blank($this->config['marketplace_id'] ?? null)) {
+        if (DataSource::primaryAmazonMarketplaceIdIn($this->config) === null) {
             throw new InvalidArgumentException('Amazon SP-API marketplace ID is not configured for this source.');
         }
     }
@@ -931,15 +943,28 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
      * from another. An item with no SKU never reaches a Product, so nothing the
      * lookup found could be filled or stamped, and it does not count.
      *
+     * Grouped by marketplace, so each ASIN is asked of a catalog it is listed
+     * in: the primary when any order it came in was placed there, else the
+     * marketplace of the first order it came in. Each ASIN is looked up once,
+     * so a second marketplace's empty answer can never overwrite the first's.
+     *
      * @param  array<int, array<string, mixed>>  $orders
-     * @return Collection<int, string>
+     * @return array<string, Collection<int, string>>
      */
-    private function asinsNeedingCatalogLookup(array $orders): Collection
+    private function asinsNeedingCatalogLookup(array $orders): array
     {
+        $primaryMarketplaceId = $this->primaryMarketplaceId();
+
         /** @var array<string, list<string>> $skusByAsin */
         $skusByAsin = [];
 
+        /** @var array<string, string> $marketplaceByAsin */
+        $marketplaceByAsin = [];
+
         foreach ($orders as $order) {
+            $marketplaceId = $order['salesChannel']['marketplaceId'] ?? null;
+            $marketplaceId = is_string($marketplaceId) && $marketplaceId !== '' ? $marketplaceId : $primaryMarketplaceId;
+
             foreach ($order['orderItems'] ?? [] as $item) {
                 $asin = is_array($item) ? ($item['product']['asin'] ?? null) : null;
                 $sku = is_array($item) ? ($item['product']['sellerSku'] ?? null) : null;
@@ -949,22 +974,34 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
                 }
 
                 $skusByAsin[$asin] = array_values(array_unique([...($skusByAsin[$asin] ?? []), $sku]));
+
+                if (! isset($marketplaceByAsin[$asin]) || $marketplaceId === $primaryMarketplaceId) {
+                    $marketplaceByAsin[$asin] = $marketplaceId;
+                }
             }
         }
 
-        return AmazonCatalogIdentifiers::asinsNeedingLookup($skusByAsin, $this->importClientId());
+        $asinsByMarketplace = [];
+
+        foreach (AmazonCatalogIdentifiers::asinsNeedingLookup($skusByAsin, $this->importClientId()) as $asin) {
+            $marketplaceId = $marketplaceByAsin[$asin];
+            $asinsByMarketplace[$marketplaceId] = ($asinsByMarketplace[$marketplaceId] ?? collect())->push($asin);
+        }
+
+        return $asinsByMarketplace;
     }
 
     /**
-     * The catalog lookup, on this run's request pacing.
+     * The catalog lookup, on this run's request pacing, in a marketplace:
+     * an order's own during an import, else the connection's primary.
      *
      * @param  string  $failureMessage  what a failed lookup logs, saying what carries on without it
      */
-    public function catalogIdentifiers(string $failureMessage): AmazonCatalogIdentifiers
+    public function catalogIdentifiers(string $failureMessage, ?string $marketplaceId = null): AmazonCatalogIdentifiers
     {
         return new AmazonCatalogIdentifiers(
             $this->requests,
-            (string) ($this->config['marketplace_id'] ?? 'ATVPDKIKX0DER'),
+            $marketplaceId ?? $this->primaryMarketplaceId(),
             isset($this->config['_data_source_id']) ? (int) $this->config['_data_source_id'] : null,
             $failureMessage,
         );
@@ -991,11 +1028,22 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             throw new InvalidArgumentException('Amazon SP-API refresh token is not configured for this source.');
         }
 
-        if (blank($this->config['marketplace_id'] ?? null)) {
+        $primaryMarketplaceId = DataSource::primaryAmazonMarketplaceIdIn($this->config);
+
+        if ($primaryMarketplaceId === null) {
             throw new InvalidArgumentException('Choose an Amazon marketplace before syncing the product catalog.');
         }
 
-        yield from (new AmazonListingCatalog($this->requests, $sellerId, (string) $this->config['marketplace_id']))->pages($cursor);
+        yield from (new AmazonListingCatalog($this->requests, $sellerId, $primaryMarketplaceId))->pages($cursor);
+    }
+
+    /**
+     * The connection's primary marketplace, for a call with no order to take
+     * one from. The US when none is chosen, as before there was a choice.
+     */
+    private function primaryMarketplaceId(): string
+    {
+        return DataSource::primaryAmazonMarketplaceIdIn($this->config) ?? AmazonMarketplace::UnitedStates->value;
     }
 
     /**

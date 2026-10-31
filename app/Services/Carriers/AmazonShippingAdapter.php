@@ -334,7 +334,8 @@ class AmazonShippingAdapter implements AsyncRateQuoting, CarrierPolicy, Recovers
      */
     private function ratesFrom(AmazonShippingQuote $quote, Package $package, RateRequest $request, DataSource $source, array $serviceCodes): Collection
     {
-        $marketplace = app(AmazonBuyShippingService::class)->marketplaceIdFor($source);
+        // No Amazon order to take a marketplace from: the connection's primary.
+        $marketplace = $source->primaryAmazonMarketplaceId();
 
         $catalog = CarrierService::query()
             ->whereHas('carrier', fn ($query) => $query->where('name', Carrier::AMAZON_SHIPPING))

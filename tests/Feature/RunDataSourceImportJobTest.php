@@ -280,7 +280,7 @@ it('logs rather than notifies when a scheduled Amazon import cannot run', functi
     $admin = User::factory()->admin()->create();
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
     ]);
 
     app()->call([new ScheduledDataSourceImportJob($source->id), 'handle']);

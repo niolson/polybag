@@ -43,7 +43,7 @@ beforeEach(function (): void {
 
     $this->connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create([
         'name' => 'Amazon Shipping (3PL)',
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => ['refresh_token' => 'external-refresh-token'],
     ]);
     CarrierAccountScope::create(['data_source_id' => $this->connection->id]);
@@ -210,6 +210,21 @@ it('records an Amazon Shipping service nobody has authored, and drops it', funct
     expect($rates->pluck('serviceCode')->all())->toBe(['std-us-swa-mfn'])
         ->and(ShippingOffer::count())->toBe(1)
         ->and(ObservedService::sole()->external_service_id)->toBe('exp-us-swa-mfn');
+});
+
+it('records an unauthored Amazon Shipping service under the connection\'s primary marketplace', function (): void {
+    $this->connection->update(['settings' => [
+        ...$this->connection->settings,
+        'marketplace_ids' => ['A2EUQ1WTGCTBG2', 'ATVPDKIKX0DER'],
+        'primary_marketplace_id' => 'A2EUQ1WTGCTBG2',
+    ]]);
+    $unauthored = [...amazonShippingGroundRate(), 'rateId' => 'rate-2', 'serviceId' => 'exp-us-swa-mfn', 'serviceName' => 'Amazon Shipping Two-Day'];
+    Saloon::fake([GetShippingRates::class => externalRatesResponse([amazonShippingGroundRate(), $unauthored])]);
+
+    app(ShippingRateService::class)->getShippingRates(externalPackage($this->shopify)->id);
+
+    expect(ObservedService::sole()->marketplace)->toBe('A2EUQ1WTGCTBG2')
+        ->and(ShippingOffer::sole()->marketplace)->toBe('A2EUQ1WTGCTBG2');
 });
 
 describe('a shipment with no shipping method', function (): void {

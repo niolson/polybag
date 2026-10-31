@@ -68,7 +68,7 @@ beforeEach(function (): void {
         'source_type' => AmazonSource::class,
         'sells_postage' => true,
         'name' => 'Prospect Amazon',
-        'settings' => ['channel_name' => 'Amazon', 'marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['channel_name' => 'Amazon', 'marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => [
             'client_id' => 'demo-client-id',
             'client_secret' => 'demo-client-secret',
@@ -458,7 +458,7 @@ it('discovers the seller\'s marketplaces from production in demo', function (): 
     $result = app(AmazonMarketplaceDiscoveryService::class)->discover($connected);
 
     expect($result->succeeded)->toBeTrue()
-        ->and($result->selectedMarketplaceId)->toBe('ATVPDKIKX0DER');
+        ->and($result->selectedMarketplaceIds)->toBe(['ATVPDKIKX0DER']);
 
     Saloon::assertSent(fn (Request $request, Response $response): bool => $request instanceof GetMarketplaceParticipations
         && str_starts_with($response->getPendingRequest()->getUrl(), DEMO_AMAZON_PRODUCTION_HOST.'/'));
@@ -665,7 +665,7 @@ it('quotes Amazon Shipping for an order from another channel on the sandbox in d
     Cache::put('amazon_sp_api_access_token_'.md5('external-refresh-token'), 'external-access-token', 3600);
 
     $connection = DataSource::factory()->unassigned()->offeringOffAmazonShipping()->create([
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
         'secret_settings' => ['refresh_token' => 'external-refresh-token'],
     ]);
     CarrierAccountScope::create(['data_source_id' => $connection->id]);

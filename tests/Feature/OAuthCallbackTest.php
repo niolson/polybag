@@ -279,7 +279,7 @@ it('stores an Amazon refresh token and selling partner from the broker', functio
     $nonce = 'amazon-nonce';
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
     ]);
 
     Http::fake([
@@ -328,7 +328,7 @@ it('stores an Amazon refresh token and selling partner from the broker', functio
         ->and($source->secret('oauth_access_token'))->toBeNull()
         ->and($source->settings['auth_mode'])->toBe('authorization_code')
         ->and($source->settings['amazon_selling_partner_id'])->toBe('SELLER123')
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($source->settings['amazon_marketplaces'])->toHaveCount(1)
         ->and(app(OAuthService::class)->isDataSourceConnected($source))->toBeTrue();
 });
@@ -338,7 +338,7 @@ it('keeps Amazon connected when post-OAuth marketplace discovery fails', functio
     $nonce = 'amazon-discovery-failure-nonce';
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
     ]);
 
     Http::fake([
@@ -372,7 +372,7 @@ it('keeps Amazon connected when post-OAuth marketplace discovery fails', functio
     $source->refresh();
     expect($source->secret('refresh_token'))->toBe('amazon-refresh-token')
         ->and($source->settings['auth_mode'])->toBe('authorization_code')
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($source->settings['amazon_marketplaces_sync_error'])->toContain('403');
 });
 
@@ -381,7 +381,7 @@ it('preserves an existing marketplace omitted during Amazon reconnection', funct
     $nonce = 'amazon-omitted-marketplace-nonce';
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'A1F83G8C2ARO7P'],
+        'settings' => ['marketplace_ids' => ['A1F83G8C2ARO7P']],
     ]);
 
     Http::fake([
@@ -419,8 +419,8 @@ it('preserves an existing marketplace omitted during Amazon reconnection', funct
         ->get('/oauth/sp-api/receive?transfer_code=amazon-transfer');
 
     $response->assertSessionHas('oauth_notification.status', 'warning');
-    $response->assertSessionHas('oauth_notification.title', 'Amazon connected, but the selected marketplace was not returned.');
-    expect($source->fresh()->settings['marketplace_id'])->toBe('A1F83G8C2ARO7P');
+    $response->assertSessionHas('oauth_notification.title', 'Amazon connected, but a selected marketplace was not returned.');
+    expect($source->fresh()->settings['marketplace_ids'])->toBe(['A1F83G8C2ARO7P']);
 });
 
 it('rejects an Amazon broker response without a selling partner ID', function (): void {
@@ -428,7 +428,7 @@ it('rejects an Amazon broker response without a selling partner ID', function ()
     $nonce = 'amazon-nonce';
     $source = DataSource::factory()->create([
         'source_type' => AmazonSource::class,
-        'settings' => ['marketplace_id' => 'ATVPDKIKX0DER'],
+        'settings' => ['marketplace_ids' => ['ATVPDKIKX0DER']],
     ]);
 
     Http::fake([
@@ -472,7 +472,7 @@ it('disconnects an Amazon OAuth data source and removes its refresh token', func
             'auth_mode' => 'authorization_code',
             'oauth_connected_at' => now()->toIso8601String(),
             'amazon_selling_partner_id' => 'SELLER123',
-            'marketplace_id' => 'ATVPDKIKX0DER',
+            'marketplace_ids' => ['ATVPDKIKX0DER'],
             'amazon_marketplaces' => [[
                 'id' => 'ATVPDKIKX0DER',
                 'name' => 'Amazon.com',
@@ -493,6 +493,6 @@ it('disconnects an Amazon OAuth data source and removes its refresh token', func
         ->and($source->settings['amazon_selling_partner_id'] ?? null)->toBeNull()
         ->and($source->settings['amazon_marketplaces'] ?? null)->toBeNull()
         ->and($source->settings['amazon_marketplaces_synced_at'] ?? null)->toBeNull()
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and(app(OAuthService::class)->isDataSourceConnected($source))->toBeFalse();
 });

@@ -29,13 +29,16 @@ function amazonMarketplaceParticipation(
     ];
 }
 
-function amazonMarketplaceSource(?string $marketplaceId = null): DataSource
+/**
+ * @param  list<string>  $marketplaceIds
+ */
+function amazonMarketplaceSource(array $marketplaceIds = []): DataSource
 {
     return DataSource::factory()->create([
         'source_type' => AmazonSource::class,
         'settings' => array_filter([
             'auth_mode' => 'authorization_code',
-            'marketplace_id' => $marketplaceId,
+            'marketplace_ids' => $marketplaceIds,
         ]),
         'secret_settings' => ['refresh_token' => 'marketplace-refresh-token'],
     ]);
@@ -61,8 +64,9 @@ it('discovers and automatically selects a single supported Amazon marketplace', 
     $source->refresh();
     expect($result->succeeded)->toBeTrue()
         ->and($result->selectionRequired)->toBeFalse()
-        ->and($result->selectedMarketplaceId)->toBe('ATVPDKIKX0DER')
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($result->selectedMarketplaceIds)->toBe(['ATVPDKIKX0DER'])
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
+        ->and($source->settings['primary_marketplace_id'])->toBe('ATVPDKIKX0DER')
         ->and($source->settings['amazon_marketplaces'])->toHaveCount(1)
         ->and($source->settings['amazon_marketplaces_synced_at'])->not->toBeEmpty();
 
@@ -70,7 +74,7 @@ it('discovers and automatically selects a single supported Amazon marketplace', 
 });
 
 it('preserves a valid selection when multiple marketplaces are discovered', function (): void {
-    $source = amazonMarketplaceSource('A2Q3Y263D00KWC');
+    $source = amazonMarketplaceSource(['A2Q3Y263D00KWC']);
 
     Saloon::fake([
         GetMarketplaceParticipations::class => MockResponse::make([
@@ -85,13 +89,53 @@ it('preserves a valid selection when multiple marketplaces are discovered', func
 
     $source->refresh();
     expect($result->selectionRequired)->toBeFalse()
-        ->and($source->settings['marketplace_id'])->toBe('A2Q3Y263D00KWC')
+        ->and($source->settings['marketplace_ids'])->toBe(['A2Q3Y263D00KWC'])
         ->and($source->settings['amazon_marketplaces'][0]['has_suspended_listings'])->toBeTrue()
         ->and($source->settings['amazon_marketplaces'][1]['has_suspended_listings'])->toBeTrue();
 });
 
+it('selects none when the seller has several marketplaces and none is chosen', function (): void {
+    $source = amazonMarketplaceSource();
+
+    Saloon::fake([
+        GetMarketplaceParticipations::class => MockResponse::make([
+            'payload' => [
+                amazonMarketplaceParticipation('ATVPDKIKX0DER', 'Amazon.com', 'US'),
+                amazonMarketplaceParticipation('A2EUQ1WTGCTBG2', 'Amazon.ca', 'CA'),
+            ],
+        ]),
+    ]);
+
+    $result = app(AmazonMarketplaceDiscoveryService::class)->discover($source);
+
+    $source->refresh();
+    expect($result->selectionRequired)->toBeTrue()
+        ->and($result->selectedMarketplaceIds)->toBe([])
+        ->and($source->settings)->not->toHaveKey('marketplace_ids')
+        ->and($source->settings)->not->toHaveKey('primary_marketplace_id');
+});
+
+it('flags each selected marketplace discovery no longer reports, keeping them all', function (): void {
+    $source = amazonMarketplaceSource(['A2EUQ1WTGCTBG2', 'ATVPDKIKX0DER', 'A1AM78C64UM0Y8']);
+
+    Saloon::fake([
+        GetMarketplaceParticipations::class => MockResponse::make([
+            'payload' => [
+                amazonMarketplaceParticipation('ATVPDKIKX0DER', 'Amazon.com', 'US'),
+            ],
+        ]),
+    ]);
+
+    $result = app(AmazonMarketplaceDiscoveryService::class)->discover($source);
+
+    $source->refresh();
+    expect($result->unavailableMarketplaceIds)->toBe(['A2EUQ1WTGCTBG2', 'A1AM78C64UM0Y8'])
+        ->and($source->settings['marketplace_ids'])->toBe(['A2EUQ1WTGCTBG2', 'ATVPDKIKX0DER', 'A1AM78C64UM0Y8'])
+        ->and($source->settings['primary_marketplace_id'])->toBe('ATVPDKIKX0DER');
+});
+
 it('filters internal marketplaces and preserves an existing selection omitted by discovery', function (): void {
-    $source = amazonMarketplaceSource('A1MQXOICRS2Z7M');
+    $source = amazonMarketplaceSource(['A1MQXOICRS2Z7M']);
 
     Saloon::fake([
         GetMarketplaceParticipations::class => MockResponse::make([
@@ -107,9 +151,9 @@ it('filters internal marketplaces and preserves an existing selection omitted by
 
     $source->refresh();
     expect($result->selectionRequired)->toBeFalse()
-        ->and($result->selectedMarketplaceUnavailable)->toBeTrue()
-        ->and($result->selectedMarketplaceId)->toBe('A1MQXOICRS2Z7M')
-        ->and($source->settings['marketplace_id'])->toBe('A1MQXOICRS2Z7M')
+        ->and($result->unavailableMarketplaceIds)->toBe(['A1MQXOICRS2Z7M'])
+        ->and($result->selectedMarketplaceIds)->toBe(['A1MQXOICRS2Z7M'])
+        ->and($source->settings['marketplace_ids'])->toBe(['A1MQXOICRS2Z7M'])
         ->and(array_column($source->settings['amazon_marketplaces'], 'id'))->toBe([
             'ATVPDKIKX0DER',
             'A2Q3Y263D00KWC',
@@ -117,7 +161,7 @@ it('filters internal marketplaces and preserves an existing selection omitted by
 });
 
 it('keeps the OAuth connection and existing marketplace when none are usable', function (): void {
-    $source = amazonMarketplaceSource('ATVPDKIKX0DER');
+    $source = amazonMarketplaceSource(['ATVPDKIKX0DER']);
 
     Saloon::fake([
         GetMarketplaceParticipations::class => MockResponse::make([
@@ -132,13 +176,13 @@ it('keeps the OAuth connection and existing marketplace when none are usable', f
     $source->refresh();
     expect($result->succeeded)->toBeTrue()
         ->and($result->marketplaces)->toBe([])
-        ->and($result->selectedMarketplaceUnavailable)->toBeTrue()
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($result->unavailableMarketplaceIds)->toBe(['ATVPDKIKX0DER'])
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($source->secret('refresh_token'))->toBe('marketplace-refresh-token');
 });
 
 it('does not discover or change marketplaces while sandbox mode is enabled', function (): void {
-    $source = amazonMarketplaceSource('ATVPDKIKX0DER');
+    $source = amazonMarketplaceSource(['ATVPDKIKX0DER']);
     app(SettingsService::class)->set('sandbox_mode', true);
     Saloon::fake([]);
 
@@ -147,14 +191,14 @@ it('does not discover or change marketplaces while sandbox mode is enabled', fun
     $source->refresh();
     expect($result->succeeded)->toBeFalse()
         ->and($result->error)->toBe('Disable sandbox mode before refreshing Amazon marketplaces.')
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($source->settings)->not->toHaveKey('amazon_marketplaces')
         ->and($source->settings)->not->toHaveKey('amazon_marketplaces_sync_error');
     Saloon::assertNothingSent();
 });
 
 it('records a discovery failure without changing the connection or existing marketplace', function (): void {
-    $source = amazonMarketplaceSource('ATVPDKIKX0DER');
+    $source = amazonMarketplaceSource(['ATVPDKIKX0DER']);
 
     Saloon::fake([
         GetMarketplaceParticipations::class => MockResponse::make([
@@ -167,7 +211,7 @@ it('records a discovery failure without changing the connection or existing mark
     $source->refresh();
     expect($result->succeeded)->toBeFalse()
         ->and($result->error)->toContain('403')
-        ->and($source->settings['marketplace_id'])->toBe('ATVPDKIKX0DER')
+        ->and($source->settings['marketplace_ids'])->toBe(['ATVPDKIKX0DER'])
         ->and($source->settings['amazon_marketplaces_sync_error'])->toContain('403')
         ->and($source->secret('refresh_token'))->toBe('marketplace-refresh-token');
 });
