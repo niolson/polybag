@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\Customs\ConvertedAmount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -10,6 +11,7 @@ use App\Enums\CarrierPackaging;
 use App\Enums\LabelReferenceSource;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\CarrierRateFetchException;
+use App\Exceptions\UnconvertibleCustomsValueException;
 use App\Http\Integrations\Fedex\Requests\CancelShipment;
 use App\Http\Integrations\Fedex\Requests\CreateShipment;
 use App\Http\Integrations\Fedex\Requests\Rates;
@@ -2587,7 +2589,7 @@ it('turns a ship request that got no answer into a decline that says to try agai
 /**
  * @param  array<int, CustomsItem>  $customsItems
  */
-function fedexShipRequestTo(string $country, array $customsItems): ShipRequest
+function fedexShipRequestTo(string $country, array $customsItems, string $customsCurrency = 'USD', ?ConvertedAmount $customsDollarRate = null): ShipRequest
 {
     return new ShipRequest(
         fromAddress: new AddressData(
@@ -2618,6 +2620,8 @@ function fedexShipRequestTo(string $country, array $customsItems): ShipRequest
             metadata: ['serviceType' => 'INTERNATIONAL_PRIORITY'],
         ),
         customsItems: $customsItems,
+        customsCurrency: $customsCurrency,
+        customsDollarRate: $customsDollarRate,
     );
 }
 
@@ -2896,5 +2900,74 @@ it('sends the destination address on a rate request as ASCII', function (): void
         $address = $request->body()->all()['requestedShipment']['recipient']['address'];
 
         return $address['city'] === 'Lodz' && $address['streetLines'] === ['Zwyciestwa 27B'];
+    });
+});
+
+describe('the order\'s currency (order-currency/02)', function (): void {
+    it('declares every commodity in the order\'s currency', function (): void {
+        fakeFedexShipEndpoints();
+
+        $request = fedexShipRequestTo('CA', [
+            new CustomsItem(description: 'Ceramic Mug', quantity: 2, unitValue: 12.5, weight: 0.8),
+            new CustomsItem(description: 'Tea Towel', quantity: 1, unitValue: 8.0, weight: 0.2),
+        ], 'CAD');
+
+        expect($this->adapter->createShipment($request)->success)->toBeTrue()
+            ->and(collect(sentFedexCommodities())->map(fn (array $commodity): array => [
+                $commodity['unitPrice']['currency'],
+                $commodity['customsValue']['currency'],
+                $commodity['customsValue']['amount'],
+            ])->all())->toBe([['CAD', 'CAD', '25'], ['CAD', 'CAD', '8']])
+            ->and($this->adapter->declaredCustomsTerms($request)->values?->currency)->toBe('CAD');
+    });
+
+    it('sends FedEx\'s own code where it is not ISO\'s', function (string $iso, string $fedex): void {
+        fakeFedexShipEndpoints();
+
+        $this->adapter->createShipment(fedexShipRequestTo('CA', [
+            new CustomsItem(description: 'Ceramic Mug', quantity: 1, unitValue: 300.0, weight: 0.8),
+        ], $iso));
+
+        expect(sentFedexCommodities()[0]['customsValue'])->toBe(['amount' => '300', 'currency' => $fedex]);
+    })->with([
+        'Mexican peso' => ['MXN', 'NMP'],
+        'pound sterling' => ['GBP', 'UKL'],
+        'Swiss franc' => ['CHF', 'SFR'],
+        'yen' => ['JPY', 'JYE'],
+        'Uruguayan peso, which is ISO\'s' => ['UYU', 'UYU'],
+    ]);
+
+    it('declares US dollars at the pinned rate for a currency FedEx has no code for', function (): void {
+        fakeFedexShipEndpoints();
+
+        // One Icelandic krona is a little under a cent.
+        $request = fedexShipRequestTo('CA', [
+            new CustomsItem(description: 'Wool Hat', quantity: 2, unitValue: 4000.0, weight: 0.3),
+        ], 'ISK', new ConvertedAmount(0.0072, 'USD', CarbonImmutable::parse('2026-10-07')));
+
+        $this->adapter->createShipment($request);
+
+        $declared = $this->adapter->declaredCustomsTerms($request)->values;
+
+        expect(sentFedexCommodities()[0]['unitPrice'])->toBe(['amount' => '28.8', 'currency' => 'USD'])
+            ->and([$declared?->currency, $declared?->convertedFrom, $declared?->rateDate?->toDateString()])
+            ->toBe(['USD', 'ISK', '2026-10-07']);
+    });
+
+    it('refuses the label before calling FedEx when no rate converts a currency it has no code for', function (): void {
+        fakeFedexShipEndpoints();
+
+        $request = fedexShipRequestTo('CA', [
+            new CustomsItem(description: 'Wool Hat', quantity: 1, unitValue: 4000.0, weight: 0.3),
+        ], 'ISK');
+
+        // The workflow asks for the declaration before claiming the offer, so
+        // this is where the purchase stops; createShipment() itself never
+        // reaches FedEx either.
+        expect(fn () => $this->adapter->declaredCustomsTerms($request))
+            ->toThrow(UnconvertibleCustomsValueException::class, 'values are in ISK')
+            ->and($this->adapter->createShipment($request)->success)->toBeFalse();
+
+        Saloon::assertNotSent(CreateShipment::class);
     });
 });

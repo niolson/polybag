@@ -399,6 +399,16 @@ it('sends a getRates body that conforms to the published Shipping v2 schema', fu
     });
 });
 
+it('values an Amazon order\'s items in the currency it was paid in', function (): void {
+    Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
+    $this->package->shipment->update(['currency' => 'CAD']);
+
+    amazonAdapter()->getRates(RateRequest::fromPackage($this->package->fresh()), []);
+
+    Saloon::assertSent(fn (GetShippingRates $request): bool => $request->body()->all()['packages'][0]['items'][0]['itemValue']['unit'] === 'CAD'
+        && $request->body()->all()['packages'][0]['insuredValue']['unit'] === 'USD');
+});
+
 it('does not offer Amazon Shipping to an order from another channel with no connection scoped to it', function (): void {
     Saloon::fake([GetShippingRates::class => amazonRatesResponse()]);
 

@@ -52,6 +52,14 @@ readonly class CustomsItem
     }
 
     /**
+     * This item with another unit value, as {@see withWeight()} does for weight.
+     */
+    public function withUnitValue(float $unitValue): self
+    {
+        return new self(...array_merge(get_object_vars($this), ['unitValue' => $unitValue]));
+    }
+
+    /**
      * The product's GTIN, else its scan barcode when that is a GTIN. A barcode
      * that is not one — an internal Code 128 label — is never declared as one.
      */

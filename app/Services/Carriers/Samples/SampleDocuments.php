@@ -126,7 +126,7 @@ class SampleDocuments
 
         $label->fill(0, $y + 2, $label->width, 1);
         $label->text(10, $y + 8, 7.5, sprintf(
-            'TOTAL: %s LB / %s USD',
+            'TOTAL: %s LB / %s '.$request->customsCurrency,
             $this->weight($this->totalWeight($request->customsItems)),
             $this->money($this->totalValue($request->customsItems)),
         ), bold: true);
@@ -195,7 +195,7 @@ class SampleDocuments
 
         $page->fill(40, $y + 4, 532, 1.5);
         $page->text(46, $y + 12, 10, sprintf(
-            'TOTAL: %s lb / %s USD',
+            'TOTAL: %s lb / %s '.$request->customsCurrency,
             $this->weight($this->totalWeight($request->customsItems)),
             $this->money($this->totalValue($request->customsItems)),
         ), bold: true);

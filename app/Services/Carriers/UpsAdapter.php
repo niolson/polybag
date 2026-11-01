@@ -1514,7 +1514,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
         return [
             'InvoiceLineTotal' => [
-                'CurrencyCode' => 'USD',
+                'CurrencyCode' => $request->contentsCurrency,
                 'MonetaryValue' => number_format($request->contentsValue, 2, '.', ''),
             ],
         ];
@@ -1595,20 +1595,18 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
      * itself whenever an Invoice form is attached — without it the label is
      * refused with 120502, "InvoiceLineTotal MonetaryValue must be greater than
      * 0". It is summed from the same customs items the invoice lists rather
-     * than read off the shipment, so the two always agree.
+     * than read off the shipment, so the two always agree, in the same
+     * currency.
      *
      * @return array<string, string>
      */
     private function buildShipInvoiceLineTotal(ShipRequest $request): array
     {
-        $total = array_sum(array_map(
-            fn (CustomsItem $item): float => round($item->unitValue * $item->quantity, 2),
-            $request->customsItems,
-        ));
+        $declaration = $request->customsDeclaration();
 
         return [
-            'CurrencyCode' => 'USD',
-            'MonetaryValue' => number_format($total, 2, '.', ''),
+            'CurrencyCode' => $declaration->currency,
+            'MonetaryValue' => number_format($declaration->total(), 2, '.', ''),
         ];
     }
 
@@ -1621,8 +1619,11 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
     {
         $products = [];
         $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
+        // UPS takes ISO 4217 codes, so the order's own currency is declared
+        // (`order-currency/02`).
+        $declaration = $request->customsDeclaration();
 
-        foreach ($request->customsItems as $item) {
+        foreach ($declaration->items as $item) {
             $product = [
                 // UPS takes the description as up to three lines of 35 characters.
                 'Description' => [mb_substr($item->description, 0, 35)],
@@ -1667,7 +1668,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             'InvoiceDate' => now()->format('Ymd'),
             ...$this->buildTermsOfShipment($request->customsTerms),
             'ReasonForExport' => 'SALE',
-            'CurrencyCode' => 'USD',
+            'CurrencyCode' => $declaration->currency,
             'Product' => $products,
             // The buyer the invoice is made out to. UPS refuses an Invoice form
             // without it — 9120800, "Missing contact information" — even though
@@ -1897,6 +1898,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             registration: $terms?->registration,
             recipientTaxIdType: $this->sendsGlobalTaxInformation($request) ? $request->recipientTaxId?->type : null,
             exportItn: $this->filesEei($request) ? $request->exportItn : null,
+            values: $this->sendsInternationalForms($request) ? $request->customsDeclaration() : null,
         );
     }
 
