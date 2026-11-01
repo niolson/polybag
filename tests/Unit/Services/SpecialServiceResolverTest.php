@@ -6,6 +6,7 @@ use App\Enums\HazmatClass;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\ExchangeRate;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\Product;
@@ -358,6 +359,46 @@ it('builds declared value config and throws when no value is derivable', functio
 
     expect(fn () => app(SpecialServiceResolver::class)->configForPackage($unvaluedPackage, ['declared_value']))
         ->toThrow(MissingDeclaredValueException::class);
+});
+
+it('declares the US dollar equivalent of a CAD shipment\'s value, at the rate date it pins', function (): void {
+    // One euro is 1.25 dollars and 1.50 Canadian dollars: C$150 is $125.
+    ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
+    ExchangeRate::factory()->quoting('CAD', 1.50, '2026-10-07')->create();
+    ExchangeRate::factory()->quoting('USD', 1.00, '2026-10-08')->create();
+    ExchangeRate::factory()->quoting('CAD', 1.00, '2026-10-08')->create();
+    $shipment = Shipment::factory()->create(['value' => 150.00, 'currency' => 'CAD']);
+    $shipment->forceFill(['created_at' => '2026-10-07 18:00:00'])->save();
+    $package = Package::factory()->for($shipment)->create();
+
+    expect(app(SpecialServiceResolver::class)->configForPackage($package, ['declared_value']))
+        ->toBe(['declared_value' => ['amount' => 125.00, 'currency' => 'USD']])
+        ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-07');
+
+    // The 8th's rates, fetched later, do not move a pinned Shipment.
+    $shipment->forceFill(['created_at' => '2026-10-08 18:00:00'])->save();
+
+    expect(app(SpecialServiceResolver::class)->declaredValueForPackage($package->fresh()))->toBe(125.00);
+});
+
+it('refuses a declared value no stored rate converts to dollars, naming the currency', function (): void {
+    $shipment = Shipment::factory()->create(['value' => 150.00, 'currency' => 'XTS']);
+    $package = Package::factory()->for($shipment)->create();
+
+    expect(app(SpecialServiceResolver::class)->declaredValueForPackage($package))->toBeNull()
+        ->and(fn () => app(SpecialServiceResolver::class)->configForPackage($package, ['declared_value']))
+        ->toThrow(MissingDeclaredValueException::class, 'its value is in XTS');
+});
+
+it('finds no declared value when the pinned day has no rate for the currency, and picks no other day', function (): void {
+    ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-07')->create();
+    ExchangeRate::factory()->quoting('USD', 1.25, '2026-10-08')->create();
+    ExchangeRate::factory()->quoting('CAD', 1.50, '2026-10-08')->create();
+    $shipment = Shipment::factory()->create(['value' => 150.00, 'currency' => 'CAD', 'customs_rate_date' => '2026-10-07']);
+    $package = Package::factory()->for($shipment)->create();
+
+    expect(app(SpecialServiceResolver::class)->declaredValueForPackage($package))->toBeNull()
+        ->and($shipment->fresh()->customs_rate_date?->toDateString())->toBe('2026-10-07');
 });
 
 it('returns empty config when declared_value is not resolved', function (): void {

@@ -21,7 +21,8 @@ use App\Services\Customs\CustomsTermsResolver;
  * @param  SellerTaxRegistration|null  $applicableRegistration  The registration whose regime covers the destination, before the threshold is applied, so a withheld one can still be named
  * @param  bool  $overThreshold  The consignment's goods value is over an IOSS or UK VAT threshold, or no exchange rate was stored to tell; the registration is then not declared
  * @param  bool  $exchangeRateMissing  No ECB rate was stored on or before the order date, so the value could not be converted and the registration is withheld
- * @param  float  $consignmentValue  The goods value of the Package's customs lines, in USD
+ * @param  float  $consignmentValue  The goods value of the Package's customs lines, in `$currency`
+ * @param  string  $currency  The Shipment's currency, which its customs lines are valued in (`order-currency/01`)
  * @param  ConvertedAmount|null  $convertedValue  The value compared with the threshold, in its currency: the consignment's for IOSS and UK VAT, null for the per-item regimes
  * @param  int|null  $threshold  The applicable regime's threshold for this destination
  * @param  string|null  $thresholdCurrency  Its currency
@@ -41,6 +42,7 @@ readonly class ResolvedCustomsTerms
         public bool $overThreshold = false,
         public bool $exchangeRateMissing = false,
         public float $consignmentValue = 0.0,
+        public string $currency = 'USD',
         public ?ConvertedAmount $convertedValue = null,
         public ?int $threshold = null,
         public ?string $thresholdCurrency = null,
@@ -94,6 +96,7 @@ readonly class ResolvedCustomsTerms
             dutiesTerms: null,
             dutiesTermsOrigin: CustomsTermsOrigin::SourceDecided,
             consignmentValue: $this->consignmentValue,
+            currency: $this->currency,
         );
     }
 

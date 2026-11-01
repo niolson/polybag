@@ -834,6 +834,7 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
         // Sum line item values using proceeds breakdowns.
         $useOrderedQuantity = $this->readsFromSandbox();
         $totalValue = 0;
+        $currencies = self::proceedsCurrencies($items);
         foreach ($items as $item) {
             $qtyOrdered = (int) ($item['quantityOrdered'] ?? 0);
             $qty = $useOrderedQuantity
@@ -874,6 +875,11 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             'phone' => $address['phone'] ?? null,
             'email' => null,
             'value' => round($totalValue, 2),
+            'currency' => $currencies[0] ?? null,
+            // One order is paid in one currency; amounts in several cannot be summed.
+            '_row_errors' => count($currencies) > 1
+                ? ['Order items are priced in more than one currency ('.implode(', ', $currencies).')']
+                : [],
             'residential' => $residential,
             'channel_id' => $this->config['channel_name'] ?? 'Amazon',
             'shipping_method_id' => filled($serviceLevel) ? $serviceLevel : $defaultShippingMethod,
@@ -1095,7 +1101,36 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
     }
 
     /**
-     * Sum the ITEM-type subtotals from an order item's proceeds breakdowns.
+     * The currencies an order's ITEM proceeds are in (`order-currency/01`),
+     * each once, sorted. One for any well-formed order; none when Amazon sent
+     * no code, which the import reads as `USD`.
+     *
+     * @param  array<int, array<string, mixed>>  $items
+     * @return list<string>
+     */
+    private static function proceedsCurrencies(array $items): array
+    {
+        $currencies = [];
+
+        foreach ($items as $item) {
+            foreach ($item['proceeds']['breakdowns'] ?? [] as $breakdown) {
+                $code = $breakdown['subtotal']['currencyCode'] ?? null;
+
+                if (($breakdown['type'] ?? '') === 'ITEM' && filled($code)) {
+                    $currencies[strtoupper(trim((string) $code))] = true;
+                }
+            }
+        }
+
+        $currencies = array_keys($currencies);
+        sort($currencies);
+
+        return $currencies;
+    }
+
+    /**
+     * Sum the ITEM-type subtotals from an order item's proceeds breakdowns,
+     * in the order's currency ({@see proceedsCurrencies()}).
      */
     private function sumItemProceeds(array $item): float
     {

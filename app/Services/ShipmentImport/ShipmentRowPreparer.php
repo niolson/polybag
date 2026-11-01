@@ -27,7 +27,8 @@ class ShipmentRowPreparer
 
         ['errors' => $validationErrors, 'warnings' => $validationWarnings] = $this->validateShipmentData($data);
         $customs = $this->prepareCustomsFields($data);
-        $validationErrors = [...$validationErrors, ...$customs['errors']];
+        $currency = self::currencyFrom($data);
+        $validationErrors = [...$validationErrors, ...($data['_row_errors'] ?? []), ...$currency['errors'], ...$customs['errors']];
         $validationWarnings = [...$validationWarnings, ...$customs['warnings']];
 
         if ($validationErrors !== []) {
@@ -65,6 +66,10 @@ class ShipmentRowPreparer
             $preserveExistingFields[] = 'residential';
         }
 
+        if ($currency['preserve']) {
+            $preserveExistingFields[] = 'currency';
+        }
+
         $preserveExistingFields = [...$preserveExistingFields, ...$customs['preserve']];
 
         // Sources that read a per-order shipping reference (Amazon's
@@ -100,6 +105,7 @@ class ShipmentRowPreparer
                 'phone_extension' => $phoneExtension,
                 'email' => $data['email'] ?? null,
                 'value' => $data['value'] ?? null,
+                'currency' => $currency['currency'],
                 'residential' => $data['residential'] ?? null,
                 'validation_message' => $validationWarnings !== [] ? implode('; ', $validationWarnings) : null,
                 'shipping_method_reference' => $data['shipping_method_id'] ?? null,
@@ -116,6 +122,32 @@ class ShipmentRowPreparer
             ],
             warnings: $validationWarnings,
         );
+    }
+
+    /**
+     * The currency the order's values are in (`order-currency/01`): a
+     * three-letter code, upper-cased. A source that supplies none, or a blank
+     * one, means `USD` for a new Shipment and leaves an existing Shipment's
+     * currency alone, so a manager's correction survives the next import;
+     * anything else rejects the row, since every value on it would be read in
+     * the wrong currency.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array{currency: string, preserve: bool, errors: list<string>}
+     */
+    private static function currencyFrom(array $data): array
+    {
+        $input = $data['currency'] ?? null;
+
+        if (! filled($input)) {
+            return ['currency' => Shipment::DEFAULT_CURRENCY, 'preserve' => true, 'errors' => []];
+        }
+
+        $currency = strtoupper(trim((string) $input));
+
+        return preg_match('/^[A-Z]{3}$/', $currency) === 1
+            ? ['currency' => $currency, 'preserve' => false, 'errors' => []]
+            : ['currency' => Shipment::DEFAULT_CURRENCY, 'preserve' => false, 'errors' => ["Invalid currency '{$input}' (expected a three-letter ISO 4217 code, such as USD)"]];
     }
 
     /**

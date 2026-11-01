@@ -3,10 +3,14 @@
 use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
+use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
+use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
+use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
 use App\Models\Location;
+use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
@@ -162,3 +166,52 @@ it('offers a deliverability tab for every value, labelled as the enum labels it'
         ->assertCanSeeTableRecords([$matching])
         ->assertCanNotSeeTableRecords([$other]);
 })->with(Deliverability::cases());
+
+describe('the order\'s currency', function (): void {
+    it('defaults a new Shipment to USD and saves an edited currency upper-cased', function (): void {
+        $shipment = Shipment::factory()->create(['value' => 120.00]);
+
+        expect($shipment->fresh()->currency)->toBe('USD');
+
+        Livewire::test(EditShipment::class, ['record' => $shipment->id])
+            ->assertFormSet(['currency' => 'USD'])
+            ->fillForm(['currency' => 'cad'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($shipment->fresh()->currency)->toBe('CAD');
+    });
+
+    it('refuses a currency that is not a three-letter code', function (string $currency): void {
+        $shipment = Shipment::factory()->create();
+
+        Livewire::test(EditShipment::class, ['record' => $shipment->id])
+            ->fillForm(['currency' => $currency])
+            ->call('save')
+            ->assertHasFormErrors(['currency']);
+    })->with(['$', 'US', 'C4D']);
+
+    it('fixes the currency once a Package has a Label', function (): void {
+        $shipment = Shipment::factory()->create(['currency' => 'CAD']);
+        Package::factory()->shipped()->for($shipment)->create();
+
+        Livewire::test(EditShipment::class, ['record' => $shipment->id])
+            ->assertFormFieldIsDisabled('currency')
+            ->fillForm(['currency' => 'EUR'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        expect($shipment->fresh()->currency)->toBe('CAD');
+    });
+
+    it('shows the value and its items\' values in the Shipment\'s currency', function (): void {
+        $shipment = Shipment::factory()->create(['value' => 1234.50, 'currency' => 'EUR']);
+        ShipmentItem::factory()->for($shipment)->create(['value' => 61.25]);
+
+        Livewire::test(ViewShipment::class, ['record' => $shipment->id])
+            ->assertSee('€1,234.50');
+
+        Livewire::test(ShipmentItemsRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => ViewShipment::class])
+            ->assertSee('€61.25');
+    });
+});

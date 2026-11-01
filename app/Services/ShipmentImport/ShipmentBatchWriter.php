@@ -16,7 +16,7 @@ class ShipmentBatchWriter
     private const PRESERVABLE_FIELDS = [
         'first_name', 'last_name', 'company', 'address1', 'address2', 'city',
         'state_or_province', 'postal_code', 'country', 'phone', 'phone_e164',
-        'phone_extension', 'email', 'residential',
+        'phone_extension', 'email', 'residential', 'currency',
         ...Shipment::CUSTOMS_FIELDS,
     ];
 
@@ -117,7 +117,7 @@ class ShipmentBatchWriter
             'shipment_reference', 'source_checksum',
             'first_name', 'last_name', 'company',
             'address1', 'address2', 'city', 'state_or_province', 'postal_code', 'country',
-            'phone', 'phone_e164', 'phone_extension', 'email', 'value',
+            'phone', 'phone_e164', 'phone_extension', 'email', 'value', 'currency',
             'residential',
             'validation_message', 'shipping_method_reference', 'shipping_method_id',
             'channel_reference', 'deliver_by', 'ship_by', 'metadata', 'updated_at',

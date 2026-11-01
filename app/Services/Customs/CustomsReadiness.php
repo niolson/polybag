@@ -23,6 +23,7 @@ use App\Models\Package;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShippingOffer;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use App\Services\SettingsService;
 use App\Services\Shipping\DutiesTermsFilter;
 use App\Support\FedexRecipientEmail;
@@ -50,7 +51,7 @@ use Illuminate\Database\Eloquent\Model;
  */
 class CustomsReadiness
 {
-    /** The customs value a classification may total before EEI is required (15 CFR 30.37(a)). */
+    /** The customs value, in US dollars, a classification may total before EEI is required (15 CFR 30.37(a)). */
     public const float ITN_THRESHOLD = 2500.00;
 
     /** The USPS customs form cuts a description here. */
@@ -60,6 +61,7 @@ class CustomsReadiness
         private readonly CustomsTermsResolver $resolver,
         private readonly CustomsReferenceData $referenceData,
         private readonly DutiesTermsFilter $dutiesTermsFilter,
+        private readonly ShipmentAmountConverter $amounts,
     ) {}
 
     /**
@@ -459,34 +461,42 @@ class CustomsReadiness
     }
 
     /**
+     * The values are in the Shipment's currency, and the limit is in US
+     * dollars (`order-currency/01`), so they are converted at the Shipment's
+     * pinned ECB day. A currency no stored rate converts cannot show the
+     * exemption, and is held.
+     *
      * @param  list<CustomsItem>  $lines
      * @return list<CustomsFinding>
      */
     private function itnRequiredFindings(Shipment $shipment, array $lines, string $country): array
     {
-        $total = round(array_sum(array_map(fn (CustomsItem $line): float => $line->unitValue * $line->quantity, $lines)), 2);
         $always = in_array($country, $this->referenceData->alwaysFileDestinations(), true);
+        $currency = ShipmentAmountConverter::currencyOf($shipment);
         $reason = null;
-        $overLimit = [];
 
         if ($always) {
             $reason = "EEI must be filed for every shipment to {$country}, whatever its value.";
+        } elseif (($dollarsPerUnit = $this->amounts->convert($shipment, 1.0, 'USD', 'the export filing (EEI) threshold')) === null) {
+            $reason = "This order's values are in {$currency}, and no exchange rate from {$currency} to US dollars is stored for the day it was placed, so PolyBag cannot show it is exempt from an export filing (the exemption is up to \$2,500 per classification). Enter an ITN, or correct the order's currency.";
         } else {
-            $overLimit = $this->classificationsOverLimit($lines);
+            $rate = $dollarsPerUnit->amount;
+            $total = round(array_sum(array_map(fn (CustomsItem $line): float => $line->unitValue * $line->quantity, $lines)), 2);
+            $overLimit = $this->classificationsOverLimit($lines, $rate);
             $unclassified = array_filter($lines, fn (CustomsItem $line): bool => self::hsDigits($line) === '');
 
             if ($overLimit !== []) {
                 $reason = sprintf(
                     'This order needs an export filing (EEI, which gives an ITN) because it ships more than $2,500 of one classification (15 CFR 30.37(a)): %s.',
                     implode('; ', array_map(
-                        fn (array $group): string => sprintf('%s totals $%s', implode('/', $group['codes']), number_format($group['value'], 2)),
+                        fn (array $group): string => sprintf('%s totals %s', implode('/', $group['codes']), $this->inDollars($group['value'], $currency, $rate)),
                         $overLimit,
                     )),
                 );
-            } elseif ($unclassified !== [] && $total > self::ITN_THRESHOLD) {
+            } elseif ($unclassified !== [] && $total * $rate > self::ITN_THRESHOLD) {
                 $reason = sprintf(
-                    'The customs total is $%s and %s no HS code, so PolyBag cannot show the order is exempt from an export filing (the exemption is up to $2,500 per classification): %s. Add HS codes to the products, or enter an ITN.',
-                    number_format($total, 2),
+                    'The customs total is %s and %s no HS code, so PolyBag cannot show the order is exempt from an export filing (the exemption is up to $2,500 per classification): %s. Add HS codes to the products, or enter an ITN.',
+                    $this->inDollars($total, $currency, $rate),
                     count($unclassified) === 1 ? 'one line has' : count($unclassified).' lines have',
                     $this->describeLines($unclassified),
                 );
@@ -510,12 +520,26 @@ class CustomsReadiness
     }
 
     /**
-     * The groups of lines that share a classification, over the limit.
+     * An amount in the order's currency, as the dollars a limit is measured
+     * in: `$2,600.00`, or `MXN 3,000.00 (US$163.20)`.
+     */
+    private function inDollars(float $amount, string $currency, float $dollarsPerUnit): string
+    {
+        if ($currency === 'USD') {
+            return '$'.number_format($amount, 2);
+        }
+
+        return sprintf('%s %s (US$%s)', $currency, number_format($amount, 2), number_format($amount * $dollarsPerUnit, 2));
+    }
+
+    /**
+     * The groups of lines that share a classification, over the limit. Each
+     * group's value is in the order's currency; `$dollarsPerUnit` measures it.
      *
      * @param  list<CustomsItem>  $lines
      * @return list<array{codes: list<string>, value: float}>
      */
-    private function classificationsOverLimit(array $lines): array
+    private function classificationsOverLimit(array $lines, float $dollarsPerUnit): array
     {
         $codes = [];
 
@@ -557,7 +581,7 @@ class CustomsReadiness
 
         return array_values(array_filter(
             array_map(fn (array $group): array => ['codes' => $group['codes'], 'value' => round($group['value'], 2)], $groups),
-            fn (array $group): bool => $group['value'] > self::ITN_THRESHOLD,
+            fn (array $group): bool => $group['value'] * $dollarsPerUnit > self::ITN_THRESHOLD,
         ));
     }
 
@@ -648,15 +672,22 @@ class CustomsReadiness
         if ($terms->registrationWithheld()) {
             $applicable = $terms->applicableRegistration;
             $label = $applicable?->regime->getLabel() ?? 'seller';
-            $message = $terms->exchangeRateMissing
-                ? "No exchange rate is stored, so the order's value could not be tested against the {$label} threshold and the registration is not sent."
-                : sprintf(
+            $message = match (true) {
+                $terms->exchangeRateMissing => "No exchange rate from {$terms->currency} to {$terms->thresholdCurrency} is stored, so the order's value could not be tested against the {$label} threshold and the registration is not sent.",
+                $terms->currency === $terms->thresholdCurrency => sprintf(
+                    'The order is over the %s threshold (%s %s), so the registration is not sent: customs would ignore it and charge VAT on the whole consignment.',
+                    $label,
+                    number_format((float) $terms->threshold),
+                    $terms->thresholdCurrency,
+                ),
+                default => sprintf(
                     'The order is over the %s threshold (%s %s, at the ECB rate of %s), so the registration is not sent: customs would ignore it and charge VAT on the whole consignment.',
                     $label,
                     number_format((float) $terms->threshold),
                     $terms->thresholdCurrency,
                     $terms->convertedValue?->rateDate->toDateString() ?? 'the day',
-                );
+                ),
+            };
 
             $findings[] = new CustomsFinding(CustomsFindingSeverity::Warn, 'registration_not_sent', 'Registration Not Sent', $message);
         }

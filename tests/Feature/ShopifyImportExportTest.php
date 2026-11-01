@@ -992,3 +992,20 @@ it('imports a fulfillment order for different goods as its own shipment with ite
 
     expect(Shipment::count())->toBe(2);
 });
+
+it('imports an order in the shop currency\'s code, and asks Shopify for it', function (): void {
+    mapShopifyLocation($this->dataSource);
+    $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 2);
+    $fulfillmentOrder['lineItems']['nodes'][0]['lineItem']['originalUnitPriceSet']['shopMoney'] = ['amount' => '25.00', 'currencyCode' => 'CAD'];
+
+    $result = importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+    $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+    expect($result->errors)->toBeEmpty()
+        ->and($shipment->currency)->toBe('CAD')
+        ->and((float) $shipment->value)->toBe(50.0)
+        ->and((float) $shipment->shipmentItems->sole()->value)->toBe(25.0);
+
+    Saloon::assertSent(fn (GraphQL $request): bool => str_contains((string) json_encode($request->body()->all()), 'shopMoney { amount currencyCode }'));
+});

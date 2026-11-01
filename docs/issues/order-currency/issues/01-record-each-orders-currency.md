@@ -1,6 +1,6 @@
 # Record each order's currency, and convert where a rule is in dollars
 
-Status: ready-for-agent
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -78,13 +78,49 @@ converted. It is held the way a missing rate is held now: the registration is wi
 
 ## Acceptance
 
-- [ ] An Amazon order priced in CAD imports with `currency = CAD` and its CAD amounts
-- [ ] A Shopify order imports with the shop currency's code
-- [ ] A Database source with a mapped currency imports it; unmapped imports `USD`; an
+- [x] An Amazon order priced in CAD imports with `currency = CAD` and its CAD amounts
+- [x] A Shopify order imports with the shop currency's code
+- [x] A Database source with a mapped currency imports it; unmapped imports `USD`; an
       invalid code fails the row
-- [ ] An order worth 3,000 MXN of one classification does not require an EEI filing; an
+- [x] An order worth 3,000 MXN of one classification does not require an EEI filing; an
       order worth 3,000 USD does
-- [ ] The carriage declared value of a CAD Shipment is its USD equivalent at the pinned
+- [x] The carriage declared value of a CAD Shipment is its USD equivalent at the pinned
       rate date
-- [ ] The IOSS threshold check for a EUR order compares the EUR value without conversion
-- [ ] A Shipment in a currency with no ECB rate is held with a message naming the currency
+- [x] The IOSS threshold check for a EUR order compares the EUR value without conversion
+- [x] A Shipment in a currency with no ECB rate is held with a message naming the currency
+
+## Comments
+
+**2026-10-31 — built.** `shipments.currency` (`char(3)`, default `USD`), set by every
+import: Amazon from the ITEM proceeds' `currencyCode`, Shopify from
+`originalUnitPriceSet.shopMoney.currencyCode`, Database from an optional `currency`
+mapping (documented in `docs/data-sources/database.md`). `ShipmentRowPreparer` upper-cases
+it, reads blank or absent as `USD`, and rejects anything that is not three letters. An
+Amazon order whose items are in more than one currency fails its row through a new
+`_row_errors` key the preparer adds to its own errors.
+
+The pin moved out of `CustomsTermsResolver` into `ExchangeRates\ShipmentAmountConverter`,
+which all three dollar rules share: the IOSS/UK/VOEC thresholds (now converted from the
+Shipment's currency), the EEI threshold in `CustomsReadiness`, and the carriage declared
+value in `SpecialServiceResolver` (still sent as USD). An amount already in the rule's
+currency needs no rate and pins nothing. Its warnings now name the currency pair.
+
+Decisions the issue left open:
+
+- **EEI holds on a missing rate.** A currency no stored rate converts blocks with
+  `export_itn_required`, naming the currency; entering an ITN clears it. The registration
+  path withholds and warns as before, its message naming the pair.
+- **Declared value with no rate** refuses the purchase through `MissingDeclaredValueException`,
+  with a message naming the currency, rather than declaring an unconverted amount.
+- **The code is checked for shape, not membership.** Any three letters import; one the ECB
+  does not publish is then held by the rules above. No ISO 4217 table is in the app.
+- **Manual Ship has no value field**, so it shows no currency: its Draft Shipments are
+  `USD` with no value. The Shipment form edits the currency until a Package has an active
+  Label; the item relation manager and the Shipment view show values in it, as does the
+  archive export.
+- **Not converted, and not in the spec:** the shipping rule's *order value* condition
+  (`RuleEvaluator::evaluateOrderValue()`) still compares the bare value. Left for a
+  decision; see the report on the PR.
+
+
+**2026-10-31, after review:** a re-import whose source supplies no currency now keeps the Shipment's stored currency instead of resetting it to USD. A new Shipment still defaults to USD. So a manager's correction survives the next import, as the address and customs fields already do. A re-import can still change the currency of an open Shipment with a labeled Package, as it can its value: the form lock covers manual edits only.

@@ -19,6 +19,7 @@ use App\Enums\ValidationTrigger;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\AddressReferenceService;
 use App\Services\AddressValidationService;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use App\Services\PhoneParserService;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
@@ -135,6 +136,22 @@ class Shipment extends Model
         'export_itn',
     ];
 
+    /**
+     * The currency an order's values are in when nothing says otherwise.
+     */
+    public const DEFAULT_CURRENCY = 'USD';
+
+    /**
+     * `value` and every item's `value` are in `currency`, the ISO 4217 code
+     * the order was paid in (`order-currency/01`). Converted only where a
+     * rule is stated in another currency, through {@see ShipmentAmountConverter}.
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'currency' => self::DEFAULT_CURRENCY,
+    ];
+
     protected $fillable = [
         'client_id',
         'location_id',
@@ -155,6 +172,7 @@ class Shipment extends Model
         'phone_extension',
         'email',
         'value',
+        'currency',
         'residential',
         'checked',
         'deliverability',

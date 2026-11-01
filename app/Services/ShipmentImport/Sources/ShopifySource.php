@@ -205,7 +205,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                 {{partNumberSelection}}
               }
-              lineItem { originalUnitPriceSet { shopMoney { amount } } }
+              lineItem { originalUnitPriceSet { shopMoney { amount currencyCode } } }
             }
           }
         }
@@ -377,7 +377,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                   inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                   {{partNumberSelection}}
                 }
-                lineItem { originalUnitPriceSet { shopMoney { amount } } }
+                lineItem { originalUnitPriceSet { shopMoney { amount currencyCode } } }
               }
             }
           }
@@ -1232,6 +1232,9 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0);
         $value = $lineItems->sum(fn (array $item): float => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0)
             * (int) ($item['remainingQuantity'] ?? 0));
+        // `shopMoney` is in the shop's currency, the same on every line (`order-currency/01`).
+        $currency = $lineItems->map(fn (array $item): mixed => data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.currencyCode'))
+            ->first(fn (mixed $code): bool => filled($code));
         $identity = $this->identityFor($fulfillmentOrder);
         // The shipping option the buyer chose at checkout, as it was shown to them ("Standard").
         $presentedShippingMethod = data_get($fulfillmentOrder, 'deliveryMethod.presentedName');
@@ -1253,6 +1256,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'phone' => $destination['phone'] ?? null,
             'email' => $order['email'] ?? null,
             'value' => round($value, 2),
+            'currency' => $currency,
             'channel_id' => $this->config['channel_name'] ?? 'Shopify',
             'shipping_method_id' => filled($presentedShippingMethod) ? $presentedShippingMethod : $defaultShippingMethod,
             '_shipping_method_fallback' => $defaultShippingMethod,
