@@ -1,6 +1,6 @@
 # Declare customs in the order's currency
 
-Status: ready-for-agent
+Status: done
 Category: bug
 Repo: `polybag`
 
@@ -60,12 +60,78 @@ rate at all. A conversion is needed only where a carrier insists on one currency
 
 ## Acceptance
 
-- [ ] A FedEx international Label for a CAD Shipment declares CAD on every commodity
-- [ ] A FedEx Label for an MXN Shipment sends FedEx's code for the peso
-- [ ] A UPS international Label for a CAD Shipment declares CAD on the form and invoice
+- [x] A FedEx international Label for a CAD Shipment declares CAD on every commodity
+- [x] A FedEx Label for an MXN Shipment sends FedEx's code for the peso
+- [x] A UPS international Label for a CAD Shipment declares CAD on the form and invoice
       total
-- [ ] A USPS international Label for a CAD Shipment declares the USD equivalent at the
-      pinned rate date, if USPS is confirmed USD-only
-- [ ] The Label's customs snapshot records the declared currency and, for a converted
+- [x] A USPS international Label for a CAD Shipment declares the USD equivalent at the
+      pinned rate date (USPS is confirmed USD-only)
+- [x] The Label's customs snapshot records the declared currency and, for a converted
       declaration, the rate date
-- [ ] A USD Shipment's declarations are unchanged
+- [x] A USD Shipment's declarations are unchanged
+
+## Comments
+
+**2026-11-01, built.**
+
+- **Shared mechanism.** `ShipRequest` carries the Shipment's `customsCurrency` and
+  `customsDollarRate`, which is one unit of that currency in US dollars at the pinned
+  `customs_rate_date`. A carrier calls `customsDeclaration($acceptedCurrencies)` and gets
+  the lines unchanged when it accepts the order's currency. Otherwise it gets them in USD:
+  each unit value is rounded to the cent and is at least $0.01. The rate is converted
+  when the request is built, for any label with a customs form: across a border, or to
+  an APO, FPO or DPO address, where USPS sends one too. That pins the date, as the EEI
+  check already does.
+- **No rate.** If a carrier needs USD and no rate is stored, the label is refused as
+  `Exchange Rate Needed` before the offer is claimed (`UnconvertibleCustomsValueException`).
+  For a US export the EEI check refuses first for the same missing rate. This refusal is
+  only reached for Canada, where the EEI check is skipped.
+- **FedEx.** `FedexCurrency` maps ISO 4217 codes to FedEx's codes, taken from the FedEx
+  API currency codes list on FedEx's developer portal. The REST specs only link to that
+  list. It is copied to `.scratch/order-currency/fedex-api-currency-codes.txt`. Where the
+  portal gives two codes, such as `UKL/GBP`, it notes that the ISO one "can only be used
+  as a preferred currency in rate requests", so a declaration sends FedEx's: `UKL`,
+  `NMP`, `SFR`, `JYE`, `SID`, `WON`, `DHS`, and so on. FedEx's own Mexico test cases send
+  `NMP`. The Venezuelan bolívar fuerte (`VEF`) is left out, because ISO's current code
+  is `VES`. A currency FedEx has no code for is converted to USD.
+  - A first draft used Table 99 of FedEx's 2024 *Ship Manager Server* guide, which is
+    out of date for the API: it has `UYP` where the API uses `UYU`, and `JOD`, `KHR` and
+    `NGN`, which the API list does not have. It also lacks `VND` and `WST`.
+  - The test fixture `fedexShip.json` allowed only USD on customs amounts because that
+    was all the adapter ever sent, so it now takes any three-letter code. The declared
+    value stays USD.
+- **UPS.** UPS takes ISO codes. The invoice form's `CurrencyCode` covers "all the
+  monetary values of the Invoice form", and `InvoiceLineTotal` is summed from the same
+  lines in the same currency. The rate request's `InvoiceLineTotal` uses the new
+  `RateRequest::contentsCurrency`, which is part of the offer fingerprint. The spec
+  gives no per-destination list of accepted currencies.
+- **USPS.** USD only: `itemTotalValue` is "in USD" in both the 3.3.11 spec and the
+  2026-10-12 EU update. The values are converted.
+- **Amazon.** Buy Shipping and Amazon Shipping send the order's currency on the item
+  values. The Shipping v2 `Currency.unit` is "The ISO 4217 format 3-character currency
+  code", with no marketplace restriction in the spec. `insuredValue` stays USD as the
+  carriage declared value. Amazon doesn't implement `SendsCustomsTerms`, so it has no
+  snapshot. Not verified live: a request mixing CAD items with a USD `insuredValue` has
+  not been sent to Amazon.
+- **Snapshot.** `DeclaredCustomsTerms::$values` reports the lines as sent.
+  `package_labels.customs_terms` gains `currency`, `converted_from_currency` and
+  `exchange_rate_date`, all null when nothing was declared.
+- **`CustomsReadiness`.** Its only dollar figures are the EEI messages, which already
+  show the order's currency next to the dollar equivalent since `01`, for example
+  `GBP 2,000.00 (US$3,125.00)`. That test is stated in dollars, so it is unchanged.
+- **Fake carrier.** Its sample customs documents print the order's currency.
+
+
+**2026-11-01, after review.**
+
+- **Military addresses.** A USPS label to an APO, FPO or DPO address converts its
+  customs form to USD. USPS `declaredCustomsTerms()` now reports that declaration with
+  no terms, so the label is refused as `Exchange Rate Needed` before the offer is claimed.
+  Before this fix, the refusal came as a generic carrier failure after the claim. The
+  snapshot also records the conversion.
+- **When the rate is computed.** The dollar rate is now computed only for a label that
+  carries a customs form, either across a border or to a military address. It is not
+  computed for a blind purchase, whose seller makes its own form. A package with no
+  items declares nothing and needs no rate.
+- **Offers expire once.** Adding `contentsCurrency` to the rate fingerprint makes every
+  Offer issued before the deploy need a requote, once.

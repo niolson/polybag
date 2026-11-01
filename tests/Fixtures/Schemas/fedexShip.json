@@ -467,13 +467,13 @@
       }
     },
     "CustomsMoney": {
-      "description": "A customs amount as buildCustomsClearanceDetail() sends it: a decimal string, always in USD.",
+      "description": "A customs amount as buildCustomsClearanceDetail() sends it: a decimal string, in the order's currency under FedEx's code for it (FedexCurrency), else USD.",
       "type": "object",
       "required": ["amount", "currency"],
       "additionalProperties": false,
       "properties": {
         "amount": { "$ref": "#/definitions/DecimalString" },
-        "currency": { "type": "string", "enum": ["USD"] }
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
       }
     },
     "DecimalString": {

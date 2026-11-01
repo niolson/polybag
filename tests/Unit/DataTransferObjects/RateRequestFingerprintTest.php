@@ -98,7 +98,17 @@ it('changes with anything the carrier was asked to price', function (): void {
         ->and(rateRequestFor(['packages' => [new PackageData(weight: 2.0, length: 10, width: 8, height: 6, boxType: BoxSizeType::BOX, carrierPackaging: CarrierPackaging::UspsMediumFlatRateBox)]])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['specialServiceCodes' => ['declared_value']])->fingerprint())->not->toBe($base)
         ->and(rateRequestFor(['specialServiceConfig' => ['declared_value' => ['amount' => 41.0, 'currency' => 'USD']]])->fingerprint())->not->toBe($base)
-        ->and(rateRequestFor(['clientId' => 8])->fingerprint())->not->toBe($base);
+        ->and(rateRequestFor(['clientId' => 8])->fingerprint())->not->toBe($base)
+        ->and(rateRequestFor(['contentsCurrency' => 'CAD'])->fingerprint())->not->toBe($base);
+});
+
+it('quotes the contents value in the Shipment\'s currency', function (): void {
+    $shipment = Shipment::factory()->create(['value' => 85.0, 'currency' => 'CAD']);
+    $package = Package::factory()->for($shipment)->for(Location::factory()->default()->create())->create();
+
+    $request = RateRequest::fromPackage($package);
+
+    expect([$request->contentsValue, $request->contentsCurrency])->toBe([85.0, 'CAD']);
 });
 
 it('changes with the shipping method, which decides who is asked at all', function (): void {

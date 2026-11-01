@@ -10,7 +10,9 @@ use App\Enums\CustomsTermsOrigin;
 /**
  * What a purchased Label declared, as `package_labels.customs_terms` records
  * it (ADR-0008 decision 6): the duties term and where it came from, the seller
- * registration and where it came from, the ITN, and the version of
+ * registration and where it came from, the ITN, the currency the values were
+ * declared in (and, when they were converted to it, the order's currency and
+ * the ECB day, `order-currency/02`), and the version of
  * `duties-support.json` that judged the rate.
  *
  * Built by the shipping workflow, not an adapter, so every carrier gets the
@@ -28,7 +30,7 @@ class CustomsTermsSnapshot
      * The snapshot for a request bought through $seller, or null when nothing
      * was declared and the label crosses no customs border.
      *
-     * @return array{duties_terms: string|null, duties_terms_source: string|null, registration: array{regime: string, number: string, source: string}|null, recipient_tax_id: array{type: string}|null, export_itn: string|null, duties_support_version: string}|null
+     * @return array{duties_terms: string|null, duties_terms_source: string|null, registration: array{regime: string, number: string, source: string}|null, recipient_tax_id: array{type: string}|null, export_itn: string|null, currency: string|null, converted_from_currency: string|null, exchange_rate_date: string|null, duties_support_version: string}|null
      */
     public function forRequest(ShipRequest $request, ?object $seller): ?array
     {
@@ -53,6 +55,9 @@ class CustomsTermsSnapshot
             ],
             'recipient_tax_id' => $declared->recipientTaxIdType === null ? null : ['type' => $declared->recipientTaxIdType->value],
             'export_itn' => $declared->exportItn,
+            'currency' => $declared->values?->currency,
+            'converted_from_currency' => $declared->values?->convertedFrom,
+            'exchange_rate_date' => $declared->values?->rateDate?->toDateString(),
             'duties_support_version' => $this->dutiesSupport->version(),
         ];
     }
