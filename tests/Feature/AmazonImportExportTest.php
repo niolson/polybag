@@ -2222,3 +2222,56 @@ it('confirms a shipment to its order\'s marketplace, even one the connection no 
     'the order\'s own' => ['A2EUQ1WTGCTBG2', 'A2EUQ1WTGCTBG2'],
     'none recorded' => [null, 'ATVPDKIKX0DER'],
 ]);
+
+/**
+ * @param  array<string, mixed>  $order
+ * @param  list<string>  $currencies  The currency of each item's ITEM proceeds, in order
+ * @return array<string, mixed>
+ */
+function amazonOrderPricedIn(array $order, array $currencies): array
+{
+    foreach ($currencies as $index => $currency) {
+        $order['orderItems'][$index]['proceeds']['breakdowns'][0]['subtotal']['currencyCode'] = $currency;
+    }
+
+    return $order;
+}
+
+it('imports an order priced in CAD with its currency and its CAD amounts', function (): void {
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderPricedIn(sampleAmazonOrder(), ['CAD', 'CAD'])]),
+    ]);
+
+    $result = ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail();
+
+    expect($result->errors)->toBeEmpty()
+        ->and($shipment->currency)->toBe('CAD')
+        ->and((float) $shipment->value)->toBe(85.0)
+        ->and($shipment->shipmentItems->sortBy('source_item_id')->map(fn (ShipmentItem $item): float => (float) $item->value)->values()->all())
+        ->toBe([25.0, 10.0]);
+});
+
+it('imports an order whose proceeds carry no currency code as USD', function (): void {
+    $order = sampleAmazonOrder();
+    unset($order['orderItems'][0]['proceeds']['breakdowns'][0]['subtotal']['currencyCode'], $order['orderItems'][1]['proceeds']['breakdowns'][0]['subtotal']['currencyCode']);
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$order])]);
+
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    expect(Shipment::where('shipment_reference', '111-2222222-3333333')->value('currency'))->toBe('USD');
+});
+
+it('fails the row of an order whose items are priced in more than one currency, rather than summing them', function (): void {
+    Saloon::fake([
+        SearchOrders::class => amazonOrdersResponse([amazonOrderPricedIn(sampleAmazonOrder(), ['USD', 'CAD'])]),
+    ]);
+
+    $result = ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    expect($result->shipmentsCreated)->toBe(0)
+        ->and($result->errors)->toHaveCount(1)
+        ->and($result->errors[0])->toContain('more than one currency (CAD, USD)')
+        ->and(Shipment::where('shipment_reference', '111-2222222-3333333')->exists())->toBeFalse();
+});

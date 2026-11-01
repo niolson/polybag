@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Models\SpecialService;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use Illuminate\Support\Collection;
 
 /**
@@ -21,6 +22,8 @@ use Illuminate\Support\Collection;
  */
 class SpecialServiceResolver
 {
+    public function __construct(private readonly ShipmentAmountConverter $amounts) {}
+
     /**
      * All special service codes to send to carriers for this package:
      * shipping-method required + default codes plus product-compliance codes.
@@ -237,22 +240,29 @@ class SpecialServiceResolver
 
     /**
      * Per-code config values to send alongside the resolved codes.
-     * Currently only declared_value carries config (the amount).
+     * Currently only declared_value carries config (the amount, in US
+     * dollars, which every carrier insures in).
      *
      * @param  array<int, string>  $codes
      * @return array<string, array<string, mixed>>
      *
-     * @throws MissingDeclaredValueException when declared_value resolves but no amount can be derived
+     * @throws MissingDeclaredValueException when declared_value resolves but no amount can be derived, or converted to US dollars
      */
     public function configForPackage(Package $package, array $codes): array
     {
         $config = [];
 
         if (in_array('declared_value', $codes, true)) {
-            $amount = $this->declaredValueForPackage($package);
+            $value = $this->orderValueForPackage($package);
+
+            if ($value === null) {
+                throw new MissingDeclaredValueException($package->id);
+            }
+
+            $amount = $this->inDollars($package, $value);
 
             if ($amount === null) {
-                throw new MissingDeclaredValueException($package->id);
+                throw new MissingDeclaredValueException($package->id, ShipmentAmountConverter::currencyOf($package->shipment));
             }
 
             $config['declared_value'] = ['amount' => $amount, 'currency' => 'USD'];
@@ -262,13 +272,26 @@ class SpecialServiceResolver
     }
 
     /**
-     * Declared value for one package. Single-package shipments use the
-     * shipment-level value first; multi-package shipments skip it (declaring
-     * the full shipment value on every label would over-declare) and use the
-     * per-package item sum. Null when no usable value exists — callers must
-     * surface that to the operator rather than guessing.
+     * Declared value for one package, in US dollars: its value in the
+     * order's currency, converted at the Shipment's pinned ECB day
+     * (`order-currency/01`). Null when no usable value exists, or no stored
+     * rate converts it — callers must surface that to the operator rather
+     * than guessing.
      */
     public function declaredValueForPackage(Package $package): ?float
+    {
+        $value = $this->orderValueForPackage($package);
+
+        return $value === null ? null : $this->inDollars($package, $value);
+    }
+
+    /**
+     * The package's value in the order's currency. Single-package shipments
+     * use the shipment-level value first; multi-package shipments skip it
+     * (declaring the full shipment value on every label would over-declare)
+     * and use the per-package item sum. Null when no usable value exists.
+     */
+    private function orderValueForPackage(Package $package): ?float
     {
         $package->loadMissing(['shipment.packages', 'packageItems.shipmentItem']);
         $shipment = $package->shipment;
@@ -288,6 +311,13 @@ class SpecialServiceResolver
         );
 
         return $itemSum > 0 ? round($itemSum, 2) : null;
+    }
+
+    private function inDollars(Package $package, float $value): ?float
+    {
+        $converted = $this->amounts->convert($package->shipment, $value, 'USD', 'the declared value');
+
+        return $converted === null ? null : round($converted->amount, 2);
     }
 
     /**

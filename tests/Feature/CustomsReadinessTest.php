@@ -277,6 +277,36 @@ describe('export ITN', function (): void {
         expect(findingCodes(readinessFor($filed)))->not->toContain('export_itn_required');
     });
 
+    it('measures the $2,500 in US dollars, converting an order in another currency at its pinned rate', function (): void {
+        // One euro is 20 pesos and 1.25 dollars, so 3,000 pesos are $187.50.
+        ExchangeRate::factory()->quoting('MXN', 20.0, now()->subDay()->toDateString())->create();
+        $pesos = readinessPackage('JP', [['value' => 3000.0]], ['currency' => 'MXN']);
+        $dollars = readinessPackage('JP', [['value' => 3000.0]], ['currency' => 'USD']);
+
+        expect(findingCodes(readinessFor($pesos)))->not->toContain('export_itn_required')
+            ->and($pesos->shipment->fresh()->customs_rate_date?->toDateString())->toBe(now()->subDay()->toDateString())
+            ->and(findingCodes(readinessFor($dollars)))->toContain('export_itn_required')
+            ->and($dollars->shipment->fresh()->customs_rate_date)->toBeNull();
+    });
+
+    it('shows the order\'s own currency and its dollar value when a converted classification is over', function (): void {
+        // One euro is 0.80 pounds and 1.25 dollars: £2,000 is $3,125.
+        $package = readinessPackage('JP', [['value' => 2000.0]], ['currency' => 'GBP']);
+
+        expect(findingNamed(readinessFor($package), 'export_itn_required')?->message)
+            ->toContain('610910 totals GBP 2,000.00 (US$3,125.00)');
+    });
+
+    it('holds an order in a currency no stored rate converts, naming the currency', function (): void {
+        $package = readinessPackage('JP', [['value' => 10.0]], ['currency' => 'XTS']);
+
+        $finding = findingNamed(readinessFor($package), 'export_itn_required');
+
+        expect($finding?->severity)->toBe(CustomsFindingSeverity::Block)
+            ->and($finding?->message)->toContain('values are in XTS')
+            ->and($package->shipment->fresh()->customs_rate_date)->toBeNull();
+    });
+
     it('measures $2,500 per classification, not per parcel', function (): void {
         $lines = array_map(fn (int $index): array => ['value' => 300.0, 'hs' => '61091'.$index.'00'], range(0, 9));
         $package = readinessPackage('JP', $lines);
@@ -478,6 +508,14 @@ describe('seller registrations', function (): void {
         expect($finding?->severity)->toBe(CustomsFindingSeverity::Warn)
             ->and($finding?->message)->toContain('registration is not sent')
             ->and(findingCodes(readinessFor($under)))->not->toContain('registration_not_sent');
+    });
+
+    it('names the currency when an order\'s values cannot be converted for the threshold', function (): void {
+        $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+        $package = readinessPackage('DE', [['value' => 10.0]], ['currency' => 'XTS'], $client);
+
+        expect(findingNamed(readinessFor($package), 'registration_not_sent')?->message)
+            ->toContain('No exchange rate from XTS to EUR is stored');
     });
 
     it('blocks a VOEC parcel with an item at NOK 3,000 or more, and only that', function (): void {

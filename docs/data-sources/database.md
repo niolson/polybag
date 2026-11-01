@@ -178,7 +178,8 @@ these are missing after mapping:
 | `address1` | Cannot ship without it |
 | `city` | Cannot ship without it |
 
-`value`, if present, must be numeric and non-negative or the row is rejected.
+`value`, if present, must be numeric and non-negative or the row is rejected. `currency`,
+if present and not blank, must be a three-letter code or the row is rejected.
 
 A row is **accepted with a warning** (imported, `validation_message` set, visible in the
 shipment list) for: missing US postal code, malformed US postal code, missing or invalid
@@ -541,6 +542,7 @@ out of the box:
 | `phone_extension` | shipment | Otherwise parsed out of `phone` |
 | `deliver_by` | shipment | The date the order must arrive by |
 | `ship_by` | shipment | The date the order must leave by. Shown on the Shipments list, which can filter to orders due to ship today or overdue. |
+| `currency` | shipment | The ISO 4217 code the order was paid in (`CAD`, `EUR`), any case. The shipment's `value` and every item's `value` are in it. Unmapped, NULL or blank means `USD`; any value that is not three letters rejects the row. PolyBag converts at the ECB reference rate only where a rule is stated in another currency, such as the $2,500 export filing threshold. |
 | `metadata` | shipment | JSON-encoded as stored |
 | `location_id` | shipment | PolyBag's numeric `Location` ID, not a name or the ERP's warehouse code |
 | `source_item_id` | item | A stable per-line key. Without it, re-imports match lines by product, so two lines of the same SKU collapse. |

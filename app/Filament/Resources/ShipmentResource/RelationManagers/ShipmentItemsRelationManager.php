@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
 use App\Filament\Resources\ProductResource;
 use App\Models\Product;
+use App\Models\Shipment;
 use App\Services\SettingsService;
 use Filament\Actions;
 use Filament\Forms;
@@ -30,7 +31,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->numeric(),
                 Forms\Components\TextInput::make('value')
                     ->numeric()
-                    ->prefix('$'),
+                    ->suffix(fn (): string => $this->shipmentCurrency()),
                 Forms\Components\Toggle::make('transparency')
                     ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
             ]);
@@ -50,7 +51,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->label('Barcode'),
                 Tables\Columns\TextColumn::make('quantity'),
                 Tables\Columns\TextColumn::make('value')
-                    ->money('USD'),
+                    ->money(fn (): string => $this->shipmentCurrency()),
                 Tables\Columns\IconColumn::make('transparency')
                     ->boolean()
                     ->trueIcon('heroicon-o-check-circle')
@@ -72,5 +73,15 @@ class ShipmentItemsRelationManager extends RelationManager
             ->groupedBulkActions([
                 Actions\DeleteBulkAction::make(),
             ]);
+    }
+
+    /**
+     * The currency every item's value is in: the Shipment's (`order-currency/01`).
+     */
+    private function shipmentCurrency(): string
+    {
+        $shipment = $this->getOwnerRecord();
+
+        return $shipment instanceof Shipment ? $shipment->currency : Shipment::DEFAULT_CURRENCY;
     }
 }

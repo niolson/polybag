@@ -38,6 +38,7 @@ class ShipmentFactory extends Factory
             'phone_extension' => null,
             'email' => fake()->optional()->email(),
             'value' => fake()->randomFloat(2, 10, 500),
+            'currency' => 'USD',
             'checked' => false,
             'deliverability' => Deliverability::NotChecked,
             'shipping_method_id' => ShippingMethod::factory(),

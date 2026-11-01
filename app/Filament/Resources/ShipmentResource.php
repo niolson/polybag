@@ -200,7 +200,17 @@ class ShipmentResource extends Resource
                             ->required(),
                         Forms\Components\TextInput::make('value')
                             ->numeric()
-                            ->prefix('$'),
+                            ->suffix(fn (Get $get): string => strtoupper((string) ($get('currency') ?: Shipment::DEFAULT_CURRENCY))),
+                        // What the value and every item's value are in (`order-currency/01`); fixed once a Label declares them.
+                        Forms\Components\TextInput::make('currency')
+                            ->default(Shipment::DEFAULT_CURRENCY)
+                            ->required()
+                            ->length(3)
+                            ->regex('/^[A-Za-z]{3}$/')
+                            ->live(onBlur: true)
+                            ->dehydrateStateUsing(fn (?string $state): string => strtoupper(trim((string) $state)))
+                            ->helperText('The ISO 4217 code the order was paid in, such as USD, CAD or EUR.')
+                            ->disabled(fn (?Shipment $record): bool => $record !== null && $record->packages()->whereHas('activeLabel')->exists()),
                         Forms\Components\DatePicker::make('ship_by')
                             ->label('Ship By'),
                         Forms\Components\DatePicker::make('deliver_by')
@@ -743,7 +753,7 @@ class ShipmentResource extends Resource
                             ->label('Shipping Method')
                             ->placeholder('—'),
                         TextEntry::make('value')
-                            ->money('USD'),
+                            ->money(fn (Shipment $record): string => $record->currency),
                         TextEntry::make('ship_by')
                             ->label('Ship By')
                             ->date()

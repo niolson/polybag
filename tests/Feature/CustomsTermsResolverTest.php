@@ -357,6 +357,52 @@ describe('the exchange rate', function (): void {
     });
 });
 
+describe('the order\'s currency', function (): void {
+    it('compares a EUR order with the IOSS threshold as it is, needing no rate and pinning none', function (): void {
+        ExchangeRate::query()->delete();
+        $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+        $under = resolverShipment($client, ['currency' => 'EUR']);
+        $over = resolverShipment($client, ['currency' => 'EUR']);
+
+        $underTerms = resolveFor($under, resolverDestination('DE'), [[140.0]]);
+        $overTerms = resolveFor($over, resolverDestination('DE'), [[160.0]]);
+
+        expect($underTerms->convertedValue?->amount)->toBe(140.0)
+            ->and($underTerms->convertedValue?->currency)->toBe('EUR')
+            ->and($underTerms->currency)->toBe('EUR')
+            ->and($underTerms->exchangeRateMissing)->toBeFalse()
+            ->and($underTerms->registration)->not->toBeNull()
+            ->and($overTerms->overThreshold)->toBeTrue()
+            ->and($overTerms->registration)->toBeNull()
+            ->and($under->fresh()->customs_rate_date)->toBeNull();
+    });
+
+    it('converts from the order\'s currency rather than from dollars', function (): void {
+        // One euro is 0.80 pounds: £120 is €150, at the limit; £121 is over it.
+        $client = Client::factory()->ddpToEu()->withIossRegistration()->create();
+
+        $atLimit = resolveFor(resolverShipment($client, ['currency' => 'GBP']), resolverDestination('DE'), [[120.0]]);
+        $over = resolveFor(resolverShipment($client, ['currency' => 'GBP']), resolverDestination('DE'), [[121.0]]);
+
+        expect($atLimit->convertedValue?->amount)->toBe(150.0)
+            ->and($atLimit->registration)->not->toBeNull()
+            ->and($over->registration)->toBeNull();
+    });
+
+    it('withholds the registration for a currency with no stored rate, naming it in the warning', function (): void {
+        $warnings = captureWarnings();
+        $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create(), ['currency' => 'XTS']);
+
+        $terms = resolveFor($shipment, resolverDestination('DE'), [[10.0]]);
+
+        expect($terms->exchangeRateMissing)->toBeTrue()
+            ->and($terms->registration)->toBeNull()
+            ->and($shipment->fresh()->customs_rate_date)->toBeNull()
+            ->and($warnings())->toHaveCount(1)
+            ->and($warnings()[0])->toContain('XTS to EUR');
+    });
+});
+
 describe('the customs border', function (): void {
     it('resolves a parcel inside the EU to nothing, as it crosses no customs border', function (): void {
         $shipment = resolverShipment(Client::factory()->ddpToEu()->withIossRegistration()->create());

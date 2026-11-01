@@ -15,10 +15,7 @@ use App\Models\Client;
 use App\Models\ClientTaxRegistration;
 use App\Models\Package;
 use App\Models\Shipment;
-use App\Services\ExchangeRates\ExchangeRateConverter;
-use Carbon\CarbonImmutable;
-use Carbon\CarbonInterface;
-use Illuminate\Support\Facades\Cache;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 
 /**
  * Turns a Shipment, its client and the destination into the customs terms it
@@ -35,24 +32,17 @@ use Illuminate\Support\Facades\Cache;
  *                  — withheld when the consignment is over an IOSS or UK VAT
  *                    threshold; reported per item for VOEC and ARN
  *
- * Customs values are USD; thresholds are converted at the latest ECB
- * reference rate published before the order ({@see ExchangeRateConverter}). A Shipment has no order-date column yet, so its
- * `created_at` — when it was imported — stands in until an importer supplies
- * one. With no stored rate on or before that day, the registration is
- * withheld and a warning logged: declaring a registration over its threshold
- * is the costlier mistake (IOSS: VAT charged on the whole consignment, and
- * the VAT collected at sale refunded).
+ * Customs values are in the Shipment's currency (`order-currency/01`), and
+ * are converted into the threshold's at the Shipment's pinned ECB day
+ * ({@see ShipmentAmountConverter}); a EUR order into the EU is compared as it
+ * is. With no stored rate for the pair, the registration is withheld and a
+ * warning logged: declaring a registration over its threshold is the
+ * costlier mistake (IOSS: VAT charged on the whole consignment, and the VAT
+ * collected at sale refunded).
  */
 class CustomsTermsResolver
 {
-    /**
-     * How much older than the order's expected rate day a rate may be before
-     * the conversion warns: the ECB never leaves more than a long holiday
-     * weekend between publications, so more than this is a fetch that stopped.
-     */
-    private const STALE_RATE_DAYS = 5;
-
-    public function __construct(private readonly ExchangeRateConverter $exchangeRates) {}
+    public function __construct(private readonly ShipmentAmountConverter $amounts) {}
 
     /**
      * The terms for a Package's label, from its own customs lines.
@@ -145,6 +135,7 @@ class CustomsTermsResolver
             'dutiesTerms' => $dutiesTerms,
             'dutiesTermsOrigin' => $dutiesTermsOrigin,
             'consignmentValue' => $consignmentValue,
+            'currency' => ShipmentAmountConverter::currencyOf($shipment),
             'recipientIsBusiness' => filled($destination->company),
         ];
 
@@ -155,7 +146,7 @@ class CustomsTermsResolver
         $regime = $registration->regime;
         $threshold = $regime->lowValueThresholdFor($destination);
         $currency = $regime->thresholdCurrencyFor($destination);
-        $orderDate = $this->orderDate($shipment);
+        $purpose = "the {$regime->getLabel()} threshold";
 
         $terms += [
             'applicableRegistration' => $registration,
@@ -167,7 +158,7 @@ class CustomsTermsResolver
             $linesOverLimit = [];
 
             foreach ($lines as $index => $line) {
-                $converted = $this->convert($line->unitValue, $currency, $orderDate, $shipment, $regime);
+                $converted = $this->amounts->convert($shipment, $line->unitValue, $currency, $purpose);
 
                 if ($converted === null) {
                     return new ResolvedCustomsTerms(...$terms, overThreshold: true, exchangeRateMissing: true);
@@ -188,7 +179,7 @@ class CustomsTermsResolver
             return new ResolvedCustomsTerms(...$terms, registration: $registration, linesOverLimit: $linesOverLimit);
         }
 
-        $converted = $this->convert($consignmentValue, $currency, $orderDate, $shipment, $regime);
+        $converted = $this->amounts->convert($shipment, $consignmentValue, $currency, $purpose);
 
         if ($converted === null) {
             return new ResolvedCustomsTerms(...$terms, overThreshold: true, exchangeRateMissing: true);
@@ -270,16 +261,6 @@ class CustomsTermsResolver
     }
 
     /**
-     * The day the threshold is tested on. The EU tests IOSS at the ECB rate
-     * on the day payment was accepted; PolyBag has no order date yet, so the
-     * Shipment's `created_at` is used until an importer supplies one.
-     */
-    private function orderDate(Shipment $shipment): CarbonInterface
-    {
-        return $shipment->created_at ?? now();
-    }
-
-    /**
      * Whether the parcel stays inside one customs territory, and so has no
      * import to declare terms for.
      *
@@ -294,109 +275,5 @@ class CustomsTermsResolver
     {
         return $origin->sharesCustomsZoneWith($destination)
             || ($origin->isInEuropeanUnion() && $destination->isInEuropeanUnion());
-    }
-
-    /**
-     * Convert at the Shipment's pinned ECB day, or at the latest rate
-     * published before the order, pinning the day that picked.
-     *
-     * The day is pinned on the Shipment (`customs_rate_date`) by the first
-     * resolution that converts a value and reused ever after, so the answer
-     * cannot move because a later day's rates were fetched between two
-     * quotes, or after an outage ends. A pinned day whose row for this
-     * currency is missing is no rate, never a reason to pick another day.
-     * Nothing is pinned while no rate exists at all: the registration is
-     * withheld, and the first resolution once rates arrive pins.
-     *
-     * A manager's edit to `duties_terms` or the seller registration does not
-     * clear the pin: the order date, which is all the pin depends on, has not
-     * changed.
-     *
-     * Warnings are logged once per Shipment, regime and day: the same
-     * resolution runs at every quote, inspection and redemption, since the
-     * Offer fingerprint is recomputed each time.
-     */
-    private function convert(float $usd, string $currency, CarbonInterface $on, Shipment $shipment, TaxRegistrationRegime $regime): ?ConvertedAmount
-    {
-        $context = [
-            'shipment_id' => $shipment->id,
-            'regime' => $regime->value,
-            'currency' => $currency,
-            'order_date' => $on->toDateString(),
-        ];
-
-        if ($shipment->customs_rate_date !== null) {
-            $converted = $this->exchangeRates->convertOn($usd, 'USD', $currency, $shipment->customs_rate_date);
-
-            if ($converted === null) {
-                $this->warnOnce('pinned', $shipment, $regime, 'The ECB exchange rate pinned for this Shipment is not stored for this currency; the seller tax registration is not declared', $context + [
-                    'rate_date' => $shipment->customs_rate_date->toDateString(),
-                ]);
-            }
-
-            return $converted;
-        }
-
-        $converted = $this->exchangeRates->convert($usd, 'USD', $currency, $on);
-
-        if ($converted === null) {
-            $this->warnOnce('missing', $shipment, $regime, 'No ECB exchange rate stored on or before the order date; the seller tax registration is not declared', $context);
-
-            return null;
-        }
-
-        $expected = ExchangeRateConverter::latestPublishedDayBefore($on);
-
-        if ($converted->rateDate->diffInDays($expected) > self::STALE_RATE_DAYS) {
-            $this->warnOnce('stale', $shipment, $regime, 'The ECB exchange rate used for a seller tax registration threshold is more than '.self::STALE_RATE_DAYS.' days older than the order', $context + [
-                'rate_date' => $converted->rateDate->toDateString(),
-            ]);
-        }
-
-        $pinned = $this->pinRateDate($shipment, $converted->rateDate);
-
-        // Another resolution pinned first, on another day: its pin is the answer.
-        if (! $pinned->equalTo($converted->rateDate)) {
-            return $this->convert($usd, $currency, $on, $shipment, $regime);
-        }
-
-        return $converted;
-    }
-
-    /**
-     * Pin the day if none is pinned yet, and return whichever day is pinned.
-     *
-     * Written during quoting, so race-safe: only a null column is set, and the
-     * value is read back, so two first resolutions at once agree on the one
-     * that landed. Written without touching `updated_at`, which keys the Ship
-     * page's rate cache: pinning changes nothing a quote depends on.
-     */
-    private function pinRateDate(Shipment $shipment, CarbonImmutable $rateDate): CarbonImmutable
-    {
-        Shipment::query()
-            ->whereKey($shipment->id)
-            ->whereNull('customs_rate_date')
-            ->toBase()
-            ->update(['customs_rate_date' => $rateDate->toDateString()]);
-
-        $stored = Shipment::query()->whereKey($shipment->id)->first(['id', 'customs_rate_date'])?->customs_rate_date;
-        $pinned = $stored === null ? $rateDate : CarbonImmutable::parse($stored->toDateString());
-
-        $shipment->setAttribute('customs_rate_date', $pinned->toDateString());
-        $shipment->syncOriginalAttribute('customs_rate_date');
-
-        return $pinned;
-    }
-
-    /**
-     * @param  array<string, mixed>  $context
-     */
-    private function warnOnce(string $kind, Shipment $shipment, TaxRegistrationRegime $regime, string $message, array $context): void
-    {
-        $key = "customs-terms:{$kind}-rate:{$shipment->id}:{$regime->value}:".now()->toDateString();
-
-        if (Cache::add($key, true, now()->endOfDay())) {
-            logger()->warning($message, $context);
-        }
     }
 }
