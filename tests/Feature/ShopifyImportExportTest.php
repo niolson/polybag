@@ -101,7 +101,7 @@ function sampleFulfillmentOrder(string $id, string $locationId, int $quantity = 
                 'sku' => "SKU-{$id}", 'productTitle' => 'Widget', 'remainingQuantity' => $quantity,
                 'requiresShipping' => true, 'weight' => null,
                 'variant' => ['id' => "gid://shopify/ProductVariant/{$id}", 'barcodes' => ['nodes' => []]],
-                'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
+                'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '10.00']]],
             ]],
         ],
     ];
@@ -993,10 +993,10 @@ it('imports a fulfillment order for different goods as its own shipment with ite
     expect(Shipment::count())->toBe(2);
 });
 
-it('imports an order in the shop currency\'s code, and asks Shopify for it', function (): void {
+it('imports an order in the currency the buyer paid in, and asks Shopify for it', function (): void {
     mapShopifyLocation($this->dataSource);
     $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 2);
-    $fulfillmentOrder['lineItems']['nodes'][0]['lineItem']['originalUnitPriceSet']['shopMoney'] = ['amount' => '25.00', 'currencyCode' => 'CAD'];
+    $fulfillmentOrder['lineItems']['nodes'][0]['lineItem']['originalUnitPriceSet']['presentmentMoney'] = ['amount' => '25.00', 'currencyCode' => 'CAD'];
 
     $result = importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
 
@@ -1007,5 +1007,111 @@ it('imports an order in the shop currency\'s code, and asks Shopify for it', fun
         ->and((float) $shipment->value)->toBe(50.0)
         ->and((float) $shipment->shipmentItems->sole()->value)->toBe(25.0);
 
-    Saloon::assertSent(fn (GraphQL $request): bool => str_contains((string) json_encode($request->body()->all()), 'shopMoney { amount currencyCode }'));
+    Saloon::assertSent(fn (GraphQL $request): bool => str_contains((string) json_encode($request->body()->all()), 'presentmentMoney { amount currencyCode }'));
+});
+
+/**
+ * A line the buyer paid CA$16.00 a unit for before discounts, as Shopify
+ * reports it on a USD store, with the discounts allocated to it.
+ *
+ * @param  list<string>  $allocations
+ * @return array<string, mixed>
+ */
+function discountedCadLineItem(int $quantity, array $allocations): array
+{
+    return [
+        'quantity' => $quantity,
+        'originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '16.0', 'currencyCode' => 'CAD']],
+        'discountAllocations' => array_map(
+            fn (string $amount): array => ['allocatedAmountSet' => ['presentmentMoney' => ['amount' => $amount]]],
+            $allocations,
+        ),
+    ];
+}
+
+describe('the price a Shopify order declares (order-currency/03)', function (): void {
+    it('reads open fulfillment orders 200 to a page, which Shopify does not refuse with the discount allocations', function (): void {
+        mapShopifyLocation($this->dataSource);
+
+        importFulfillmentOrders($this->dataSource, [sampleFulfillmentOrder('1001', '1')]);
+
+        // 249 or 250 requested 1,014 points on the development store, over Shopify's 1,000.
+        Saloon::assertSent(fn (GraphQL $request): bool => str_contains((string) $request->body()->get('query'), 'fulfillmentOrders(first: 200, after: $cursor, includeClosed: false)')
+            && str_contains((string) $request->body()->get('query'), 'discountAllocations'));
+    });
+
+    it('values a line after a discount code and its share of an order discount', function (): void {
+        mapShopifyLocation($this->dataSource);
+        $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 1);
+        // A product discount code of CA$0.80 and the line's CA$0.45 share of an order-level code.
+        $fulfillmentOrder['lineItems']['nodes'][0]['lineItem'] = discountedCadLineItem(1, ['0.8', '0.45']);
+
+        importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+        $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+        expect($shipment->currency)->toBe('CAD')
+            ->and((float) $shipment->value)->toBe(14.75)
+            ->and((float) $shipment->shipmentItems->sole()->value)->toBe(14.75);
+    });
+
+    it('values a multi-unit line at what was charged, though its units do not divide evenly', function (): void {
+        mapShopifyLocation($this->dataSource);
+        $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 3);
+        $fulfillmentOrder['lineItems']['nodes'][0]['lineItem'] = discountedCadLineItem(3, ['2.83', '1.42']);
+
+        importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+        $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+        // CA$48.00 less CA$4.25. Shopify's own after-discount unit price, 14.59, would make 43.77.
+        expect((float) $shipment->value)->toBe(43.75)
+            ->and((float) $shipment->shipmentItems->sole()->value)->toBe(14.58);
+    });
+
+    it('declares a fulfillment order\'s share of a line it holds only part of', function (): void {
+        mapShopifyLocation($this->dataSource);
+        $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 2);
+        $fulfillmentOrder['lineItems']['nodes'][0]['lineItem'] = discountedCadLineItem(3, ['2.83', '1.42']);
+
+        importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+        $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+        // Two thirds of CA$43.75.
+        expect((float) $shipment->value)->toBe(29.17)
+            ->and($shipment->shipmentItems->sole()->quantity)->toBe(2)
+            ->and((float) $shipment->shipmentItems->sole()->value)->toBe(14.58);
+    });
+
+    it('keeps the list price on a line given away, which customs still values', function (): void {
+        mapShopifyLocation($this->dataSource);
+        $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 1);
+        $fulfillmentOrder['lineItems']['nodes'][0]['lineItem'] = discountedCadLineItem(1, ['16.0']);
+
+        importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+        $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+        expect((float) $shipment->value)->toBe(16.0)
+            ->and((float) $shipment->shipmentItems->sole()->value)->toBe(16.0);
+    });
+
+    it('imports an undiscounted order in the shop\'s currency as before', function (): void {
+        mapShopifyLocation($this->dataSource);
+        $fulfillmentOrder = sampleFulfillmentOrder('1001', '1', quantity: 2);
+        $fulfillmentOrder['lineItems']['nodes'][0]['lineItem'] = [
+            'quantity' => 2,
+            'originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '10.0', 'currencyCode' => 'USD']],
+            'discountAllocations' => [],
+        ];
+
+        importFulfillmentOrders($this->dataSource, [$fulfillmentOrder]);
+
+        $shipment = Shipment::where('source_record_id', 'gid://shopify/FulfillmentOrder/1001')->firstOrFail();
+
+        expect($shipment->currency)->toBe('USD')
+            ->and((float) $shipment->value)->toBe(20.0)
+            ->and((float) $shipment->shipmentItems->sole()->value)->toBe(10.0);
+    });
 });
