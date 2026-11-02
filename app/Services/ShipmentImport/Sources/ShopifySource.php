@@ -23,6 +23,7 @@ use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
+use App\Services\Customs\CustomsReadiness;
 use App\Services\ShipmentImport\ImportRunRecorder;
 use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
@@ -205,21 +206,27 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                 {{partNumberSelection}}
               }
-              lineItem { originalUnitPriceSet { shopMoney { amount currencyCode } } }
+              lineItem {
+                quantity
+                originalUnitPriceSet { presentmentMoney { amount currencyCode } }
+                discountAllocations { allocatedAmountSet { presentmentMoney { amount } } }
+              }
             }
           }
         }
         GRAPHQL;
 
     /**
-     * Every open fulfillment order. 250 to a page, Shopify's most, requests
-     * 926 points with a part-number metafield and `barcodes(first: 5)`, on
-     * the development store (2026-10-14). `barcodes(first: 10)` requests
-     * 1,003 and Shopify refuses it: 1,000 is the most one query may request.
+     * Every open fulfillment order, 200 to a page. With a part-number
+     * metafield, `barcodes(first: 5)` and the line items' discount
+     * allocations (`order-currency/03`), any page from 150 to 240 requests
+     * 922 points on the development store (2026-11-02), and 249 or 250,
+     * Shopify's most, request 1,014, which Shopify refuses: 1,000 is the most
+     * one query may request. Before the allocations, 250 requested 937.
      */
     private const FULFILLMENT_ORDERS_QUERY = <<<'GRAPHQL'
         query FulfillmentOrders($cursor: String{{partNumberVariables}}) {
-          fulfillmentOrders(first: 250, after: $cursor, includeClosed: false) {
+          fulfillmentOrders(first: 200, after: $cursor, includeClosed: false) {
             pageInfo { hasNextPage endCursor }
             nodes { ...ImportedFulfillmentOrder }
           }
@@ -249,9 +256,9 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     /**
      * Every open fulfillment order's identity, read before any row
      * (`import-memory/01`). Every field it selects is one
-     * {@see FULFILLMENT_ORDERS_QUERY} selects too, at the same page sizes, so
-     * a page requests no more points than one of those. Each page's log line
-     * records what it requested.
+     * {@see FULFILLMENT_ORDERS_QUERY} selected at 250 a page before
+     * `order-currency/03`, when that requested 937 points, so a page of 250
+     * requests fewer. Each page's log line records what it requested.
      */
     private const FULFILLMENT_ORDER_IDENTITIES_QUERY = <<<'GRAPHQL'
         query FulfillmentOrderIdentities($cursor: String) {
@@ -377,7 +384,11 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                   inventoryItem { harmonizedSystemCode countryCodeOfOrigin }
                   {{partNumberSelection}}
                 }
-                lineItem { originalUnitPriceSet { shopMoney { amount currencyCode } } }
+                lineItem {
+                  quantity
+                  originalUnitPriceSet { presentmentMoney { amount currencyCode } }
+                  discountAllocations { allocatedAmountSet { presentmentMoney { amount } } }
+                }
               }
             }
           }
@@ -1230,10 +1241,10 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
         $shopifyLocation = $assigned['location'] ?? [];
         $lineItems = collect($fulfillmentOrder['lineItems'] ?? [])
             ->filter(fn (array $item): bool => ($item['requiresShipping'] ?? false) && ($item['remainingQuantity'] ?? 0) > 0);
-        $value = $lineItems->sum(fn (array $item): float => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0)
-            * (int) ($item['remainingQuantity'] ?? 0));
-        // `shopMoney` is in the shop's currency, the same on every line (`order-currency/01`).
-        $currency = $lineItems->map(fn (array $item): mixed => data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.currencyCode'))
+        // The exact amounts summed, then rounded once (`order-currency/03`).
+        $value = round($lineItems->sum(fn (array $item): float => self::paidUnitValue($item) * (int) ($item['remainingQuantity'] ?? 0)), 2);
+        // `presentmentMoney` is in the currency the buyer paid in, the same on every line.
+        $currency = $lineItems->map(fn (array $item): mixed => data_get($item, 'lineItem.originalUnitPriceSet.presentmentMoney.currencyCode'))
             ->first(fn (mixed $code): bool => filled($code));
         $identity = $this->identityFor($fulfillmentOrder);
         // The shipping option the buyer chose at checkout, as it was shown to them ("Standard").
@@ -1326,6 +1337,36 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
     }
 
     /**
+     * What the buyer paid for one unit of a fulfillment order line, in the
+     * currency they paid in (`order-currency/03`), unrounded: the line item's
+     * list price less every discount allocated to the line, spread over the
+     * line's quantity. `discountedUnitPriceSet` misses discount codes, and
+     * `discountedUnitPriceAfterAllDiscountsSet` is rounded per unit, so a
+     * line's units would not add up to what was charged.
+     *
+     * A line given away (a free gift, a 100% code) keeps its list price: goods
+     * still have a customs value when nothing was paid for them, and a line at
+     * zero is refused before purchase ({@see CustomsReadiness::zeroValueLines()}).
+     *
+     * @param  array<string, mixed>  $item
+     */
+    private static function paidUnitValue(array $item): float
+    {
+        $listPrice = (float) data_get($item, 'lineItem.originalUnitPriceSet.presentmentMoney.amount', 0);
+        $lineQuantity = (int) data_get($item, 'lineItem.quantity', 0);
+        $discount = collect(data_get($item, 'lineItem.discountAllocations', []))
+            ->sum(fn (mixed $allocation): float => (float) data_get($allocation, 'allocatedAmountSet.presentmentMoney.amount', 0));
+
+        if ($lineQuantity <= 0) {
+            return $listPrice;
+        }
+
+        $paid = $listPrice - $discount / $lineQuantity;
+
+        return round($paid, 2) > 0 ? $paid : $listPrice;
+    }
+
+    /**
      * The metafield this connection reads a part number from, or null when
      * it reads none.
      */
@@ -1381,7 +1422,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'sku' => ShopifyGoodsFingerprint::skuFor($item),
             'name' => $item['productTitle'] ?? null,
             'quantity' => (int) ($item['remainingQuantity'] ?? 0),
-            'value' => (float) data_get($item, 'lineItem.originalUnitPriceSet.shopMoney.amount', 0),
+            'value' => round(self::paidUnitValue($item), 2),
             'barcode' => $fields['barcode'],
             'gtin' => $fields['gtin'],
             'weight' => $weightLbs,

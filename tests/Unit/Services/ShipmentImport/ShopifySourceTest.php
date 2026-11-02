@@ -76,7 +76,7 @@ function shopifyFulfillmentOrderNode(array $overrides = []): array
                         'id' => 'gid://shopify/ProductVariant/1',
                         'barcodes' => ['nodes' => [['type' => null, 'value' => '012345678901']]],
                     ],
-                    'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '19.99']]],
+                    'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '19.99']]],
                 ],
             ],
         ],
@@ -196,7 +196,7 @@ it('maps fulfillment orders as location-aware shipments', function (): void {
                             'sku' => 'SKU-1', 'productTitle' => 'Widget', 'remainingQuantity' => 2,
                             'requiresShipping' => true, 'weight' => ['unit' => 'OUNCES', 'value' => 8],
                             'variant' => ['id' => 'gid://shopify/ProductVariant/9', 'barcodes' => ['nodes' => [['type' => null, 'value' => '123']]]],
-                            'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '12.50']]],
+                            'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '12.50']]],
                         ]],
                     ],
                 ]],
@@ -218,12 +218,54 @@ it('maps fulfillment orders as location-aware shipments', function (): void {
         ->toMatchArray(['sku' => 'SKU-1', 'quantity' => 2, 'value' => 12.5, 'barcode' => '123', 'weight' => 0.5]);
 });
 
+it('values line items read on a later page after their discounts', function (): void {
+    $item = fn (string $id, array $lineItem): array => [
+        'id' => "gid://shopify/FulfillmentOrderLineItem/{$id}",
+        'sku' => "SKU-{$id}", 'productTitle' => 'Widget', 'remainingQuantity' => 2,
+        'requiresShipping' => true, 'weight' => null, 'variant' => null,
+        'lineItem' => $lineItem,
+    ];
+    $undiscounted = ['quantity' => 2, 'originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '5.00', 'currencyCode' => 'CAD']], 'discountAllocations' => []];
+    $discounted = [...$undiscounted, 'discountAllocations' => [['allocatedAmountSet' => ['presentmentMoney' => ['amount' => '1.00']]]]];
+    Saloon::fake([
+        GraphQL::class => answeringShopifyPages([
+            '' => MockResponse::make(['data' => ['fulfillmentOrders' => [
+                'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+                'nodes' => [[
+                    'id' => 'gid://shopify/FulfillmentOrder/8001', 'status' => 'OPEN',
+                    'order' => ['id' => 'gid://shopify/Order/1001', 'name' => '#1001'],
+                    'destination' => ['address1' => '1 Main', 'city' => 'Seattle', 'province' => 'WA', 'countryCode' => 'US'],
+                    'assignedLocation' => ['location' => ['id' => 'gid://shopify/Location/1', 'name' => 'Main', 'isActive' => true]],
+                    'lineItems' => [
+                        'pageInfo' => ['hasNextPage' => true, 'endCursor' => 'items-1'],
+                        'nodes' => [$item('1', $undiscounted)],
+                    ],
+                ]],
+            ]]]),
+        ], [
+            'items-1' => MockResponse::make(['data' => ['fulfillmentOrder' => ['lineItems' => [
+                'pageInfo' => ['hasNextPage' => false, 'endCursor' => null],
+                'nodes' => [$item('2', $discounted)],
+            ]]]]),
+        ]),
+    ]);
+
+    $source = new ShopifySource(shopifyConfig());
+    $shipment = $source->fetchShipments()->sole();
+
+    expect($shipment['value'])->toBe(19.0)
+        ->and($source->fetchShipmentItems('gid://shopify/FulfillmentOrder/8001')->pluck('value', 'sku')->all())
+        ->toBe(['SKU-1' => 5.0, 'SKU-2' => 4.5]);
+    Saloon::assertSent(fn (GraphQL $request): bool => str_contains((string) $request->body()->get('query'), 'query FulfillmentOrderItems')
+        && str_contains((string) $request->body()->get('query'), 'discountAllocations'));
+});
+
 it('paginates fulfillment order line items and excludes non-shipping work', function (): void {
     $baseItem = [
         'id' => 'gid://shopify/FulfillmentOrderLineItem/1',
         'sku' => 'SKU-1', 'productTitle' => 'Widget', 'remainingQuantity' => 1,
         'requiresShipping' => true, 'weight' => null, 'variant' => null,
-        'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '5.00']]],
+        'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '5.00']]],
     ];
     Saloon::fake([
         GraphQL::class => answeringShopifyPages([
@@ -296,7 +338,7 @@ it('maps line items using remaining quantity', function (): void {
                     'requiresShipping' => true,
                     'weight' => ['unit' => 'POUNDS', 'value' => 1.5],
                     'variant' => ['id' => 'gid://shopify/ProductVariant/1', 'barcodes' => ['nodes' => [['type' => null, 'value' => '111111111111']]]],
-                    'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
+                    'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '10.00']]],
                 ],
                 [
                     'id' => 'gid://shopify/FulfillmentOrderLineItem/2',
@@ -306,7 +348,7 @@ it('maps line items using remaining quantity', function (): void {
                     'requiresShipping' => true,
                     'weight' => ['unit' => 'OUNCES', 'value' => 4.0],
                     'variant' => ['id' => 'gid://shopify/ProductVariant/2', 'barcodes' => ['nodes' => [['type' => null, 'value' => '222222222222']]]],
-                    'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '15.00']]],
+                    'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '15.00']]],
                 ],
             ],
         ],

@@ -94,7 +94,7 @@ function pagedNode(string $id, ?string $orderId = null, string $locationId = '1'
                 'sku' => "SKU-{$orderId}", 'productTitle' => 'Widget', 'remainingQuantity' => 1,
                 'requiresShipping' => true, 'weight' => null,
                 'variant' => ['id' => "gid://shopify/ProductVariant/{$orderId}", 'barcodes' => ['nodes' => []]],
-                'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
+                'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '10.00']]],
             ]],
         ],
     ];
