@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\Customs\ConvertedAmount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\CustomsItem;
@@ -10,6 +11,7 @@ use App\Enums\AmazonChannelType;
 use App\Enums\PostageSource;
 use App\Models\ShippingOffer;
 use App\Services\AmazonBuyShippingService;
+use Carbon\CarbonImmutable;
 
 /*
 |--------------------------------------------------------------------------
@@ -155,4 +157,21 @@ it('lists nothing for a label inside one customs zone, which carries no declarat
 it('lists nothing for a label from one EU country to a consumer in another, which never enters the EU', function (): void {
     expect(shipRequestFor(consigneeIn('FR'), [lineIdentifiedBy('SKU-1', null)], originCountry: 'DE')->customsItemsMissingProductIdentifiers())
         ->toBe([]);
+});
+
+it('keeps the customs currency and dollar rate through every copy', function (): void {
+    $rate = new ConvertedAmount(0.8, 'USD', CarbonImmutable::parse('2026-10-07'));
+    $request = new ShipRequest(
+        fromAddress: warehouseIn('US'),
+        toAddress: consigneeIn('CA'),
+        packageData: new PackageData(weight: 2.0, length: 8, width: 6, height: 4),
+        customsItems: [lineIdentifiedBy('SKU-1', 'MPN-1')],
+        customsCurrency: 'CAD',
+        customsDollarRate: $rate,
+    );
+
+    foreach ([$request->withSpecialServiceCodes([]), $request->withScaledCustomsWeights(), $request->withDeclaredWeightOverride()] as $copy) {
+        expect($copy->customsCurrency)->toBe('CAD')
+            ->and($copy->customsDollarRate)->toBe($rate);
+    }
 });

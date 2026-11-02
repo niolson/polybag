@@ -20,6 +20,7 @@ use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageItem;
 use App\Models\ShippingOffer;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\AmazonOrderItems;
@@ -269,7 +270,7 @@ class AmazonBuyShippingService
         return [
             'shipTo' => $this->address(AddressData::fromShipment($package->shipment)),
             'shipFrom' => $this->address($from),
-            'packages' => [$this->packagePayload($package, $request, $this->orderItems->shippingItemsFor($package, 'USD'))],
+            'packages' => [$this->packagePayload($package, $request, $this->orderItems->shippingItemsFor($package, ShipmentAmountConverter::currencyOf($package->shipment)))],
             'channelDetails' => [
                 'channelType' => 'AMAZON',
                 'amazonOrderDetails' => ['orderId' => $orderId],
@@ -294,7 +295,7 @@ class AmazonBuyShippingService
             : AddressData::fromConfig();
 
         $parcel = $this->packagePayload($package, $request, []);
-        $parcel['items'] = $this->offAmazonItemsFor($package, (float) $parcel['weight']['value'], 'USD');
+        $parcel['items'] = $this->offAmazonItemsFor($package, (float) $parcel['weight']['value'], ShipmentAmountConverter::currencyOf($package->shipment));
 
         return $this->buildExternalRatePayload($from, AddressData::fromShipment($package->shipment), $parcel);
     }
@@ -930,6 +931,8 @@ class AmazonBuyShippingService
     private function packagePayload(Package $package, RateRequest $request, array $items): array
     {
         $parcel = $request->packages[0];
+        // The carriage declared value, which is in US dollars whatever the
+        // order's currency (`order-currency/01`); the items carry the order's.
         $currency = 'USD';
 
         return [

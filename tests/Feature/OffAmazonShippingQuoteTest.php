@@ -118,6 +118,19 @@ it('sends an EXTERNAL body with no order ID that conforms to the published Shipp
         ->and($body['shipTo']['postalCode'])->toBe($package->shipment->postal_code);
 });
 
+it('values the items in the order\'s currency and the insured value in US dollars', function (): void {
+    Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
+
+    $package = externalPackage($this->shopify);
+    $package->shipment->update(['currency' => 'CAD']);
+    app(ShippingRateService::class)->getShippingRates($package->id);
+
+    $parcel = sentExternalBody()['packages'][0];
+
+    expect($parcel['items'][0]['itemValue'])->toBe(['value' => 12.5, 'unit' => 'CAD'])
+        ->and($parcel['insuredValue']['unit'])->toBe('USD');
+});
+
 it('scales item weights down to fit the scanned package weight when product weights overshoot it', function (): void {
     Saloon::fake([GetShippingRates::class => externalRatesResponse()]);
 

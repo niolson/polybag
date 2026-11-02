@@ -501,7 +501,7 @@ function upsSpecialServiceShipRequest(array $codes, array $config = [], array $r
  * @param  AddressData|null  $fromAddress  Origin, a Seattle warehouse unless the lane under test needs another
  * @param  array<string, mixed>  $rateMetadata  The selected rate's metadata, as UpsAdapter::extractRateDetails() stamps it
  */
-function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = [], ?AddressData $fromAddress = null, array $rateMetadata = ['serviceCode' => '03']): ShipRequest
+function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042', array $customsItems = [], array $specialServiceCodes = [], ?AddressData $fromAddress = null, array $rateMetadata = ['serviceCode' => '03'], string $customsCurrency = 'USD'): ShipRequest
 {
     return new ShipRequest(
         fromAddress: $fromAddress ?? new AddressData(
@@ -524,6 +524,7 @@ function upsShipRequestTo(AddressData $toAddress, string $reference = 'ORD-10042
         references: [$reference],
         customsItems: $customsItems,
         specialServiceCodes: $specialServiceCodes,
+        customsCurrency: $customsCurrency,
     );
 }
 
@@ -3207,4 +3208,48 @@ it('scrubs only whole tokens, so a number inside a longer identifier survives', 
     $response = $this->adapter->createShipment(upsTermsShipRequest(upsGermanAddress(), upsResolvedTerms('DE', DutiesTerms::Ddu), ein: '030388962'));
 
     expect($response->errorMessage)->toBe('Bad [REDACTED] for shipment 1Z14A6G90303889622');
+});
+
+describe('the order\'s currency (order-currency/02)', function (): void {
+    it('declares the invoice and its line total in the order\'s currency', function (): void {
+        fakeUpsShipEndpoints();
+        $request = upsShipRequestTo(upsCanadianAddress(), customsItems: upsCustomsItems(), customsCurrency: 'CAD');
+
+        expect($this->adapter->createShipment($request)->success)->toBeTrue()
+            ->and($this->adapter->declaredCustomsTerms($request)->values?->currency)->toBe('CAD');
+
+        Saloon::assertSent(function ($request): bool {
+            if (! $request instanceof CreateShipment) {
+                return false;
+            }
+
+            $shipment = $request->body()->all()['ShipmentRequest']['Shipment'];
+            $forms = $shipment['ShipmentServiceOptions']['InternationalForms'];
+
+            expect($forms['CurrencyCode'])->toBe('CAD')
+                ->and($forms['Product'][0]['Unit']['Value'])->toBe('19.99')
+                ->and($shipment['InvoiceLineTotal'])->toBe(['CurrencyCode' => 'CAD', 'MonetaryValue' => '39.98']);
+
+            return true;
+        });
+    });
+
+    it('rates a forward international lane with the contents value in the order\'s currency', function (): void {
+        Saloon::fake([
+            '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+            Rate::class => MockResponse::make(['RateResponse' => ['RatedShipment' => []]]),
+        ]);
+
+        $this->adapter->getRates(new RateRequest(
+            originPostalCode: '98072',
+            destinationPostalCode: 'M5H 2N2',
+            destinationCountry: 'CA',
+            packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
+            contentsValue: 18.03,
+            contentsCurrency: 'CAD',
+        ), ['03']);
+
+        Saloon::assertSent(fn ($request): bool => $request instanceof Rate
+            && ($request->body()->all()['RateRequest']['Shipment']['InvoiceLineTotal'] ?? null) === ['CurrencyCode' => 'CAD', 'MonetaryValue' => '18.03']);
+    });
 });

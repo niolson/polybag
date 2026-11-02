@@ -6,6 +6,7 @@ use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\PackageShipping\PackageShippingResult;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipRequest;
@@ -193,6 +194,9 @@ it('records an order-sourced term and registration, the ITN and the recipient ta
         'registration' => ['regime' => 'ioss', 'number' => 'IM2760000742', 'source' => 'order'],
         'recipient_tax_id' => ['type' => 'vat'],
         'export_itn' => 'X20261008123456',
+        'currency' => null,
+        'converted_from_currency' => null,
+        'exchange_rate_date' => null,
         'duties_support_version' => app(DutiesSupportTable::class)->version(),
     ])
         ->and($label->duties_cost)->toBeNull()
@@ -297,6 +301,9 @@ it('records a source-decided purchase through the workflow as such, declaring no
         'registration' => null,
         'recipient_tax_id' => null,
         'export_itn' => null,
+        'currency' => null,
+        'converted_from_currency' => null,
+        'exchange_rate_date' => null,
         'duties_support_version' => app(DutiesSupportTable::class)->version(),
     ]);
 });
@@ -440,4 +447,92 @@ it('buys a DDP label to Germany through the USPS adapter and stores the prepaid 
     Saloon::assertSent(fn ($sent): bool => $sent instanceof InternationalLabel
         && $sent->body()->all()['packageDescription']['prepayDutiesTaxesFees'] === true
         && $sent->body()->all()['customsForm']['importersReference']['reference'] === 'DE123456789');
+});
+
+/**
+ * Buy a USPS label to Germany for the package, with every USPS endpoint faked.
+ */
+function snapshotUspsPurchase(Package $package): PackageShippingResult
+{
+    $account = createUspsAccount();
+    app(CarrierRegistry::class)->registerInstance('USPS', new UspsAdapter);
+
+    $json = json_encode(['internationalTrackingNumber' => 'LN123456789US', 'postage' => 31.40]);
+    Saloon::fake([
+        '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+        PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+        InternationalLabel::class => MockResponse::make(
+            body: "--boundary\r\nContent-Type: application/json\r\n\r\n{$json}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
+            headers: ['Content-Type' => 'multipart/mixed; boundary=boundary'],
+        ),
+    ]);
+
+    $rate = quotedDirectly($package, new RateResponse(
+        'USPS',
+        'TEST',
+        'Priority Mail International',
+        31.40,
+        metadata: ['mailClass' => 'PRIORITY_MAIL_INTERNATIONAL', 'processingCategory' => 'MACHINABLE', 'rateIndicator' => 'SP'],
+        carrierAccountId: $account->id,
+        carrierServiceId: CarrierService::query()->where('service_code', 'TEST')->value('id'),
+    ));
+
+    return app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: auth()->id()));
+}
+
+describe('the currency a Label declared (order-currency/02)', function (): void {
+    it('declares a CAD order to USPS in US dollars at the pinned rate, and records the conversion', function (): void {
+        // One euro is 1.25 dollars and 1.50 Canadian dollars: C$20 is $16.67.
+        foreach ([2, 4] as $daysAgo) {
+            ExchangeRate::factory()->quoting('CAD', 1.50, now()->subDays($daysAgo)->toDateString())->create();
+        }
+        $package = snapshotPackage(Client::factory()->create(), ['currency' => 'CAD', 'duties_terms' => 'ddu'], 'USPS');
+
+        $result = snapshotUspsPurchase($package);
+
+        expect($result->success)->toBeTrue($result->message ?? $result->title ?? '')
+            ->and($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toMatchArray([
+                'currency' => 'USD',
+                'converted_from_currency' => 'CAD',
+                'exchange_rate_date' => now()->subDays(2)->toDateString(),
+            ]);
+
+        Saloon::assertSent(fn ($sent): bool => $sent instanceof InternationalLabel
+            && $sent->body()->all()['customsForm']['contents'][0]['itemTotalValue'] === 16.67);
+    });
+
+    it('records the US dollars a USD order declared, unconverted', function (): void {
+        $package = snapshotPackage(Client::factory()->create(), ['duties_terms' => 'ddu'], 'USPS');
+
+        expect(snapshotUspsPurchase($package)->success)->toBeTrue()
+            ->and($package->fresh()->activeLabel()->firstOrFail()->customs_terms)->toMatchArray([
+                'currency' => 'USD',
+                'converted_from_currency' => null,
+                'exchange_rate_date' => null,
+            ]);
+
+        Saloon::assertSent(fn ($sent): bool => $sent instanceof InternationalLabel
+            && $sent->body()->all()['customsForm']['contents'][0]['itemTotalValue'] === 20.0);
+    });
+
+    it('buys nothing when USPS needs dollars and no rate converts the order\'s currency', function (): void {
+        // To Canada, where no export filing check has already refused it for
+        // the same missing rate.
+        $package = snapshotPackage(Client::factory()->create(), [
+            'currency' => 'XTS',
+            'city' => 'Toronto',
+            'state_or_province' => 'ON',
+            'postal_code' => 'M5H 2N2',
+            'country' => 'CA',
+        ], 'USPS');
+
+        $result = snapshotUspsPurchase($package);
+
+        expect($result->success)->toBeFalse()
+            ->and($result->title)->toBe('Exchange Rate Needed')
+            ->and($result->message)->toContain('values are in XTS')
+            ->and($package->fresh()->activeLabel()->exists())->toBeFalse();
+
+        Saloon::assertNotSent(InternationalLabel::class);
+    });
 });

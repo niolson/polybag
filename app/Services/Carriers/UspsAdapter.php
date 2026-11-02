@@ -7,6 +7,7 @@ use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\CustomsDeclaration;
 use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\SellerTaxRegistration;
@@ -1338,7 +1339,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         $commerceType = $this->euCommerceType($request->toAddress);
         $contents = [];
 
-        foreach ($request->customsItems as $item) {
+        foreach ($this->customsDeclaration($request)->items as $item) {
             $contentItem = [
                 'itemDescription' => mb_substr($item->description, 0, 30),
                 'itemQuantity' => $item->quantity,
@@ -1632,7 +1633,10 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     public function declaredCustomsTerms(ShipRequest $request): DeclaredCustomsTerms
     {
         if (! $this->declaresCustomsTerms($request)) {
-            return DeclaredCustomsTerms::none();
+            // A military address carries a customs form and none of the terms.
+            return $request->toAddress->isMilitary()
+                ? new DeclaredCustomsTerms(values: $this->customsDeclaration($request))
+                : DeclaredCustomsTerms::none();
         }
 
         return new DeclaredCustomsTerms(
@@ -1640,7 +1644,19 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             registration: $this->sentRegistration($request),
             recipientTaxIdType: $this->sentRecipientTaxId($request)?->type,
             exportItn: filled($request->exportItn) ? (string) $request->exportItn : null,
+            values: $this->customsDeclaration($request),
         );
+    }
+
+    /**
+     * The customs lines in US dollars, the only currency the Labels API's
+     * `itemTotalValue` takes ("The total item value, in USD"): an order in
+     * another currency is converted at the rate pinned on its Shipment
+     * (`order-currency/02`).
+     */
+    private function customsDeclaration(ShipRequest $request): CustomsDeclaration
+    {
+        return $request->customsDeclaration(['USD']);
     }
 
     /**

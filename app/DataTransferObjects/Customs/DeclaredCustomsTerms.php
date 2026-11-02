@@ -14,11 +14,15 @@ use App\Enums\RecipientTaxIdType;
  */
 readonly class DeclaredCustomsTerms
 {
+    /**
+     * @param  CustomsDeclaration|null  $values  The customs lines as sent, for the currency they were declared in (`order-currency/02`)
+     */
     public function __construct(
         public ?DutiesTerms $dutiesTerms = null,
         public ?SellerTaxRegistration $registration = null,
         public ?RecipientTaxIdType $recipientTaxIdType = null,
         public ?string $exportItn = null,
+        public ?CustomsDeclaration $values = null,
     ) {}
 
     /**
@@ -34,6 +38,7 @@ readonly class DeclaredCustomsTerms
         return $this->dutiesTerms === null
             && $this->registration === null
             && $this->recipientTaxIdType === null
-            && $this->exportItn === null;
+            && $this->exportItn === null
+            && $this->values === null;
     }
 }

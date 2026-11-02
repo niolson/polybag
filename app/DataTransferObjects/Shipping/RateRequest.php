@@ -6,6 +6,7 @@ use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\Models\CarrierAccount;
 use App\Models\Package;
 use App\Services\Customs\CustomsTermsResolver;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use App\Services\SpecialServiceResolver;
 use Carbon\CarbonImmutable;
 
@@ -18,6 +19,7 @@ readonly class RateRequest
      * @param  int|null  $shippingMethodId  The shipping method the package is quoted under. No adapter reads it — it is eligibility, not price: `ShippingRateService::buildRatingTasks()` derives from the method which sources are asked at all and which of their services, so a method swap changes the price *list* without changing any price on it. It is here so that {@see fingerprint()} covers that: an offer quoted under a method that permitted its carrier must not stay spendable once the shipment moves to one that does not.
      * @param  array<int, string>  $requiredSpecialServiceCodes  The subset of `$specialServiceCodes` an offer must honor or be dropped (ADR-0002 decision 8); the rest are preferences an offer that cannot express them keeps its place without. Set from the package by {@see fromPackage()}, narrowed per source by `ShippingRateService::buildTask()`, and read by a source that filters its own offers by what each can add — Amazon Buy Shipping. In {@see fingerprint()}: a preference that becomes a requirement changes which offers may be bought, so an offer quoted as preferring it must not stay spendable.
      * @param  ResolvedCustomsTerms|null  $customsTerms  The duties term and seller tax registration the Shipment ships on ({@see CustomsTermsResolver}), for the adapters to send (`international-customs-terms/06`–`08`) and the duties-support filter to judge rates by. In {@see fingerprint()} through {@see ResolvedCustomsTerms::fingerprintInputs()}: a DDP surcharge is in the price, and an Offer quoted on one term or registration must not buy on another, so a manager's edit to `duties_terms` retires it. Null on a hand-built request, which declares nothing.
+     * @param  string  $contentsCurrency  The ISO 4217 currency `$contentsValue` is in, the Shipment's (`order-currency/01`). In {@see fingerprint()}: the same number in another currency is another declared value.
      * @param  CarrierAccount|null  $carrierAccount  The account a direct adapter rates on, resolved by `PostageSourceResolver` and handed over per call rather than stored on the adapter, which the registry shares between tasks. Null when nobody resolved one, and a direct adapter then resolves it as it always has. Left out of {@see fingerprint()}: which account quoted is bound separately, by the offer's account id and billing fingerprint.
      */
     public function __construct(
@@ -44,6 +46,7 @@ readonly class RateRequest
         public ?CarrierAccount $carrierAccount = null,
         public array $requiredSpecialServiceCodes = [],
         public ?ResolvedCustomsTerms $customsTerms = null,
+        public string $contentsCurrency = 'USD',
     ) {}
 
     public static function fromPackage(Package $package, ?AddressData $destination = null): self
@@ -87,6 +90,7 @@ readonly class RateRequest
             destinationStreetAddress2: $destination->streetAddress2,
             requiredSpecialServiceCodes: $requiredSpecialServiceCodes,
             customsTerms: app(CustomsTermsResolver::class)->forPackage($package, $origin, $destination),
+            contentsCurrency: ShipmentAmountConverter::currencyOf($shipment),
         );
     }
 
@@ -219,6 +223,7 @@ readonly class RateRequest
             carrierAccount: $this->carrierAccount,
             requiredSpecialServiceCodes: $requiredCodes,
             customsTerms: $this->customsTerms,
+            contentsCurrency: $this->contentsCurrency,
         );
     }
 
@@ -248,6 +253,7 @@ readonly class RateRequest
             carrierAccount: $this->carrierAccount,
             requiredSpecialServiceCodes: $this->requiredSpecialServiceCodes,
             customsTerms: $this->customsTerms,
+            contentsCurrency: $this->contentsCurrency,
         );
     }
 
@@ -280,6 +286,7 @@ readonly class RateRequest
             carrierAccount: $account,
             requiredSpecialServiceCodes: $this->requiredSpecialServiceCodes,
             customsTerms: $this->customsTerms,
+            contentsCurrency: $this->contentsCurrency,
         );
     }
 }

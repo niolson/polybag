@@ -5,6 +5,7 @@ namespace App\Services\Carriers;
 use App\Contracts\DirectCarrierAdapter;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
+use App\DataTransferObjects\Customs\CustomsDeclaration;
 use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\SellerTaxRegistration;
@@ -1747,8 +1748,10 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
     {
         $commodities = [];
         $declaresEuProductIdentifiers = $request->toAddress->isInEuropeanUnion();
+        $declaration = $this->customsDeclaration($request);
+        $currency = FedexCurrency::codeFor($declaration->currency);
 
-        foreach ($request->customsItems as $item) {
+        foreach ($declaration->items as $item) {
             $totalValue = round($item->unitValue * $item->quantity, 2);
 
             $commodity = [
@@ -1760,11 +1763,11 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
                 'numberOfPieces' => (string) $item->quantity,
                 'unitPrice' => [
                     'amount' => (string) $item->unitValue,
-                    'currency' => 'USD',
+                    'currency' => $currency,
                 ],
                 'customsValue' => [
                     'amount' => (string) $totalValue,
-                    'currency' => 'USD',
+                    'currency' => $currency,
                 ],
                 'weight' => [
                     'units' => 'LB',
@@ -1966,7 +1969,17 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             registration: $this->sentRegistration($request),
             recipientTaxIdType: $this->recipientTin($request) !== null ? $request->recipientTaxId?->type : null,
             exportItn: $this->exportComplianceStatement($request) !== null ? $request->exportItn : null,
+            values: $this->customsDeclaration($request),
         );
+    }
+
+    /**
+     * The commodities in the order's currency where FedEx has a code for it,
+     * else in US dollars (`order-currency/02`).
+     */
+    private function customsDeclaration(ShipRequest $request): CustomsDeclaration
+    {
+        return $request->customsDeclaration(FedexCurrency::supported());
     }
 
     /**

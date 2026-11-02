@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\Customs\ConvertedAmount;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -11,6 +12,7 @@ use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\TrackingStatus;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
+use App\Exceptions\UnconvertibleCustomsValueException;
 use App\Http\Integrations\USPS\Requests\CancelInternationalLabel;
 use App\Http\Integrations\USPS\Requests\CancelLabel;
 use App\Http\Integrations\USPS\Requests\InternationalLabel;
@@ -27,6 +29,7 @@ use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingOffer;
 use App\Services\Carriers\UspsAdapter;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 use Saloon\Contracts\Body\HasBody;
@@ -2841,3 +2844,66 @@ it('leaves the question open when the account the offer was bought on is gone or
     expect($this->adapter->recoverPurchase(uspsOfferShipRequest($offer->fresh())))->toBeNull();
     Saloon::assertNothingSent();
 })->with(['deleted', 'rebilled']);
+
+/**
+ * A domestic label to an FPO address, which carries a customs form.
+ */
+function uspsMilitaryShipRequest(string $customsCurrency, ?ConvertedAmount $customsDollarRate = null): ShipRequest
+{
+    return new ShipRequest(
+        fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+        toAddress: new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: 'PSC 402 BOX 301', city: 'FPO', stateOrProvince: 'AE', postalCode: '09532'),
+        packageData: new PackageData(weight: 2.5, length: 10, width: 8, height: 6),
+        selectedRate: new RateResponse(
+            carrier: 'USPS',
+            serviceCode: 'USPS_GROUND_ADVANTAGE',
+            serviceName: 'USPS Ground Advantage',
+            price: 8.50,
+            metadata: ['mailClass' => 'USPS_GROUND_ADVANTAGE', 'processingCategory' => 'MACHINABLE', 'rateIndicator' => 'SP', 'destinationEntryFacilityType' => 'NONE'],
+        ),
+        customsItems: [new CustomsItem(description: 'Blue Widget', quantity: 2, unitValue: 25.0, weight: 0.5, countryOfOrigin: 'US')],
+        customsCurrency: $customsCurrency,
+        customsDollarRate: $customsDollarRate,
+    );
+}
+
+describe('the order\'s currency on a military customs form (order-currency/02)', function (): void {
+    it('declares US dollars at the pinned rate, and reports the conversion with no terms', function (): void {
+        Saloon::fake([
+            '*oauth*' => MockResponse::make(['access_token' => 'test_token', 'token_type' => 'Bearer', 'expires_in' => 3600]),
+            PaymentAuthorization::class => MockResponse::make(['paymentAuthorizationToken' => 'test_payment_token']),
+            Label::class => MockResponse::make(
+                body: "--boundary\r\nContent-Type: application/json\r\n\r\n{\"trackingNumber\":\"9400111899223456789012\",\"postage\":8.50}\r\n--boundary\r\nContent-Type: application/pdf\r\n\r\nJVBERi0xLjQKYmFzZTY0bGFiZWxkYXRh\r\n--boundary--",
+                headers: ['Content-Type' => 'multipart/mixed; boundary=boundary']
+            ),
+        ]);
+        $request = uspsMilitaryShipRequest('CAD', new ConvertedAmount(0.8, 'USD', CarbonImmutable::parse('2026-10-07')));
+
+        expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+        $declared = $this->adapter->declaredCustomsTerms($request);
+
+        expect([$declared->values?->currency, $declared->values?->convertedFrom, $declared->values?->rateDate?->toDateString()])
+            ->toBe(['USD', 'CAD', '2026-10-07'])
+            ->and([$declared->dutiesTerms, $declared->registration, $declared->exportItn])->toBe([null, null, null]);
+
+        Saloon::assertSent(fn (Request $request): bool => $request instanceof Label
+            && $request->body()->all()['customsForm']['contents'][0]['itemTotalValue'] === 40.0);
+    });
+
+    it('refuses before anything is bought when no rate converts the order\'s currency', function (): void {
+        expect(fn () => $this->adapter->declaredCustomsTerms(uspsMilitaryShipRequest('XTS')))
+            ->toThrow(UnconvertibleCustomsValueException::class, 'values are in XTS');
+    });
+
+    it('reports nothing for an ordinary domestic label', function (): void {
+        $request = new ShipRequest(
+            fromAddress: new AddressData(firstName: 'Shipping', lastName: 'Center', streetAddress: '123 Warehouse St', city: 'Seattle', stateOrProvince: 'WA', postalCode: '98072'),
+            toAddress: new AddressData(firstName: 'John', lastName: 'Doe', streetAddress: '1 Example Ave', city: 'Portland', stateOrProvince: 'OR', postalCode: '97201'),
+            packageData: new PackageData(weight: 2.5, length: 10, width: 8, height: 6),
+            customsCurrency: 'XTS',
+        );
+
+        expect($this->adapter->declaredCustomsTerms($request)->isEmpty())->toBeTrue();
+    });
+});

@@ -2,15 +2,19 @@
 
 namespace App\DataTransferObjects\Shipping;
 
+use App\DataTransferObjects\Customs\ConvertedAmount;
+use App\DataTransferObjects\Customs\CustomsDeclaration;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\Enums\ServiceCapability;
+use App\Exceptions\UnconvertibleCustomsValueException;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\ShippingOffer;
 use App\Services\Customs\CustomsReadiness;
 use App\Services\Customs\CustomsTermsResolver;
+use App\Services\ExchangeRates\ShipmentAmountConverter;
 use App\Services\LabelReferenceResolver;
 use App\Services\ShipDateService;
 use App\Services\Shipping\DutiesTermsFilter;
@@ -38,6 +42,8 @@ readonly class ShipRequest
      * @param  ResolvedCustomsTerms|null  $customsTerms  The duties term and seller registration the label declares, resolved from the Shipment when the request is built, or recorded as source-decided when the seller takes no terms. Null on a hand-built request, which declares nothing.
      * @param  RecipientTaxId|null  $recipientTaxId  The recipient's own tax ID, when the Shipment has one. Personal data: an adapter sends it and never logs it.
      * @param  string|null  $exporterEin  The client's own EIN, which a carrier wants beside an export ITN
+     * @param  string  $customsCurrency  The ISO 4217 currency the customs items' values are in: the Shipment's (`order-currency/01`)
+     * @param  ConvertedAmount|null  $customsDollarRate  One unit of $customsCurrency in US dollars, at the ECB rate pinned on the Shipment; null when the currency is USD, the label carries no customs form, nothing is packed, no rate is stored, or for a blind purchase, whose seller makes its own customs form
      * @param  bool  $overrideDeclaredWeight  The operator has been shown that the seller declares more weight for the goods than the box was weighed at, and has asked for the purchase to be attempted anyway — at the scale weight, unchanged. Nothing is over-declared by it; it exists so a catalog corrected between the refusal and the retry, or a reading of ours that was wrong, is not a dead end.
      */
     public function __construct(
@@ -62,6 +68,8 @@ readonly class ShipRequest
         public ?ResolvedCustomsTerms $customsTerms = null,
         public ?RecipientTaxId $recipientTaxId = null,
         public ?string $exporterEin = null,
+        public string $customsCurrency = 'USD',
+        public ?ConvertedAmount $customsDollarRate = null,
     ) {}
 
     public function hasSpecialService(string $code): bool
@@ -111,6 +119,8 @@ readonly class ShipRequest
             customsTerms: $this->customsTerms,
             recipientTaxId: $this->recipientTaxId,
             exporterEin: $this->exporterEin,
+            customsCurrency: $this->customsCurrency,
+            customsDollarRate: $this->customsDollarRate,
         );
     }
 
@@ -140,6 +150,44 @@ readonly class ShipRequest
             $this->customsItems,
             $this->blindOffer !== null,
             $this->offer?->amazonChannelType(),
+        );
+    }
+
+    /**
+     * The customs lines as a carrier declares them (`order-currency/02`).
+     *
+     * Customs values a parcel at what the buyer paid, in the currency they
+     * paid it, so the order's own currency is declared wherever the carrier
+     * takes it, and needs no rate. A carrier that takes only some currencies
+     * gets the values in US dollars instead, at the ECB rate pinned on the
+     * Shipment, each unit value rounded to the cent and never below one.
+     *
+     * @param  list<string>|null  $acceptedCurrencies  The ISO 4217 codes the carrier declares in; null when it takes any
+     *
+     * @throws UnconvertibleCustomsValueException when dollars are needed and no rate is stored
+     */
+    public function customsDeclaration(?array $acceptedCurrencies = null): CustomsDeclaration
+    {
+        if ($acceptedCurrencies === null || $this->customsItems === [] || in_array($this->customsCurrency, $acceptedCurrencies, true)) {
+            return new CustomsDeclaration(array_values($this->customsItems), $this->customsCurrency);
+        }
+
+        if ($this->customsDollarRate === null) {
+            throw new UnconvertibleCustomsValueException($this->customsCurrency);
+        }
+
+        $dollarsPerUnit = $this->customsDollarRate->amount;
+
+        return new CustomsDeclaration(
+            array_values(array_map(
+                fn (CustomsItem $item): CustomsItem => $item->withUnitValue(
+                    $item->unitValue > 0 ? max(0.01, round($item->unitValue * $dollarsPerUnit, 2)) : 0.0,
+                ),
+                $this->customsItems,
+            )),
+            'USD',
+            convertedFrom: $this->customsCurrency,
+            rateDate: $this->customsDollarRate->rateDate,
         );
     }
 
@@ -212,6 +260,8 @@ readonly class ShipRequest
             customsTerms: $this->customsTerms,
             recipientTaxId: $this->recipientTaxId,
             exporterEin: $this->exporterEin,
+            customsCurrency: $this->customsCurrency,
+            customsDollarRate: $this->customsDollarRate,
         );
     }
 
@@ -246,6 +296,8 @@ readonly class ShipRequest
             customsTerms: $this->customsTerms,
             recipientTaxId: $this->recipientTaxId,
             exporterEin: $this->exporterEin,
+            customsCurrency: $this->customsCurrency,
+            customsDollarRate: $this->customsDollarRate,
         );
     }
 
@@ -320,6 +372,8 @@ readonly class ShipRequest
             customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, app(DutiesTermsFilter::class)->isSourceDecided($rate, $offer)),
             recipientTaxId: RecipientTaxId::fromShipment($package->shipment),
             exporterEin: $package->shipment->client?->exporter_ein,
+            customsCurrency: ShipmentAmountConverter::currencyOf($package->shipment),
+            customsDollarRate: self::customsDollarRateFor($package, $fromAddress, $toAddress),
         );
     }
 
@@ -381,7 +435,28 @@ readonly class ShipRequest
             customsTerms: self::customsTermsFor($package, $fromAddress, $toAddress, sourceDecided: true),
             recipientTaxId: RecipientTaxId::fromShipment($package->shipment),
             exporterEin: $package->shipment->client?->exporter_ein,
+            customsCurrency: ShipmentAmountConverter::currencyOf($package->shipment),
         );
+    }
+
+    /**
+     * One unit of the Shipment's currency in US dollars, for a carrier that
+     * declares customs only in dollars; null when there is nothing to convert.
+     * Only for a label with a customs form: one across a customs border, or to
+     * an APO, FPO or DPO address, where USPS sends one too. Converting pins
+     * the Shipment's rate day, which the export filing check has already done
+     * for most exports; the day depends only on the order.
+     */
+    private static function customsDollarRateFor(Package $package, AddressData $from, AddressData $to): ?ConvertedAmount
+    {
+        $currency = ShipmentAmountConverter::currencyOf($package->shipment);
+        $hasCustomsForm = ! $to->sharesCustomsZoneWith($from) || $to->isMilitary();
+
+        if ($currency === 'USD' || ! $hasCustomsForm || $package->packageItems->isEmpty()) {
+            return null;
+        }
+
+        return app(ShipmentAmountConverter::class)->convert($package->shipment, 1.0, 'USD', 'the customs declaration');
     }
 
     /**

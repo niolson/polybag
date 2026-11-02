@@ -38,6 +38,7 @@ use App\Exceptions\LabelNotRecoverableException;
 use App\Exceptions\MissingDeclaredValueException;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Exceptions\ShopifyDeclaredWeightException;
+use App\Exceptions\UnconvertibleCustomsValueException;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierAlias;
@@ -636,6 +637,10 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $unrecorded ?? PackageShippingResult::shipped($response, $selectedRate, $package);
         } catch (MissingDeclaredValueException $e) {
             return PackageShippingResult::failed('Declared Value Required', $e->getMessage());
+        } catch (UnconvertibleCustomsValueException $e) {
+            // Thrown while deciding what the label declares, before the offer
+            // is claimed: nothing was bought.
+            return PackageShippingResult::failed('Exchange Rate Needed', $e->getMessage());
         } catch (ShopifyDeclaredWeightException $e) {
             // Nothing was bought and nothing was claimed — the seller's own
             // declaration would have made the purchase fail, and it was
