@@ -272,6 +272,19 @@ class DataSource extends Model
     }
 
     /**
+     * Whether a Shipment came from this connection or postage was quoted or
+     * bought through it. Such a connection is made inactive, not deleted: its
+     * row is what voids, tracking, exports and source closure go through.
+     */
+    public function hasShippingHistory(): bool
+    {
+        return $this->shipments()->exists()
+            || Package::query()->where('postage_data_source_id', $this->id)->exists()
+            || PackageLabel::query()->where('postage_data_source_id', $this->id)->exists()
+            || ShippingOffer::query()->where('postage_data_source_id', $this->id)->exists();
+    }
+
+    /**
      * The scope rows that route off-Amazon Amazon Shipping to this connection.
      *
      * @return HasMany<CarrierAccountScope, $this>

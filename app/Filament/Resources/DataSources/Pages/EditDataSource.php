@@ -315,7 +315,8 @@ class EditDataSource extends EditRecord
                     $this->notifyOffAmazonShippingCheck(app(OffAmazonShippingCheck::class)->check($this->dataSource()));
                 }),
 
-            DeleteAction::make(),
+            DeleteAction::make()
+                ->authorizationTooltip(),
         ];
     }
 

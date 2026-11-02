@@ -5,6 +5,7 @@ namespace App\Policies;
 use App\Enums\Role;
 use App\Models\DataSource;
 use App\Models\User;
+use Illuminate\Auth\Access\Response;
 
 /**
  * Connections hold the credentials of every sales channel and import database,
@@ -34,9 +35,17 @@ class DataSourcePolicy
         return $user->role->isAtLeast(Role::Admin);
     }
 
-    public function delete(User $user, DataSource $dataSource): bool
+    public function delete(User $user, DataSource $dataSource): Response|bool
     {
-        return $user->role->isAtLeast(Role::Admin);
+        if (! $user->role->isAtLeast(Role::Admin)) {
+            return false;
+        }
+
+        if ($dataSource->hasShippingHistory()) {
+            return Response::deny('This connection has shipments or postage history, so it cannot be deleted. Make it inactive instead.');
+        }
+
+        return true;
     }
 
     /**

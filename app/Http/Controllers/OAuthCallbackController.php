@@ -88,7 +88,10 @@ class OAuthCallbackController extends Controller
                         'title' => $wasActive
                             ? 'Amazon connected, but this connection was made inactive.'
                             : 'Amazon connected, but this connection stays inactive.',
-                        'body' => $importSource->accountConflictMessage($conflictingConnection).' Delete this connection, or deactivate the other one.',
+                        // A connection with history cannot be deleted (`connection-identity/02`).
+                        'body' => $importSource->accountConflictMessage($conflictingConnection).($importSource->hasShippingHistory()
+                            ? ' Leave this connection inactive, or deactivate the other one.'
+                            : ' Delete this connection, or deactivate the other one.'),
                     ],
                     $provider === 'shopify' => $this->synchronizeShopifyLocations($importSource),
                     default => $this->dataSourceNotification($provider, $discoveryResult),
