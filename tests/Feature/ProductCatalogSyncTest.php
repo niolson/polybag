@@ -417,7 +417,7 @@ describe('the sync', function (): void {
                     'sku' => null, 'productTitle' => 'Synthetic Tee', 'remainingQuantity' => 1, 'requiresShipping' => true,
                     'weight' => ['unit' => 'POUNDS', 'value' => 0.6],
                     'variant' => ['id' => 'gid://shopify/ProductVariant/900005', 'barcodes' => ['nodes' => []]],
-                    'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '12.00']]],
+                    'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '12.00']]],
                 ]],
             ],
         ];

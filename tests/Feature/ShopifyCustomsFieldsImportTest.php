@@ -90,7 +90,7 @@ function customsFieldsFulfillmentOrder(array $variant = []): array
                 'sku' => 'WIDGET-1', 'productTitle' => 'Widget', 'remainingQuantity' => 2,
                 'requiresShipping' => true, 'weight' => null,
                 'variant' => array_merge(['id' => 'gid://shopify/ProductVariant/1', 'barcodes' => ['nodes' => []]], $variant),
-                'lineItem' => ['originalUnitPriceSet' => ['shopMoney' => ['amount' => '10.00']]],
+                'lineItem' => ['originalUnitPriceSet' => ['presentmentMoney' => ['amount' => '10.00']]],
             ]],
         ],
     ];
