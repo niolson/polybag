@@ -3,6 +3,7 @@
 use App\DataTransferObjects\QueryPreviewResult;
 use App\Enums\AmazonMarketplace;
 use App\Enums\AuditAction;
+use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Resources\DataSources\Pages\CreateDataSource;
@@ -16,12 +17,15 @@ use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
+use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\Testing\TestAction;
 use Filament\Forms\Components\Select;
@@ -30,6 +34,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
@@ -1066,6 +1071,40 @@ it('offers no bulk delete on the connections list', function (): void {
     Livewire::test(ListDataSources::class)
         ->assertActionDoesNotExist(TestAction::make(DeleteBulkAction::class)->table()->bulk());
 });
+
+it('deletes a connection nothing references', function (): void {
+    $this->actingAs($this->admin);
+    $connection = DataSource::factory()->create();
+
+    Livewire::test(EditDataSource::class, ['record' => $connection->id])
+        ->callAction(DeleteAction::class);
+
+    expect(DataSource::query()->whereKey($connection->id)->exists())->toBeFalse();
+});
+
+it('refuses to delete a connection with shipping history', function (Closure $reference): void {
+    $this->actingAs($this->admin);
+    $connection = DataSource::factory()->create();
+    $reference($connection);
+
+    Livewire::test(EditDataSource::class, ['record' => $connection->id])
+        ->assertActionVisible(DeleteAction::class)
+        ->assertActionDisabled(DeleteAction::class)
+        ->callAction(DeleteAction::class);
+
+    expect(DataSource::query()->whereKey($connection->id)->exists())->toBeTrue()
+        ->and($this->admin->can('delete', $connection))->toBeFalse()
+        ->and(Gate::forUser($this->admin)->inspect('delete', $connection)->message())
+        ->toBe('This connection has shipments or postage history, so it cannot be deleted. Make it inactive instead.');
+})->with([
+    'an imported shipment' => [fn (DataSource $connection) => Shipment::factory()->create(['data_source_id' => $connection->id])],
+    'a package bought through it' => [fn (DataSource $connection) => Package::factory()->create(['postage_data_source_id' => $connection->id])],
+    'a label bought through it' => [fn (DataSource $connection) => PackageLabel::factory()->create([
+        'postage_source' => PostageSource::PostageDataSource,
+        'postage_data_source_id' => $connection->id,
+    ])],
+    'an offer quoted through it' => [fn (DataSource $connection) => ShippingOffer::factory()->create(['postage_data_source_id' => $connection->id])],
+]);
 
 it('imports orders by default on a new connection', function (): void {
     $this->actingAs($this->admin);

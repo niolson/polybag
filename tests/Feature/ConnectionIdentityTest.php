@@ -239,6 +239,16 @@ it('makes a connection reconnected to a seller another active connection reads i
     Saloon::assertNothingSent();
 });
 
+it('does not suggest deleting a reconnected connection that has shipments', function (): void {
+    amazonSellerConnection('Seller Two Main', 'A2SELLER');
+    $reconnected = amazonSellerConnection('Seller One', 'A1SELLER');
+    Shipment::factory()->create(['data_source_id' => $reconnected->id]);
+    Saloon::fake([]);
+
+    receiveAmazonGrant($this, $reconnected, 'A2SELLER')
+        ->assertSessionHas('oauth_notification.body', 'Another active connection, Seller Two Main, already reads this seller account. Add marketplaces to it instead. Leave this connection inactive, or deactivate the other one.');
+});
+
 it('says a connection that was already inactive stays inactive', function (): void {
     amazonSellerConnection('Seller Main', 'A1SELLER');
     $inactive = amazonSellerConnection('Seller History', 'A2SELLER', active: false);
