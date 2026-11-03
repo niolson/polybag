@@ -851,6 +851,131 @@ it('deletes orphaned package items when cleaning up unshipped packages', functio
     expect(PackageItem::find($orphanItem->id))->toBeNull();
 });
 
+it('starts a scanned line at its Product\'s customs value', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create(['currency' => 'CAD']);
+    Product::factory()->withCustomsValue(19.99)->create(['client_id' => $client->id, 'barcode' => '555000111222']);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id, 'currency' => 'CAD']);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('addItemByScan', '555000111222')
+        ->assertDispatched('scan-to-add-found', fn (string $event, array $params): bool => $params['product']['value'] === 19.99);
+})->after(fn () => app(SettingsService::class)->clearCache());
+
+it('gives a scanned line no starting value on a Shipment in another currency than its Client\'s', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create(['currency' => 'USD']);
+    Product::factory()->withCustomsValue(19.99)->create(['client_id' => $client->id, 'barcode' => '555000111333']);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id, 'currency' => 'EUR']);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('addItemByScan', '555000111333')
+        ->assertDispatched('scan-to-add-found', fn (string $event, array $params): bool => $params['product']['value'] === null);
+})->after(fn () => app(SettingsService::class)->clearCache());
+
+it('saves the value a scanned line was packed with and resumes it', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create();
+    $priced = Product::factory()->create(['client_id' => $client->id]);
+    $unpriced = Product::factory()->create(['client_id' => $client->id]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    $line = fn (Product $product, mixed $value): array => [
+        'product_id' => $product->id,
+        'sku' => $product->sku,
+        'barcode' => $product->barcode,
+        'name' => $product->name,
+        'quantity' => 2,
+        'packed' => 2,
+        'value' => $value,
+        'transparency_codes' => [],
+    ];
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', [$line($priced, '12.5'), $line($unpriced, '')], null, '1.00', '10', '8', '6')
+        ->assertNotNotified('Progress Not Saved');
+
+    $items = Package::where('shipment_id', $shipment->id)->sole()->packageItems->keyBy('product_id');
+    expect($items[$priced->id]->value)->toBe('12.50')
+        ->and($items[$priced->id]->shipment_item_id)->toBeNull()
+        ->and($items[$unpriced->id]->value)->toBeNull();
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->assertSet('packingItems.0.value', 12.5)
+        ->assertSet('packingItems.1.value', null);
+})->after(fn () => app(SettingsService::class)->clearCache());
+
+it('refuses to save a scanned line whose value is not a number', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create();
+    $product = Product::factory()->create(['client_id' => $client->id]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', [[
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'packed' => 1,
+            'value' => 'twelve',
+            'transparency_codes' => [],
+        ]], null, '1.00', '10', '8', '6')
+        ->assertNotified('Progress Not Saved');
+
+    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+})->after(fn () => app(SettingsService::class)->clearCache());
+
+it('refuses to save a scanned line whose value is out of range', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create();
+    $product = Product::factory()->create(['client_id' => $client->id]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    $line = fn (mixed $value): array => [[
+        'product_id' => $product->id,
+        'quantity' => 1,
+        'packed' => 1,
+        'value' => $value,
+        'transparency_codes' => [],
+    ]];
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('saveDraft', $line(-0.01), null, '1.00', '10', '8', '6')
+        ->assertNotified('Progress Not Saved')
+        ->call('saveDraft', $line(1000000), null, '1.00', '10', '8', '6')
+        ->assertNotified('Progress Not Saved');
+
+    expect(Package::where('shipment_id', $shipment->id)->exists())->toBeFalse();
+})->after(fn () => app(SettingsService::class)->clearCache());
+
+it('saves a scanned line\'s value when the package is shipped', function (): void {
+    Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+
+    $client = Client::factory()->create();
+    $product = Product::factory()->create(['client_id' => $client->id]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+
+    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
+        ->call('ship', [[
+            'product_id' => $product->id,
+            'quantity' => 1,
+            'packed' => 1,
+            'value' => '8.75',
+            'transparency_codes' => [],
+        ]], null, '1.5', '10', '8', '6', false)
+        ->assertRedirect();
+
+    expect(Package::where('shipment_id', $shipment->id)->sole()->packageItems->sole()->value)->toBe('8.75');
+})->after(fn () => app(SettingsService::class)->clearCache());
+
 it('scan-to-add mode is false when shipment has line items even when setting is enabled', function (): void {
     Setting::create(['key' => 'scan_to_add_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
     app(SettingsService::class)->clearCache();

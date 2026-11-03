@@ -32,6 +32,8 @@ class PackagingService
             'shipping_method_id' => $data['shipping_method_id'] ?: null,
             'channel_id' => $channelId,
             'status' => $status,
+            // Its values come from the Client's Products, so it is in their currency (`manual-ship-contents/01`).
+            'currency' => app(ClientContext::class)->default()->currency,
         ]);
     }
 

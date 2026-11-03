@@ -83,7 +83,8 @@ readonly class RateRequest
             specialServiceConfig: $resolver->configForPackage($package, $specialServiceCodes),
             originCity: $origin->city,
             originStateOrProvince: $origin->stateOrProvince,
-            contentsValue: $shipment->value !== null ? (float) $shipment->value : null,
+            // The value declared on its label: a scanned package has no Shipment value, only its lines' (`manual-ship-contents/01`).
+            contentsValue: $resolver->orderValueForPackage($package),
             packageId: $package->id,
             shippingMethodId: $shipment->shipping_method_id,
             destinationStreetAddress: $destination->streetAddress,

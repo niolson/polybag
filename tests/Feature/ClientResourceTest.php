@@ -53,6 +53,21 @@ it('can create a client', function (): void {
     ]);
 });
 
+it('saves a client\'s currency as an upper-case ISO 4217 code, USD unless changed', function (): void {
+    Livewire::test(CreateClient::class)
+        ->assertSchemaStateSet(['currency' => 'USD'])
+        ->fillForm(['name' => 'Maple Goods', 'currency' => 'cad'])
+        ->call('create')
+        ->assertHasNoFormErrors();
+
+    expect(Client::where('name', 'Maple Goods')->sole()->currency)->toBe('CAD');
+
+    Livewire::test(CreateClient::class)
+        ->fillForm(['name' => 'Bad Currency', 'currency' => 'C1'])
+        ->call('create')
+        ->assertHasFormErrors(['currency']);
+});
+
 it('can create a client with a return address', function (): void {
     Livewire::test(CreateClient::class)
         ->fillForm([

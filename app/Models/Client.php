@@ -17,6 +17,7 @@ class Client extends Model
 
     protected $fillable = [
         'name',
+        'currency',
         'logo',
         'company_name',
         'custom_message',
@@ -38,6 +39,16 @@ class Client extends Model
         'label_reference_source',
         'duties_policy',
         'exporter_ein',
+    ];
+
+    /**
+     * `currency` is the ISO 4217 code its Products' customs values are in, and
+     * its Manual Ship Shipments' (`manual-ship-contents/01`).
+     *
+     * @var array<string, mixed>
+     */
+    protected $attributes = [
+        'currency' => Shipment::DEFAULT_CURRENCY,
     ];
 
     /**

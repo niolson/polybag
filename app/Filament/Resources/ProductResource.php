@@ -5,8 +5,10 @@ namespace App\Filament\Resources;
 use App\Enums\HazmatClass;
 use App\Filament\Concerns\InteractsWithScoutSearch;
 use App\Filament\Resources\ProductResource\Pages;
+use App\Models\Client;
 use App\Models\Location;
 use App\Models\Product;
+use App\Models\Shipment;
 use App\Models\SpecialService;
 use App\Services\ClientContext;
 use App\Services\SettingsService;
@@ -60,6 +62,18 @@ class ProductResource extends Resource
         ];
     }
 
+    /**
+     * The currency a Product's customs value is in: its Client's, else the
+     * default Client's. Only a label, so a missing default client is USD
+     * here and refused on save, not a page that will not render.
+     */
+    private static function currencyFor(int|string|null $clientId): string
+    {
+        $query = filled($clientId) ? Client::whereKey($clientId) : Client::where('is_default', true);
+
+        return $query->value('currency') ?? Shipment::DEFAULT_CURRENCY;
+    }
+
     public static function form(Schema $form): Schema
     {
         return $form
@@ -67,6 +81,7 @@ class ProductResource extends Resource
                 Forms\Components\Select::make('client_id')
                     ->relationship('client', 'name')
                     ->required()
+                    ->live()
                     ->visible(fn () => app(SettingsService::class)->get('multi_client_enabled', false)),
                 Forms\Components\TextInput::make('name')
                     ->required()
@@ -115,6 +130,15 @@ class ProductResource extends Resource
                     ->description('Printed on the customs declaration of international shipments. EU consumer shipments need the SKU and a manufacturer part number on every line.')
                     ->columns(2)
                     ->schema([
+                        Forms\Components\TextInput::make('customs_value')
+                            ->label('Customs Value')
+                            ->numeric()
+                            ->inputMode('decimal')
+                            ->step(0.01)
+                            ->minValue(0)
+                            ->maxValue(999999.99)
+                            ->suffix(fn (Get $get, ?Product $record): string => self::currencyFor($get('client_id') ?? $record?->client_id))
+                            ->helperText('The value of one, declared when it is packed by scanning. International labels need a value for every item.'),
                         Forms\Components\TextInput::make('hs_tariff_number')
                             ->label('HS Tariff Number')
                             ->maxLength(20)

@@ -276,7 +276,7 @@ class CustomsReadiness
             'Customs Value Required',
             sprintf(
                 'This shipment needs a customs declaration, but %s no value: %s. '
-                .'A customs form cannot declare an item at $0.00. Set the value on the shipment item, then refresh rates.',
+                .'A customs form cannot declare an item at $0.00. Set the value on the shipment item, or on the packed line for an item added by scanning, then refresh rates.',
                 count($names) === 1 ? 'one item has' : count($names).' items have',
                 implode(', ', $names),
             ),
