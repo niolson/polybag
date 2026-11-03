@@ -1,6 +1,6 @@
 # Value scan-to-add items from the Product
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -62,13 +62,13 @@ The Product catalog has weight, HS code and origin for each item, but no value.
 
 ## Acceptance criteria
 
-- [ ] A Product has an editable customs value in its customs section; the factory has a state for one
-- [ ] A Client has a currency, default USD; a Manual Ship Shipment takes it
-- [ ] A scan-to-add line carries its Product's customs value, editable by the packer,
+- [x] A Product has an editable customs value in its customs section; the factory has a state for one
+- [x] A Client has a currency, default USD; a Manual Ship Shipment takes it
+- [x] A scan-to-add line carries its Product's customs value, editable by the packer,
       and saved on the package item
-- [ ] An international scan-to-add Package declares those values in customs and in the
+- [x] An international scan-to-add Package declares those values in customs and in the
       carriage declared value
-- [ ] A package item's value wins over its ShipmentItem's
-- [ ] A Product's customs value is not copied onto a Shipment in another currency
-- [ ] A line with no value, scanned or imported, blocks an international label through
+- [x] A package item's value wins over its ShipmentItem's
+- [x] A Product's customs value is not copied onto a Shipment in another currency
+- [x] A line with no value, scanned or imported, blocks an international label through
       `zero_value`, with a test; a domestic label still buys
