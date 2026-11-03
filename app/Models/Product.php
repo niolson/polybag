@@ -30,6 +30,7 @@ class Product extends Model
         'barcode',
         'description',
         'weight',
+        'customs_value',
         'handling_surcharge',
         'hs_tariff_number',
         'country_of_origin',
@@ -47,6 +48,7 @@ class Product extends Model
     {
         return [
             'weight' => 'decimal:2',
+            'customs_value' => 'decimal:2',
             'handling_surcharge' => 'decimal:2',
             'active' => 'boolean',
             'contains_alcohol' => 'boolean',
@@ -68,6 +70,20 @@ class Product extends Model
             get: fn (?string $value): ?string => $value,
             set: fn (?string $value): ?string => filled($value) ? $value : null,
         );
+    }
+
+    /**
+     * The unit value a Shipment in `$currency` can declare for this Product:
+     * its customs value, which is in its Client's currency, so null on a
+     * Shipment in any other (`manual-ship-contents/01`). Never converted.
+     */
+    public function customsValueIn(string $currency): ?float
+    {
+        if ($this->customs_value === null || strcasecmp((string) $this->client?->currency, $currency) !== 0) {
+            return null;
+        }
+
+        return (float) $this->customs_value;
     }
 
     /**

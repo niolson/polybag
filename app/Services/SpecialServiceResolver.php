@@ -291,7 +291,7 @@ class SpecialServiceResolver
      * (declaring the full shipment value on every label would over-declare)
      * and use the per-package item sum. Null when no usable value exists.
      */
-    private function orderValueForPackage(Package $package): ?float
+    public function orderValueForPackage(Package $package): ?float
     {
         $package->loadMissing(['shipment.packages', 'packageItems.shipmentItem']);
         $shipment = $package->shipment;
@@ -307,7 +307,7 @@ class SpecialServiceResolver
         }
 
         $itemSum = $package->packageItems->sum(
-            fn ($packageItem): float => (float) ($packageItem->shipmentItem->value ?? 0) * (int) ($packageItem->quantity ?? 1)
+            fn ($packageItem): float => ($packageItem->declaredUnitValue() ?? 0.0) * (int) ($packageItem->quantity ?? 1)
         );
 
         return $itemSum > 0 ? round($itemSum, 2) : null;

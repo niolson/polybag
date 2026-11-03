@@ -338,6 +338,15 @@ it('uses the per-package item sum instead of the shipment value for multi-packag
     expect(app(SpecialServiceResolver::class)->declaredValueForPackage($packageA))->toBe(40.00);
 });
 
+it('sums the values packed on scanned lines, which have no shipment item', function (): void {
+    $shipment = Shipment::factory()->create(['value' => null]);
+    $package = Package::factory()->for($shipment)->create();
+    PackageItem::factory()->for($package)->create(['shipment_item_id' => null, 'quantity' => 3, 'value' => 12.50]);
+    PackageItem::factory()->for($package)->create(['shipment_item_id' => null, 'quantity' => 1, 'value' => 4.00]);
+
+    expect(app(SpecialServiceResolver::class)->declaredValueForPackage($package))->toBe(41.50);
+});
+
 it('returns null declared value when neither shipment nor items carry a value', function (): void {
     $shipment = Shipment::factory()->create(['value' => null]);
     $package = Package::factory()->for($shipment)->create();

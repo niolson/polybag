@@ -17,6 +17,7 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingOffer;
 use App\Models\User;
 use App\Services\AddressValidationService;
+use App\Services\ClientContext;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -64,6 +65,32 @@ it('creates a shipment and redirects to ship page', function (): void {
         ->and($shipment->shipping_method_id)->toBe($shippingMethod->id);
 
     expect(Package::where('shipment_id', $shipment->id)->exists())->toBeTrue();
+});
+
+it('creates its shipment in the default client\'s currency, which its products\' values are in', function (): void {
+    Channel::factory()->create(['name' => 'Manual']);
+    app(ClientContext::class)->default()->update(['currency' => 'CAD']);
+
+    Livewire::test(ManualShip::class)
+        ->fillForm([
+            'shipment_reference' => 'MAN-CAD',
+            'first_name' => 'Taylor',
+            'address1' => '123 Main St',
+            'city' => 'Seattle',
+            'country' => 'US',
+            'state_or_province' => 'WA',
+            'postal_code' => '98101',
+            'shipping_method_id' => ShippingMethod::factory()->create()->id,
+            'box_size_id' => BoxSize::factory()->create()->id,
+            'weight' => 2.5,
+            'height' => 10,
+            'width' => 8,
+            'length' => 6,
+        ])
+        ->call('ship')
+        ->assertHasNoFormErrors();
+
+    expect(Shipment::where('shipment_reference', 'MAN-CAD')->sole()->currency)->toBe('CAD');
 });
 
 it('cannot create a shipment with no shipping method', function (): void {

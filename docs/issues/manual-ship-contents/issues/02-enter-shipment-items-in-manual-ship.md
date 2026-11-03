@@ -1,6 +1,6 @@
 # Enter Shipment items in Manual Ship
 
-Status: needs-triage
+Status: ready-for-agent
 Category: enhancement
 Repo: `polybag`
 
@@ -31,17 +31,29 @@ Ship flow. Editing items there on an imported Shipment also has no guard: the ne
   currency beside the values.
 - Sum the lines into the Shipment's `value` unless one is entered.
 
-## Questions for triage
+## Triage (2026-11-02)
 
-- Should the same editing be offered on Pack for an imported Shipment, and what happens
-  when the source next updates those items? Today a re-import replaces them, and changed
-  items make a printed pack slip out of date.
-- Who may enter items? `warehouse-permissions/01` proposes that Manual Ship be Manager- or
-  Admin-only.
-- Does packing validation count entered items as the expected contents?
+- **Manual Ship only.** Typed-in items become real ShipmentItems on a Shipment PolyBag
+  owns (no source to overwrite them). Values are in the Shipment's currency, the Client's
+  (`01`). A line picked from the catalog prefills its value from the Product's customs
+  value.
+- **Packing validation counts them.** They are the Shipment's expected contents, so
+  Pack checks them like an imported order's items.
+- **Imported Shipments are not edited here.** The source owns their items: a Shopify
+  order edit or an ERP correction arrives through the next import, and an edit made in
+  PolyBag would be overwritten by it and leave a printed pack slip out of date. Guard
+  `ShipmentItemsRelationManager` on a Shipment with a source: read-only, or a warning that
+  the next import replaces the change. Decide which when building it.
+- **Pack-time substitutions are out of scope.** No one needs them yet. If they come up,
+  they are a Package-level difference from the Shipment, which `01`'s package item
+  `value` begins to model.
+- **Who may enter items** follows `warehouse-permissions/01` for Manual Ship; nothing
+  separate here.
 
 ## Acceptance criteria
 
 - [ ] With the setting on, Manual Ship can record items, freehand or from a Product
 - [ ] The Draft Shipment and the bought Label's customs lines carry those items and values
+- [ ] Pack validates the packed items against them
+- [ ] Items on a Shipment with a source cannot be silently edited in the Shipment resource
 - [ ] With the setting off, Manual Ship behaves as it does today

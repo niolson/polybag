@@ -261,6 +261,7 @@
                         name: product.name,
                         quantity: 1,
                         packed: 1,
+                        value: product.value ?? null,
                         transparency_codes: [],
                     });
                 }
@@ -413,6 +414,11 @@
             },
 
             async shipPackage() {
+                // A value still being typed (F12 from the field) is committed on blur.
+                if (document.activeElement?.dataset.testid === 'scan-to-add-value') {
+                    document.activeElement.blur();
+                }
+
                 if (this.isShipping || !this.isReadyToShip()) return;
 
                 // Auto Ship buys and prints in one go. A label printer the OS
@@ -719,12 +725,13 @@
                             <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">SKU</th>
                             <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">Barcode</th>
                             <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white">Name</th>
+                            <th class="px-3 py-3.5 text-left text-sm font-semibold text-gray-950 dark:text-white w-40">Unit Value</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-200 dark:divide-white/5">
                         <template x-if="packingItems.length === 0">
                             <tr>
-                                <td colspan="4" class="px-3 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
+                                <td colspan="5" class="px-3 py-10 text-center text-sm text-gray-500 dark:text-gray-400">
                                     Scan a product barcode to begin recording what's packed
                                 </td>
                             </tr>
@@ -757,6 +764,20 @@
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.sku"></td>
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white" x-text="packingItem.barcode"></td>
                                 <td class="px-3 py-4 text-sm text-gray-950 dark:text-white max-w-xs truncate" x-text="packingItem.name" x-bind:title="packingItem.name"></td>
+                                {{-- What a customs form declares for one; from the Product, and needed for an international label. Bound on blur, not each keystroke: every change saves the draft. --}}
+                                <td class="px-3 py-3">
+                                    <x-filament::input.wrapper :suffix="$shipment?->currency">
+                                        <x-filament::input
+                                            type="number"
+                                            inputmode="decimal"
+                                            min="0"
+                                            step="0.01"
+                                            x-model.lazy="packingItem.value"
+                                            x-bind:aria-label="'Unit value of ' + packingItem.name"
+                                            data-testid="scan-to-add-value"
+                                        />
+                                    </x-filament::input.wrapper>
+                                </td>
                             </tr>
                         </template>
                     </tbody>

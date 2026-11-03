@@ -1008,10 +1008,11 @@ class AmazonBuyShippingService
                 /** @var PackageItem $item */
                 $item = $line['item'];
                 $weight = round($line['weight'], 2);
+                $unitValue = $item->declaredUnitValue();
 
                 return array_filter([
-                    'itemValue' => $item->shipmentItem?->value !== null
-                        ? ['value' => round((float) $item->shipmentItem->value, 2), 'unit' => $currency]
+                    'itemValue' => $unitValue !== null
+                        ? ['value' => round($unitValue, 2), 'unit' => $currency]
                         : null,
                     'description' => $item->product?->description ?: $item->product?->name,
                     'itemIdentifier' => $item->product?->sku ?: null,

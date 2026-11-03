@@ -42,10 +42,19 @@ class ProductFactory extends Factory
     }
 
     /**
+     * With a customs value, in its Client's currency, for a scan-to-add line to
+     * start from (`manual-ship-contents/01`).
+     */
+    public function withCustomsValue(?float $value = null): static
+    {
+        return $this->state(fn (): array => ['customs_value' => $value ?? fake()->randomFloat(2, 1, 100)]);
+    }
+
+    /**
      * Declared by the seller as media, so it qualifies for USPS Media Mail.
      */
     public function media(): static
     {
-        return $this->state(fn () => ['is_media' => true]);
+        return $this->state(fn (): array => ['is_media' => true]);
     }
 }

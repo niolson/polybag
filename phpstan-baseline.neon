@@ -67,12 +67,6 @@ parameters:
 			path: app/Console/Commands/GenerateTestData.php
 
 		-
-			message: '#^Using nullsafe property access "\?\-\>value" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
-			identifier: nullsafe.neverNull
-			count: 1
-			path: app/DataTransferObjects/Shipping/CustomsItem.php
-
-		-
 			message: '#^Method App\\Enums\\AuditAction\:\:getLabel\(\) never returns Illuminate\\Contracts\\Support\\Htmlable so it can be removed from the return type\.$#'
 			identifier: return.unusedType
 			count: 1

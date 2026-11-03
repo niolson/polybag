@@ -8,6 +8,7 @@ use App\Enums\TaxRegistrationRegime;
 use App\Filament\Pages\Settings;
 use App\Models\Client;
 use App\Models\ClientTaxRegistration;
+use App\Models\Shipment;
 use App\Services\AddressReferenceService;
 use App\Services\LabelReferenceResolver;
 use App\Services\SettingsService;
@@ -259,6 +260,13 @@ class ClientForm
                         TextInput::make('name')
                             ->required()
                             ->maxLength(255),
+                        TextInput::make('currency')
+                            ->default(Shipment::DEFAULT_CURRENCY)
+                            ->required()
+                            ->length(3)
+                            ->regex('/^[A-Za-z]{3}$/')
+                            ->dehydrateStateUsing(fn (?string $state): string => strtoupper(trim((string) $state)))
+                            ->helperText('The ISO 4217 code, such as USD, CAD or EUR, that this client\'s product customs values and Manual Ship shipments are in.'),
                         Toggle::make('active')
                             ->default(true),
                         Toggle::make('is_default')

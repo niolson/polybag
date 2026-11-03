@@ -26,6 +26,9 @@ use Illuminate\Support\Facades\DB;
 
 class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
 {
+    /** The largest unit value `package_items.value` (decimal 8,2) holds. */
+    private const MAX_ITEM_VALUE = 999999.99;
+
     public function resumeForShipment(Shipment $shipment): ?PackageDraftSnapshot
     {
         $package = $this->activeDraftFor($shipment);
@@ -59,6 +62,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
                     'shipment_item_id' => $item->shipmentItemId,
                     'product_id' => $item->productId,
                     'quantity' => $item->quantity,
+                    'value' => $item->value,
                     'transparency_codes' => $item->transparencyCodes,
                 ], $input->items)
             );
@@ -279,6 +283,10 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
             if ($item->quantity < 0 || $item->quantity > 10000) {
                 throw new PackageDraftInvalidException('A packed item has a quantity that is too low or too high. Correct the quantity.');
             }
+
+            if ($item->value !== null && ($item->value < 0 || $item->value > self::MAX_ITEM_VALUE)) {
+                throw new PackageDraftInvalidException('A packed item has a value that is too low or too high. Correct the value.');
+            }
         }
     }
 
@@ -311,6 +319,7 @@ class EloquentPackageDraftWorkflow implements PackageDraftWorkflow
                     productId: $item->product_id,
                     quantity: $item->quantity,
                     transparencyCodes: $item->transparency_codes ?? [],
+                    value: $item->value === null ? null : (float) $item->value,
                 ))
                 ->values()
                 ->all(),

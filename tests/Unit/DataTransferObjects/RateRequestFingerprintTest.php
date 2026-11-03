@@ -6,6 +6,7 @@ use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageItem;
 use App\Models\Shipment;
 use Carbon\CarbonImmutable;
 
@@ -60,6 +61,15 @@ it('builds a quote destination from server address and classification state', fu
         ->and($request->destinationStreetAddress2)->toBe('Unit 2')
         ->and($request->destinationCity)->toBe('Validated City')
         ->and($request->residential)->toBeFalse();
+});
+
+it('quotes a scanned package at its lines\' values when the Shipment has none', function (): void {
+    $location = Location::factory()->default()->create();
+    $shipment = Shipment::factory()->create(['value' => null, 'country' => 'CA']);
+    $package = Package::factory()->for($shipment)->for($location)->create();
+    PackageItem::factory()->for($package)->create(['shipment_item_id' => null, 'quantity' => 2, 'value' => 15.00]);
+
+    expect(RateRequest::fromPackage($package)->contentsValue)->toBe(30.0);
 });
 
 it('is stable across the order codes and config keys were given in', function (): void {

@@ -27,12 +27,12 @@ readonly class CustomsItem
     public static function fromPackageItem(PackageItem $packageItem): self
     {
         $product = $packageItem->product;
-        $shipmentItem = $packageItem->shipmentItem;
 
         return new self(
             description: $product->description ?? $product->name,
             quantity: $packageItem->quantity,
-            unitValue: (float) ($shipmentItem?->value ?? 1),
+            // No value is 0, never a stand-in: `CustomsReadiness` blocks it.
+            unitValue: $packageItem->declaredUnitValue() ?? 0.0,
             weight: (float) ($product->weight ?? 0.1),
             hsTariffNumber: $product->hs_tariff_number,
             countryOfOrigin: self::blankToNull($product->country_of_origin),

@@ -12,5 +12,6 @@ final readonly class PackageDraftItemSnapshot
         public int $productId,
         public int $quantity,
         public array $transparencyCodes,
+        public ?float $value = null,
     ) {}
 }

@@ -152,8 +152,53 @@ it('refuses before asking the operator to confirm a customs weight', function ()
         ->and($result->title)->toBe('Customs Value Required');
 });
 
-it('still falls back to a value of 1 for a null item value, which predates the guard', function (): void {
+it('withholds a purchase whose item has no value at all, which is never declared at a stand-in', function (): void {
     $package = packageWithItemValues([null]);
+    carrierThatMustNotBeAsked();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Customs Value Required')
+        ->and($result->message)->toContain('one item has no value: Item 1');
+
+    $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem']);
+    expect(CustomsItem::fromPackageItem($package->packageItems->first())->unitValue)->toBe(0.0);
+});
+
+/**
+ * A box packed by scanning (`manual-ship-contents/01`): its lines have no
+ * Shipment item, and each carries the value it was packed with.
+ *
+ * @param  list<float|null>  $values  One scanned line per entry, in order
+ */
+function scannedPackageWithLineValues(array $values): Package
+{
+    $shipment = Shipment::factory()->create([
+        'city' => 'FPO',
+        'state_or_province' => 'AE',
+        'postal_code' => '09532',
+        'country' => 'US',
+    ]);
+    $package = Package::factory()->for($shipment)->create(['weight' => 2.0, 'status' => PackageStatus::Unshipped]);
+
+    foreach ($values as $index => $value) {
+        $product = Product::factory()->create(['description' => 'Scanned '.($index + 1), 'weight' => 0.2]);
+        $package->packageItems()->create([
+            'product_id' => $product->id,
+            'quantity' => 2,
+            'value' => $value,
+        ]);
+    }
+
+    return $package;
+}
+
+it('declares a scanned line at the value it was packed with', function (): void {
+    $package = scannedPackageWithLineValues([14.25]);
     carrierThatSells();
 
     $result = app(PackageShippingWorkflow::class)->ship(
@@ -163,8 +208,34 @@ it('still falls back to a value of 1 for a null item value, which predates the g
 
     expect($result->success)->toBeTrue();
 
-    $package->loadMissing(['packageItems.product', 'packageItems.shipmentItem']);
-    expect(CustomsItem::fromPackageItem($package->packageItems->first())->unitValue)->toBe(1.0);
+    $package->load(['packageItems.product', 'packageItems.shipmentItem']);
+    $line = CustomsItem::fromPackageItem($package->packageItems->first());
+    expect($line->unitValue)->toBe(14.25)
+        ->and($line->quantity)->toBe(2);
+});
+
+it('withholds a purchase with a scanned line packed without a value', function (): void {
+    $package = scannedPackageWithLineValues([14.25, null]);
+    carrierThatMustNotBeAsked();
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(selectedRate: quotedDirectly($package, mockCarrierRate())),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Customs Value Required')
+        ->and($result->message)->toContain('one item has no value: Scanned 2')
+        ->and($result->message)->toContain('on the packed line');
+});
+
+it('declares a packed line\'s own value over its Shipment item\'s', function (): void {
+    $package = packageWithItemValues([30.00]);
+    $package->packageItems()->first()->update(['value' => 18.00]);
+
+    $package->load(['packageItems.product', 'packageItems.shipmentItem']);
+
+    expect(CustomsItem::fromPackageItem($package->packageItems->first())->unitValue)->toBe(18.0);
 });
 
 it('lets a zero-value item ship domestically, where no declaration is made', function (): void {

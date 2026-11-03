@@ -1,6 +1,6 @@
 # Value scan-to-add items from the Product
 
-Status: needs-triage
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -25,30 +25,50 @@ records what the contents are worth. The Shipment's `value` stays empty, so:
 
 The Product catalog has weight, HS code and origin for each item, but no value.
 
-## Proposal
+## Triage (2026-11-02)
 
-- Add a `value` column (unit value, nullable) to `products`. Make it editable on the
-  Product form and importable through the product catalog sync where a source offers a
-  price. Add it to the factory.
-- When scan-to-add packs a Product, give the Shipment its contents: either a
-  `ShipmentItem` per scanned Product carrying the Product's value, or a Shipment `value`
-  summed from the scans. Triage decides which. A `ShipmentItem` per line also feeds
-  customs lines and pack slips.
-
-## Questions for triage
-
-- **Which currency is a Product's value in?** Shipments now record a currency
-  (`order-currency/01`) and a Manual Ship Shipment is USD. A Product belongs to a Client,
-  so it could be the Client's currency, a currency stored on the Product, or USD.
-- **Is the Product's value a price, a cost, or a customs value?** Customs wants the
-  transaction value. A 3PL often knows only a wholesale cost.
-- **A Product with no value:** does scan-to-add block an international label, or ask the
-  packer?
+- **What the value is:** a customs value, kept apart from price and cost as other
+  shipping APIs do. It is a `customs_value` column (unit value, nullable) on `products`,
+  edited in the Product form's customs section beside HS code and origin. For goods that
+  are sold the customs value is the sale price, so a store's price is the natural source;
+  filling it from the product catalog sync is `03`.
+- **Currency:** the Client's. Add a `currency` to `clients` (ISO 4217, default `USD`),
+  edited on the Client form. A Manual Ship Shipment takes its Client's currency instead
+  of `Shipment::DEFAULT_CURRENCY`. A Product's customs value is used only on a Shipment
+  in its Client's currency; on any other it is not copied (no conversion for now).
+- **The value lives on the package item, not the Shipment.** Scan-to-add is not only
+  Manual Ship: Pack turns it on for any Shipment without items (`Pack::mount`), a
+  Shipment may have several Packages, and an import `update` replaces a Shipment's items.
+  Writing ShipmentItems from scans would keep the same data in two places and collide
+  with all three. Instead `package_items` gets a nullable `value` (unit value, in the
+  Shipment's currency):
+  - Scan-to-add copies the Product's customs value onto the line when it is scanned.
+    The packer sees it on the line and can enter or correct it.
+  - A package item's own value wins over its ShipmentItem's. Ordinary packing leaves it
+    null, so imported orders declare as they do today. This is also the data model that
+    lets a Package differ from its Shipment later (a pack-time substitution), which no
+    one needs yet.
+  - `CustomsItem::fromPackageItem` and `SpecialServiceResolver::orderValueForPackage`
+    read package item value, else ShipmentItem value.
+  - The Shipment's `value` is not written. The Label's declaration snapshot records what
+    was declared.
+  - A Product value set after scanning does not reach a line already packed; the block
+    below says to enter it on the line.
+- **A missing value blocks an international label.** Every carrier needs a value. Drop
+  the `?? 1` fallback in `CustomsItem::fromPackageItem`: a line with no value becomes 0
+  and the existing `zero_value` finding in `CustomsReadiness` blocks it, attended, batch
+  and auto-ship alike. This also blocks an imported ShipmentItem with a null value, which
+  today is silently declared at $1.00. Domestic is unaffected.
 
 ## Acceptance criteria
 
-- [ ] A Product has an editable unit value
-- [ ] A scan-to-add Manual Ship Shipment has a value equal to the sum of its scanned
-      Products' values times their quantities
-- [ ] An international scan-to-add shipment declares those values in customs
-- [ ] A scanned Product with no value is handled as triage decides, with a test
+- [x] A Product has an editable customs value in its customs section; the factory has a state for one
+- [x] A Client has a currency, default USD; a Manual Ship Shipment takes it
+- [x] A scan-to-add line carries its Product's customs value, editable by the packer,
+      and saved on the package item
+- [x] An international scan-to-add Package declares those values in customs and in the
+      carriage declared value
+- [x] A package item's value wins over its ShipmentItem's
+- [x] A Product's customs value is not copied onto a Shipment in another currency
+- [x] A line with no value, scanned or imported, blocks an international label through
+      `zero_value`, with a test; a domestic label still buys

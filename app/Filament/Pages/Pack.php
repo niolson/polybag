@@ -255,6 +255,7 @@ class Pack extends Page
                         'name' => $product->name,
                         'quantity' => $draftItem->quantity,
                         'packed' => $draftItem->quantity,
+                        'value' => $draftItem->value,
                         'transparency_codes' => $draftItem->transparencyCodes,
                     ];
                 }
@@ -313,6 +314,8 @@ class Pack extends Page
             'sku' => $product->sku,
             'barcode' => $product->barcode,
             'name' => $product->name,
+            // A starting value the packer can change; the line declares it (`manual-ship-contents/01`).
+            'value' => $product->customsValueIn($this->shipment->currency),
         ]);
     }
 
@@ -562,7 +565,26 @@ class Pack extends Page
             productId: $item['product_id'],
             quantity: (int) $item['packed'],
             transparencyCodes: $item['transparency_codes'] ?? [],
+            value: $this->scanToAddMode ? $this->lineValue($item['value'] ?? null) : null,
         ), $this->packingItems);
+    }
+
+    /**
+     * A scanned line's value as the packer left it: blank is no value.
+     *
+     * @throws PackageDraftInvalidException when it is not a number
+     */
+    private function lineValue(mixed $value): ?float
+    {
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return null;
+        }
+
+        if (! is_numeric($value)) {
+            throw new PackageDraftInvalidException('Enter each item\'s value as a number.');
+        }
+
+        return round((float) $value, 2);
     }
 
     /**
