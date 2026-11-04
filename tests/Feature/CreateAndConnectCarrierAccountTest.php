@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
+use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 
@@ -190,7 +191,7 @@ it('keeps the no-global-scope warning for the edit page the callback returns to'
 
     // A redirecting response leaves sent notifications in the session; the next
     // full page, the edit page the callback redirects to, shows them.
-    expect(collect(session('filament.notifications'))->pluck('title'))->toContain('No global scope assigned');
+    expect(sentNotifications()->map(fn (Notification $notification): ?string => $notification->getTitle()))->toContain('No global scope assigned');
 });
 
 it('offers no create another', function (): void {
@@ -254,6 +255,6 @@ it('answers Back with a redirect that leaves the create toasts for the edit page
     $this->get(CarrierAccountResource::getUrl('create'))
         ->assertRedirect(editPageFor('USPS Account'));
 
-    expect(collect(session('filament.notifications'))->pluck('title'))
+    expect(sentNotifications()->map(fn (Notification $notification): ?string => $notification->getTitle()))
         ->toContain('Created', 'No global scope assigned', 'USPS Account is not connected to USPS yet.');
 });

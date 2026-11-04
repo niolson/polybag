@@ -44,7 +44,12 @@ class Login extends BaseLogin
             return;
         }
 
-        $this->userUndertakingMultiFactorAuthentication = encrypt($user->getAuthIdentifier());
+        // The shape Filament's own challenge writes: the challenge form is built
+        // only for a user getUserUndertakingMultiFactorAuthentication() resolves.
+        $this->userUndertakingMultiFactorAuthentication = encrypt([
+            'identifier' => $user->getAuthIdentifier(),
+            'userKey' => Filament::getUserScopedAuthIdentifier($user),
+        ]);
 
         $this->prepareSsoChallenge($user);
 
@@ -196,9 +201,11 @@ class Login extends BaseLogin
         // another tab can overwrite the pending session user, leaving this stale
         // form validating one user's code while we log in another. Require the
         // challenged user and the pending session user to be identical.
-        $challengeUserId = filled($this->userUndertakingMultiFactorAuthentication)
-            ? decrypt($this->userUndertakingMultiFactorAuthentication)
-            : null;
+        //
+        // Resolve the challenged user through Filament rather than decrypting the
+        // property here: a user Filament cannot resolve gets an empty challenge
+        // form, which validates, so it must be refused, not logged in.
+        $challengeUserId = $this->getUserUndertakingMultiFactorAuthentication()?->getAuthIdentifier();
 
         if ($sessionUserId === null
             || $challengeUserId === null

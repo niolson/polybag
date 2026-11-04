@@ -19,6 +19,7 @@ use App\Models\User;
 use App\Services\AddressValidationService;
 use App\Services\ClientContext;
 use App\Services\SettingsService;
+use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
 use Tests\Support\FixedValidationPlan;
@@ -344,7 +345,7 @@ it('warns about the address only when validation did not confirm it', function (
         },
     ])));
 
-    $component = Livewire::test(ManualShip::class)
+    Livewire::test(ManualShip::class)
         ->fillForm([
             'shipment_reference' => 'MAN-2001',
             'first_name' => 'Taylor',
@@ -364,12 +365,10 @@ it('warns about the address only when validation did not confirm it', function (
         ->call('ship');
 
     // The notices name the validator that settled the address.
-    expect(collect(session('filament.notifications'))->map(fn (array $notification): array => [$notification['title'], $notification['body']])->all())
+    expect(sentNotifications()->map(fn (Notification $notification): array => [$notification->getTitle(), $notification->getBody()])->all())
         ->toBe([$warns
             ? ['Address Warning', 'USPS: Stub validation result']
             : ['Address '.mb_strtolower($deliverability->getLabel()), 'Checked by USPS.']]);
-
-    $component->assertNotified($warns ? 'Address Warning' : 'Address '.mb_strtolower($deliverability->getLabel()));
 
     expect(Shipment::where('shipment_reference', 'MAN-2001')->sole()->validationAnswers()->sole()->trigger)
         ->toBe(ValidationTrigger::Manual);

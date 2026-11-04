@@ -21,7 +21,10 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
 use App\Models\ShippingOffer;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use Filament\Notifications\Notification;
+use Filament\Notifications\NotificationMailbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use JsonSchema\Validator;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\AssertionFailedError;
@@ -681,4 +684,21 @@ function fetchPackSlipJobs(mixed $test, array $jobs): array
         fn (array $job): array => $test->postJson($job['url'])->assertOk()->json(),
         $jobs,
     );
+}
+
+/**
+ * Take the notifications sent so far from Filament's mailbox, in the order sent.
+ * They are consumed, as a page showing them would, so a later assertNotified()
+ * no longer sees them.
+ *
+ * @return Collection<int, Notification>
+ */
+function sentNotifications(): Collection
+{
+    $mailbox = app(NotificationMailbox::class);
+    $mailbox->flush();
+
+    return collect($mailbox->pull())
+        ->map(fn (array $notification): Notification => Notification::fromArray($notification))
+        ->values();
 }

@@ -52,7 +52,7 @@ it('shows client names and open shipment counts', function (): void {
     Shipment::factory()->count(1)->create(['client_id' => $clientA->id, 'status' => ShipmentStatus::Shipped]);
     Shipment::factory()->count(2)->create(['client_id' => $clientB->id, 'status' => ShipmentStatus::Open]);
 
-    Livewire::actingAs(User::factory()->create())
+    Livewire::actingAs(User::factory()->manager()->create())
         ->test(OpenShipmentsPerClientWidget::class)
         ->assertSee('Acme Corp')
         ->assertSee('Beta LLC')
@@ -69,7 +69,7 @@ it('excludes inactive clients', function (): void {
     Shipment::factory()->create(['client_id' => $active->id, 'status' => ShipmentStatus::Open]);
     Shipment::factory()->create(['client_id' => $inactive->id, 'status' => ShipmentStatus::Open]);
 
-    Livewire::actingAs(User::factory()->create())
+    Livewire::actingAs(User::factory()->manager()->create())
         ->test(OpenShipmentsPerClientWidget::class)
         ->assertSee('Active Co')
         ->assertDontSee('Inactive Co');
@@ -81,7 +81,7 @@ it('shows zero for clients with no open shipments', function (): void {
     $client = Client::factory()->create(['name' => 'Empty Client', 'active' => true]);
     Shipment::factory()->create(['client_id' => $client->id, 'status' => ShipmentStatus::Shipped]);
 
-    Livewire::actingAs(User::factory()->create())
+    Livewire::actingAs(User::factory()->manager()->create())
         ->test(OpenShipmentsPerClientWidget::class)
         ->assertSee('Empty Client')
         ->assertSee('0');
