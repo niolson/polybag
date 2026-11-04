@@ -94,6 +94,26 @@ function amazonCatalogListing(string $sku, string $created, ?array $attributes =
     ];
 }
 
+/**
+ * A `purchasable_offer` entry, as the production listings carry it
+ * (`manual-ship-contents/03`).
+ *
+ * @param  array<string, mixed>  $overrides
+ * @return array<string, mixed>
+ */
+function amazonCatalogOffer(string $price, array $overrides = []): array
+{
+    return [
+        'currency' => 'USD',
+        'audience' => 'ALL',
+        'marketplace_id' => AMAZON_CATALOG_MARKETPLACE,
+        'minimum_seller_allowed_price' => [['schedule' => [['value_with_tax' => 1.00]]]],
+        'maximum_seller_allowed_price' => [['schedule' => [['value_with_tax' => 99.00]]]],
+        'our_price' => [['schedule' => [['value_with_tax' => (float) $price]]]],
+        ...$overrides,
+    ];
+}
+
 /** A synthetic ASIN for a SKU. */
 function amazonCatalogAsin(string $sku): string
 {
@@ -359,6 +379,51 @@ describe('listings', function (): void {
             ->and((float) $unweighed->weight)->toBe(2.25)
             ->and($unweighed->name)->toBe('Kept name')
             ->and([amazonCatalogRun($dataSource)->updated, amazonCatalogRun($dataSource)->unchanged])->toBe([1, 1]);
+    });
+
+    it('fills an empty customs value from the marketplace\'s regular price, and keeps one the Product has', function (): void {
+        $dataSource = amazonCatalogConnection();
+        $kept = Product::factory()->withCustomsValue(12.0)->create(['client_id' => $dataSource->client->id, 'sku' => 'SYN-VALUED']);
+        $offer = ['purchasable_offer' => [amazonCatalogOffer('19.99')]];
+
+        fakeAmazonCatalog([
+            amazonCatalogListing('SYN-PRICED', '2026-01-01T00:00:00.000Z', $offer),
+            amazonCatalogListing('SYN-VALUED', '2026-01-02T00:00:00.000Z', $offer),
+        ]);
+
+        amazonSyncCatalog($dataSource);
+
+        expect((float) Product::where('sku', 'SYN-PRICED')->sole()->customs_value)->toBe(19.99)
+            ->and((float) $kept->refresh()->customs_value)->toBe(12.0);
+    });
+
+    it('reads the customs value of the marketplace\'s offer to every buyer, at its regular price', function (array $offers, ?array $expected): void {
+        expect(AmazonListingCatalog::customsValueFrom(['purchasable_offer' => $offers], AMAZON_CATALOG_MARKETPLACE))
+            ->toBe($expected === null ? [] : ['customs_value' => $expected[0], ProductCatalogSync::CUSTOMS_VALUE_CURRENCY => $expected[1]]);
+    })->with([
+        'the regular price, not a sale' => [[amazonCatalogOffer('19.99', ['discounted_price' => [['schedule' => [['value_with_tax' => 9.99]]]]])], [19.99, 'USD']],
+        'the offer to every buyer, not a business price' => [[amazonCatalogOffer('15.00', ['audience' => 'B2B']), amazonCatalogOffer('19.99')], [19.99, 'USD']],
+        'this marketplace\'s offer only' => [[amazonCatalogOffer('25.99', ['marketplace_id' => 'A2EUQ1WTGCTBG2', 'currency' => 'CAD'])], null],
+        'a price of 0' => [[amazonCatalogOffer('0')], null],
+        'no price' => [[amazonCatalogOffer('19.99', ['our_price' => []])], null],
+        'no offer' => [[], null],
+    ]);
+
+    it('reads no customs value in a marketplace whose prices include tax', function (string $marketplaceId): void {
+        expect(AmazonListingCatalog::customsValueFrom(['purchasable_offer' => [amazonCatalogOffer('399.00', ['marketplace_id' => $marketplaceId, 'currency' => 'MXN'])]], $marketplaceId))
+            ->toBe([]);
+    })->with(['Mexico' => 'A1AM78C64UM0Y8', 'Brazil' => 'A2Q3Y263D00KWC', 'an unknown marketplace' => 'A1F83G8C2ARO7P']);
+
+    it('fills no customs value in a currency other than the Client\'s', function (): void {
+        $dataSource = amazonCatalogConnection(['marketplace_ids' => ['A2EUQ1WTGCTBG2'], 'primary_marketplace_id' => 'A2EUQ1WTGCTBG2']);
+
+        fakeAmazonCatalog([amazonCatalogListing('SYN-CAD', '2026-01-01T00:00:00.000Z', [
+            'purchasable_offer' => [amazonCatalogOffer('25.99', ['marketplace_id' => 'A2EUQ1WTGCTBG2', 'currency' => 'CAD'])],
+        ])]);
+
+        amazonSyncCatalog($dataSource);
+
+        expect(Product::where('sku', 'SYN-CAD')->sole()->customs_value)->toBeNull();
     });
 
     it('reads a weight from the package weight, else the item weight, in pounds', function (array $attributes, ?float $pounds): void {

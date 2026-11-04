@@ -77,6 +77,7 @@ function catalogVariant(array $overrides = []): array
         'id' => 'gid://shopify/ProductVariant/900001',
         'sku' => 'SYN-TEE-RED',
         'title' => 'Red',
+        'price' => '24.00',
         'product' => ['title' => 'Synthetic Tee', 'status' => 'ACTIVE'],
         'barcodes' => ['nodes' => [
             ['type' => 'UPC', 'value' => '036000291452'],
@@ -98,14 +99,16 @@ function catalogVariant(array $overrides = []): array
 }
 
 /**
- * A page of `productVariants`.
+ * A page of `productVariants`, from a shop in `$shop`'s currency and tax
+ * setting (US dollars, tax added at checkout, by default).
  *
  * @param  list<array<string, mixed>>  $variants
+ * @param  array<string, mixed>  $shop
  */
-function catalogPage(array $variants, ?string $nextCursor = null): MockResponse
+function catalogPage(array $variants, ?string $nextCursor = null, array $shop = []): MockResponse
 {
     return MockResponse::make([
-        'data' => ['productVariants' => [
+        'data' => ['shop' => [...['currencyCode' => 'USD', 'taxesIncluded' => false], ...$shop], 'productVariants' => [
             'pageInfo' => ['hasNextPage' => $nextCursor !== null, 'endCursor' => $nextCursor],
             'nodes' => $variants,
         ]],
@@ -340,6 +343,60 @@ describe('the sync', function (): void {
             ->and($product->manufacturer_part_number)->toBe('KEPT-PN')
             ->and($product->hs_tariff_number)->toBe('610990')
             ->and($product->country_of_origin)->toBe('US');
+    });
+
+    it('fills an empty customs value from the variant\'s price, never its compare-at price', function (): void {
+        $dataSource = catalogShopifyConnection();
+        fakeCatalogPages([catalogPage([
+            catalogVariant(['price' => '24.499', 'compareAtPrice' => '40.00']),
+            catalogVariant(['id' => 'gid://shopify/ProductVariant/900002', 'sku' => 'SYN-TEE-BLUE', 'price' => '18.00']),
+        ])]);
+
+        syncCatalog($dataSource);
+
+        expect((float) Product::where('sku', 'SYN-TEE-RED')->sole()->customs_value)->toBe(24.5)
+            ->and((float) Product::where('sku', 'SYN-TEE-BLUE')->sole()->customs_value)->toBe(18.0);
+    });
+
+    it('keeps a customs value the Product already has, typed in or filled by an earlier sync', function (): void {
+        $dataSource = catalogShopifyConnection();
+        $product = Product::factory()->withCustomsValue(12.0)->create([
+            'client_id' => app(ClientContext::class)->default()->id,
+            'sku' => 'SYN-TEE-RED',
+            'hs_tariff_number' => '610990',
+        ]);
+        fakeCatalogPages([catalogPage([catalogVariant(['price' => '30.00'])])]);
+
+        syncCatalog($dataSource);
+
+        $product->refresh();
+
+        expect((float) $product->customs_value)->toBe(12.0)
+            ->and($product->hs_tariff_number)->toBe('610910');
+    });
+
+    it('fills no customs value from a price of 0, a shop in another currency, or a shop whose prices include tax', function (array $shop, string $price): void {
+        $dataSource = catalogShopifyConnection();
+        fakeCatalogPages([catalogPage([catalogVariant(['price' => $price])], shop: $shop)]);
+
+        syncCatalog($dataSource);
+
+        expect(Product::where('sku', 'SYN-TEE-RED')->sole()->customs_value)->toBeNull();
+    })->with([
+        'a price of 0' => [[], '0.00'],
+        'another currency' => [['currencyCode' => 'CAD'], '24.00'],
+        'tax included' => [['taxesIncluded' => true], '24.00'],
+        'no tax setting read' => [['taxesIncluded' => null], '24.00'],
+    ]);
+
+    it('fills the customs value of a Client whose currency is the shop\'s', function (): void {
+        $client = Client::factory()->create(['currency' => 'CAD']);
+        $dataSource = catalogShopifyConnection(['client_id' => $client->id]);
+        fakeCatalogPages([catalogPage([catalogVariant()], shop: ['currencyCode' => 'CAD'])]);
+
+        syncCatalog($dataSource);
+
+        expect((float) Product::where('client_id', $client->id)->where('sku', 'SYN-TEE-RED')->sole()->customs_value)->toBe(24.0);
     });
 
     it('leaves PolyBag\'s weight alone for a store weight that rounds to 0.00 lb', function (): void {
