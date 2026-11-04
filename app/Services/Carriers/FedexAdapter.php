@@ -998,7 +998,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             $events = collect(data_get($trackResult, 'scanEvents', []))
                 ->filter(fn ($event): bool => is_array($event))
                 ->map(fn (array $event): TrackingEventData => $this->mapTrackingEvent($event))
-                ->sortByDesc(fn (TrackingEventData $event) => $event->timestamp?->getTimestamp() ?? 0)
+                ->sortByDesc(fn (TrackingEventData $event): int => $event->timestamp?->getTimestamp() ?? 0)
                 ->values()
                 ->all();
 
@@ -1334,7 +1334,7 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
             return collect();
         }
 
-        $returnedServiceTypes = array_map(fn ($d): mixed => $d['serviceType'] ?? 'unknown', $rateReplyDetails);
+        $returnedServiceTypes = array_map(fn (array $d): mixed => $d['serviceType'] ?? 'unknown', $rateReplyDetails);
         logger()->debug('FedEx rate response filtering', [
             'returned_services' => $returnedServiceTypes,
             'requested_codes' => $serviceCodes,
