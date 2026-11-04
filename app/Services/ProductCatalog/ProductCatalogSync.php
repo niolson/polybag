@@ -12,6 +12,7 @@ use App\Jobs\SyncProductCatalogJob;
 use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Product;
+use App\Services\ClientContext;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\ImportRunRecorder;
@@ -29,8 +30,8 @@ use Throwable;
  * one.
  *
  * Every item goes through {@see ImportReferenceResolver::productIdFor()}.
- * The store's non-blank values overwrite PolyBag's, except the name
- * ({@see FILL_ONLY_FIELDS}). A listed Product is marked active, as an order
+ * The store's non-blank values overwrite PolyBag's, except the name and the
+ * customs value ({@see FILL_ONLY_FIELDS}). A listed Product is marked active, as an order
  * import marks it. Nothing is deleted, and nothing is written back to the
  * source.
  *
@@ -50,8 +51,23 @@ class ProductCatalogSync
      * a Product by the line's title, and if the sync overwrote it with
      * "Product - Variant", the name would flip with every import and every
      * sync, each counting the flip as an update.
+     *
+     * The customs value is filled from the store's price
+     * (`manual-ship-contents/03`) and never overwritten: a repricing app can
+     * move an Amazon price hundreds of times a day, two connections of one
+     * Client can price a SKU differently, and a value typed in is kept.
      */
-    public const FILL_ONLY_FIELDS = ['name'];
+    public const FILL_ONLY_FIELDS = ['name', 'customs_value'];
+
+    /**
+     * The item key a source names its `customs_value`'s currency by. A value
+     * in a currency other than the Client's is dropped
+     * ({@see Product::customsValueIn()}).
+     */
+    public const CUSTOMS_VALUE_CURRENCY = '_customs_value_currency';
+
+    /** The most the `products.customs_value` column, decimal(8,2), holds. */
+    private const MAX_CUSTOMS_VALUE = 999999.99;
 
     public function __construct(
         private readonly DataSourceFactory $sources,
@@ -215,9 +231,13 @@ class ProductCatalogSync
     {
         $productIds = [];
         $created = $updated = $unchanged = 0;
+        $currency = (string) ($client ?? app(ClientContext::class)->default())->currency;
 
         foreach ($page->items as $item) {
-            $result = $this->references->productIdFor([...$item, '_fill_only' => self::FILL_ONLY_FIELDS], $client);
+            $result = $this->references->productIdFor([
+                ...self::inClientCurrency($item, $currency),
+                '_fill_only' => self::FILL_ONLY_FIELDS,
+            ], $client);
 
             if ($result['id'] === null) {
                 continue;
@@ -233,6 +253,41 @@ class ProductCatalogSync
         }
 
         return [$productIds, $created, $updated, $unchanged];
+    }
+
+    /**
+     * A store price as a customs value: rounded to the cent, or null when it
+     * is no value. A price of 0 (a free sample, a gift) is none, as a weight
+     * of 0 is, and neither is one past what the column holds.
+     */
+    public static function customsValueFrom(mixed $price): ?float
+    {
+        if (! is_numeric($price)) {
+            return null;
+        }
+
+        $value = round((float) $price, 2);
+
+        return $value > 0 && $value <= self::MAX_CUSTOMS_VALUE ? $value : null;
+    }
+
+    /**
+     * The item without its customs value unless the value is in the Client's
+     * currency, and without the currency key either way.
+     *
+     * @param  array<string, mixed>  $item
+     * @return array<string, mixed>
+     */
+    private static function inClientCurrency(array $item, string $currency): array
+    {
+        $valueCurrency = $item[self::CUSTOMS_VALUE_CURRENCY] ?? null;
+        unset($item[self::CUSTOMS_VALUE_CURRENCY]);
+
+        if (! is_string($valueCurrency) || strcasecmp($valueCurrency, $currency) !== 0) {
+            unset($item['customs_value']);
+        }
+
+        return $item;
     }
 
     /**

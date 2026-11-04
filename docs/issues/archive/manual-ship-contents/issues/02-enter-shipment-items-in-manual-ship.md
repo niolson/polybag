@@ -1,6 +1,6 @@
 # Enter Shipment items in Manual Ship
 
-Status: ready-for-agent
+Status: done
 Category: enhancement
 Repo: `polybag`
 
@@ -50,10 +50,28 @@ Ship flow. Editing items there on an imported Shipment also has no guard: the ne
 - **Who may enter items** follows `warehouse-permissions/01` for Manual Ship; nothing
   separate here.
 
+## Built (2026-11-03)
+
+- **A typed-in item becomes a catalog Product.** `shipment_items.product_id` and
+  `package_items.product_id` are required, and customs, `CustomsReadiness`, Pack, pack
+  slips, pick lists, weight checks and rules all read the item's Product. A typed-in line
+  makes one in the Client's catalog, as an import does for an unseen SKU, so it needs a
+  SKU. A SKU already in the catalog is refused, never reused or overwritten: pick it
+  instead. A catalog line declares its Product's details; only its quantity and value are
+  its own (`ManualShipContents`).
+- **The Shipment's value** is the one entered, with or without items, else the items'
+  total. It stays unknown (null) when any item has no value, rather than understating it.
+- **Ship and Auto Ship** put every item in the Package at its full quantity, since no one
+  scans them after. **Pack** starts with an empty Package Draft and checks the items, with
+  scan-to-add off because the Shipment has items.
+- **Relation manager: read-only**, not a warning, while the Shipment's source imports
+  items (`ShipmentItemImporter::isEnabledFor`). A warned edit would still save and then be
+  overwritten. A source with item import off, or no source, stays editable.
+
 ## Acceptance criteria
 
-- [ ] With the setting on, Manual Ship can record items, freehand or from a Product
-- [ ] The Draft Shipment and the bought Label's customs lines carry those items and values
-- [ ] Pack validates the packed items against them
-- [ ] Items on a Shipment with a source cannot be silently edited in the Shipment resource
-- [ ] With the setting off, Manual Ship behaves as it does today
+- [x] With the setting on, Manual Ship can record items, freehand or from a Product
+- [x] The Draft Shipment and the bought Label's customs lines carry those items and values
+- [x] Pack validates the packed items against them
+- [x] Items on a Shipment with a source cannot be silently edited in the Shipment resource
+- [x] With the setting off, Manual Ship behaves as it does today

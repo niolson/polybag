@@ -5,6 +5,7 @@ namespace App\Services\ShipmentImport;
 use App\Models\DataSource;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -44,7 +45,9 @@ class ShipmentItemImporter
         $hasUnresolvedItems = false;
 
         foreach ($items as $itemData) {
-            $product = $this->references->productIdFor($itemData, $shipment->client);
+            // An order line's price is what one buyer paid, so an order never sets a
+            // Product's customs value; the catalog sync fills it (`manual-ship-contents/03`).
+            $product = $this->references->productIdFor(Arr::except($itemData, ['customs_value']), $shipment->client);
             $productId = $product['id'];
 
             if (! $productId) {
