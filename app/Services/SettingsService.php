@@ -58,6 +58,16 @@ class SettingsService
     }
 
     /**
+     * Whether Manual Ship takes the parcel's items, which become the Draft
+     * Shipment's items. Off unless saved on, so Manual Ship takes only an
+     * address and a parcel.
+     */
+    public function manualShipItemsEnabled(): bool
+    {
+        return (bool) $this->get('manual_ship_items_enabled', false);
+    }
+
+    /**
      * Whether Amazon-specific screens and columns are shown. On when the
      * `amazon_features_enabled` setting is on, which an install importing
      * Amazon orders through a Database connection turns on by hand, or while

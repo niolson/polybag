@@ -3,9 +3,11 @@
 namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
 use App\Filament\Resources\ProductResource;
+use App\Models\DataSource;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Services\SettingsService;
+use App\Services\ShipmentImport\ShipmentItemImporter;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -41,6 +43,9 @@ class ShipmentItemsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('product.name')
+            ->description(fn (): ?string => ($source = $this->sourceOwningItems()) instanceof DataSource
+                ? "These items come from {$source->name}. Change them there, and the next import brings the change here."
+                : null)
             ->columns([
                 Tables\Columns\TextColumn::make('product.name')
                     ->label('Product')
@@ -73,6 +78,28 @@ class ShipmentItemsRelationManager extends RelationManager
             ->groupedBulkActions([
                 Actions\DeleteBulkAction::make(),
             ]);
+    }
+
+    /**
+     * An imported Shipment's items belong to its source: the next import
+     * rewrites them, and a change made here in between would leave a printed
+     * pack slip out of date (`manual-ship-contents/02`). Read-only also denies
+     * the create, edit and delete actions, not only hides them.
+     */
+    public function isReadOnly(): bool
+    {
+        return $this->sourceOwningItems() instanceof DataSource || parent::isReadOnly();
+    }
+
+    /**
+     * The Shipment's source, when it imports items.
+     */
+    private function sourceOwningItems(): ?DataSource
+    {
+        $shipment = $this->getOwnerRecord();
+        $source = $shipment instanceof Shipment ? $shipment->dataSource : null;
+
+        return $source !== null && app(ShipmentItemImporter::class)->isEnabledFor($source) ? $source : null;
     }
 
     /**

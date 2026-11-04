@@ -106,6 +106,8 @@ class ImportReferenceResolver
                 'description' => $itemData['description'] ?? null,
                 'barcode' => $itemData['barcode'] ?? null,
                 'weight' => $itemData['weight'] ?? null,
+                // Only a catalog sync sends one, from the store's price (`manual-ship-contents/03`).
+                'customs_value' => $itemData['customs_value'] ?? null,
                 'hs_tariff_number' => $itemData['hs_tariff_number'] ?? null,
                 'country_of_origin' => $itemData['country_of_origin'] ?? null,
                 'manufacturer_part_number' => $itemData['manufacturer_part_number'] ?? null,

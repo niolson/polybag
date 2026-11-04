@@ -98,6 +98,7 @@ class Settings extends Page
             'transparency_enabled' => $settings->get('transparency_enabled', true),
             'batch_shipping_enabled' => $settings->get('batch_shipping_enabled', true),
             'manual_shipping_enabled' => $settings->get('manual_shipping_enabled', true),
+            'manual_ship_items_enabled' => $settings->manualShipItemsEnabled(),
             'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => $settings->get('picking_enabled', false),
             'require_picking_before_shipping' => $settings->get('require_picking_before_shipping', false),
@@ -239,6 +240,10 @@ class Settings extends Page
                                                 ->label('Manual Shipping')
                                                 ->helperText('When enabled, the Manual Ship page is available for creating ad-hoc shipments.')
                                                 ->default(true),
+                                            Toggle::make('manual_ship_items_enabled')
+                                                ->label('Manual Ship Items')
+                                                ->helperText('When enabled, Manual Ship records what is in the parcel: items picked from the product catalog or typed in. They are the shipment\'s items, declared on customs forms and checked when packing. A typed-in item is added to the product catalog.')
+                                                ->default(false),
                                             Toggle::make('pack_slips_enabled')
                                                 ->label('PolyBag Prints Pack Slips')
                                                 ->helperText('When enabled, pack slips print from the Print Pack Slips page, the Shipment page and pick batches. Turn this off if another system, such as your ERP, prints them: Scan & Pack still opens a Shipment when its barcode matches the Shipment Reference exactly.')
@@ -729,6 +734,7 @@ class Settings extends Page
             'transparency_enabled' => $data['transparency_enabled'] ?? app(SettingsService::class)->get('transparency_enabled', true),
             'batch_shipping_enabled' => $data['batch_shipping_enabled'] ?? true,
             'manual_shipping_enabled' => $data['manual_shipping_enabled'] ?? true,
+            'manual_ship_items_enabled' => (bool) ($data['manual_ship_items_enabled'] ?? false),
             'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),
             'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
             'require_picking_before_shipping' => (bool) ($data['require_picking_before_shipping'] ?? false),
