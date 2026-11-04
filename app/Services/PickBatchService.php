@@ -284,10 +284,10 @@ class PickBatchService
         $unlocated = $rows->filter(fn ($r): bool => blank($r['bin_location']))->values();
 
         $locatedArray = $located->toArray();
-        usort($locatedArray, fn ($a, $b): int => strnatcasecmp($a['bin_location'], $b['bin_location']));
+        usort($locatedArray, fn (array $a, array $b): int => strnatcasecmp($a['bin_location'], $b['bin_location']));
 
         $unlocatedArray = $unlocated->toArray();
-        usort($unlocatedArray, fn ($a, $b): int => strcasecmp($a['product_name'], $b['product_name']));
+        usort($unlocatedArray, fn (array $a, array $b): int => strcasecmp($a['product_name'], $b['product_name']));
 
         return array_merge($locatedArray, $unlocatedArray);
     }

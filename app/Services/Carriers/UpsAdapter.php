@@ -475,7 +475,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             $events = collect($packageData['activity'] ?? [])
                 ->filter(fn ($event): bool => is_array($event))
                 ->map(fn (array $event): TrackingEventData => $this->mapTrackingEvent($event))
-                ->sortByDesc(fn (TrackingEventData $event) => $event->timestamp?->getTimestamp() ?? 0)
+                ->sortByDesc(fn (TrackingEventData $event): int => $event->timestamp?->getTimestamp() ?? 0)
                 ->values()
                 ->all();
 
@@ -555,7 +555,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             $ratedShipments = [$ratedShipments];
         }
 
-        $returnedServiceCodes = array_map(fn ($s): mixed => $s['Service']['Code'] ?? 'unknown', $ratedShipments);
+        $returnedServiceCodes = array_map(fn (array $s): mixed => $s['Service']['Code'] ?? 'unknown', $ratedShipments);
         logger()->debug('UPS rate response filtering', [
             'returned_services' => $returnedServiceCodes,
             'requested_codes' => $serviceCodes,
@@ -1318,7 +1318,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
         if (! $response->successful()) {
             $errors = data_get($body, 'response.errors', data_get($body, 'errors', []));
-            $codes = array_map(fn ($error): string => (string) ($error['code'] ?? ''), is_array($errors) ? $errors : []);
+            $codes = array_map(fn (array $error): string => (string) ($error['code'] ?? ''), is_array($errors) ? $errors : []);
 
             Log::channel('ups-validation')->info('UPS Label Recovery by reference did not return a label', [
                 'offer' => $recoveryKey,

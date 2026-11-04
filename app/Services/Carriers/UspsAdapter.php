@@ -877,7 +877,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
             $events = collect($trackingDetail['trackingEvents'] ?? [])
                 ->filter(fn ($event): bool => is_array($event))
                 ->map(fn (array $event): TrackingEventData => $this->mapTrackingEvent($event))
-                ->sortByDesc(fn (TrackingEventData $event) => $event->timestamp?->getTimestamp() ?? 0)
+                ->sortByDesc(fn (TrackingEventData $event): int => $event->timestamp?->getTimestamp() ?? 0)
                 ->values()
                 ->all();
 
