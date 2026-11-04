@@ -29,6 +29,20 @@ enum AmazonMarketplace: string
         };
     }
 
+    /**
+     * Whether a listing's price includes consumption tax, which a customs
+     * value excludes (`manual-ship-contents/03`). Amazon.com and Amazon.ca
+     * add sales tax, GST and HST at checkout; Mexico's IVA and Brazil's taxes
+     * are in the price shown.
+     */
+    public function pricesIncludeTax(): bool
+    {
+        return match ($this) {
+            self::UnitedStates, self::Canada => false,
+            self::Mexico, self::Brazil => true,
+        };
+    }
+
     /** @return array<string, string> */
     public static function options(): array
     {

@@ -24,6 +24,7 @@ use App\Models\DataSource;
 use App\Models\DataSourceLocation;
 use App\Models\Location;
 use App\Services\Customs\CustomsReadiness;
+use App\Services\ProductCatalog\ProductCatalogSync;
 use App\Services\ShipmentImport\ImportRunRecorder;
 use App\Services\ShipmentImport\ShopifyClosedFulfillmentOrderCloser;
 use App\Services\ShipmentImport\ShopifyFulfillmentOrderRepointer;
@@ -405,13 +406,18 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      *
      * `product_status:active` leaves out draft and archived products; the
      * product's `status` is read too, and anything else is skipped.
+     *
+     * `shop` and `price` fill the customs value (`manual-ship-contents/03`):
+     * with them, a page of 250 requested 25 points on the development stores
+     * (2026-11-04).
      */
     private const PRODUCT_VARIANTS_QUERY = <<<'GRAPHQL'
         query CatalogVariants($cursor: String{{partNumberVariables}}) {
+          shop { currencyCode taxesIncluded }
           productVariants(first: 250, after: $cursor, query: "product_status:active") {
             pageInfo { hasNextPage endCursor }
             nodes {
-              id sku title
+              id sku title price
               product { title status }
               barcodes(first: 5) { nodes { type value } }
               inventoryItem {
@@ -1489,10 +1495,12 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 ...self::queryCost($json),
             ]);
 
+            $shop = is_array($json['data']['shop'] ?? null) ? $json['data']['shop'] : [];
+
             /** @var Collection<int, array<string, mixed>> $items */
             $items = collect($connection['nodes'] ?? [])
                 ->filter(fn (mixed $variant): bool => is_array($variant) && ($variant['product']['status'] ?? null) === 'ACTIVE')
-                ->map(fn (array $variant): array => $this->mapCatalogVariant($variant))
+                ->map(fn (array $variant): array => $this->mapCatalogVariant($variant, $shop))
                 ->filter(fn (array $item): bool => $item['sku'] !== null)
                 ->values();
 
@@ -1541,10 +1549,17 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
      * The SKU follows the order import's rule, so a SKU-less variant lands on
      * the Product a later order names.
      *
+     * Its customs value is the variant's `price`, the price the store sells
+     * at, never the crossed-out `compareAtPrice`, in the shop's currency
+     * (`manual-ship-contents/03`). A shop whose prices include tax gives none:
+     * a customs value excludes VAT, and a catalog price cannot have it taken
+     * out, since the rate depends on where the buyer is.
+     *
      * @param  array<string, mixed>  $variant
+     * @param  array<string, mixed>  $shop  the query's `shop`
      * @return array<string, mixed>
      */
-    private function mapCatalogVariant(array $variant): array
+    private function mapCatalogVariant(array $variant, array $shop): array
     {
         $productTitle = self::filledText(data_get($variant, 'product.title'));
         $variantTitle = self::filledText($variant['title'] ?? null);
@@ -1556,6 +1571,8 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
                 ? $productTitle
                 : ($productTitle === null ? $variantTitle : "{$productTitle} - {$variantTitle}")),
             'weight' => self::catalogPounds(is_array($weight) ? $weight : null),
+            'customs_value' => ($shop['taxesIncluded'] ?? null) === false ? ProductCatalogSync::customsValueFrom($variant['price'] ?? null) : null,
+            ProductCatalogSync::CUSTOMS_VALUE_CURRENCY => self::filledText($shop['currencyCode'] ?? null),
             ...$this->variantFields($variant),
         ];
     }

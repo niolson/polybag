@@ -154,3 +154,17 @@ function shipmentItemImporter(): ShipmentItemImporter
 {
     return new ShipmentItemImporter(app(ImportReferenceResolver::class));
 }
+
+test('an order import never sets a Product\'s customs value', function (): void {
+    $source = DataSource::factory()->create();
+    $shipment = Shipment::factory()->create(['data_source_id' => $source]);
+    $product = Product::factory()->withCustomsValue(12.0)->create(['client_id' => $shipment->client_id, 'sku' => 'VALUED-SKU']);
+
+    shipmentItemImporter()->import($shipment, collect([
+        ['sku' => 'VALUED-SKU', 'quantity' => 1, 'value' => 30, 'customs_value' => 30],
+        ['sku' => 'NEW-SKU', 'quantity' => 1, 'value' => 30, 'customs_value' => 30],
+    ]), $source);
+
+    expect((float) $product->refresh()->customs_value)->toBe(12.0)
+        ->and(Product::where('sku', 'NEW-SKU')->sole()->customs_value)->toBeNull();
+});

@@ -4,6 +4,7 @@ namespace App\Services\ProductCatalog;
 
 use App\DataTransferObjects\ShipmentImport\AmazonListingsCursor;
 use App\DataTransferObjects\ShipmentImport\ProductCatalogPage;
+use App\Enums\AmazonMarketplace;
 use App\Exceptions\CatalogReadMustStartOver;
 use App\Http\Integrations\Amazon\AmazonRequestPacer;
 use App\Http\Integrations\Amazon\Requests\SearchListingsItems;
@@ -176,6 +177,47 @@ class AmazonListingCatalog
     }
 
     /**
+     * A listing's customs value and its currency, as the item keys a sync
+     * reads (`manual-ship-contents/03`): the regular price, `our_price`, of the
+     * listing's `purchasable_offer` for `$marketplaceId` and every buyer
+     * (audience `ALL`, not a business price). A scheduled `discounted_price`
+     * is ignored. Nothing for another marketplace's offer, or a marketplace
+     * whose prices include tax ({@see AmazonMarketplace::pricesIncludeTax()}).
+     *
+     * `value_with_tax` is Amazon's name for the amount in every marketplace;
+     * on Amazon.com it excludes the sales tax added at checkout.
+     *
+     * @param  array<string, mixed>  $attributes
+     * @return array<string, mixed>
+     */
+    public static function customsValueFrom(array $attributes, string $marketplaceId): array
+    {
+        $marketplace = AmazonMarketplace::tryFrom($marketplaceId);
+
+        if ($marketplace === null || $marketplace->pricesIncludeTax()) {
+            return [];
+        }
+
+        $offers = is_array($attributes['purchasable_offer'] ?? null) ? $attributes['purchasable_offer'] : [];
+
+        foreach ($offers as $offer) {
+            if (! is_array($offer) || ($offer['marketplace_id'] ?? null) !== $marketplaceId || ($offer['audience'] ?? null) !== 'ALL') {
+                continue;
+            }
+
+            $value = ProductCatalogSync::customsValueFrom(data_get($offer, 'our_price.0.schedule.0.value_with_tax'));
+            $currency = is_string($offer['currency'] ?? null) ? trim($offer['currency']) : '';
+
+            return $value === null || $currency === '' ? [] : [
+                'customs_value' => $value,
+                ProductCatalogSync::CUSTOMS_VALUE_CURRENCY => $currency,
+            ];
+        }
+
+        return [];
+    }
+
+    /**
      * Where to carry on after Amazon called the window's page token expired:
      * a slice can wait hours behind order imports, longer than a token lives
      * (between 15 minutes and 6 days, `product-catalog-sync/04`).
@@ -307,6 +349,7 @@ class AmazonListingCatalog
                 // The products.name column's 255 characters.
                 'name' => $name === '' ? null : rtrim(mb_substr($name, 0, 255)),
                 'weight' => self::poundsFrom($attributes, $this->marketplaceId),
+                ...self::customsValueFrom($attributes, $this->marketplaceId),
                 '_asin' => is_string($asin) && $asin !== '' ? $asin : null,
             ];
         }
