@@ -1,6 +1,6 @@
 # Stage 1: Install Composer dependencies
 # Pin digests to prevent supply chain attacks — update with `docker manifest inspect <image>`
-FROM php:8.4.27-cli-alpine@sha256:2c3a5bf9c1aa2000189e40940a7f9092a461dced30f7825e04dba94638731363 AS vendor
+FROM php:8.4.27-cli-alpine@sha256:d8784155c4d37986be9ddd7a8950df7e78998cc48e35472cd69e2b9371424a65 AS vendor
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
