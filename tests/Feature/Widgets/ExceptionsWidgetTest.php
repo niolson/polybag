@@ -40,7 +40,7 @@ it('shows undeliverable shipments count', function (): void {
         ]);
     }
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     $component = Livewire::actingAs($user)
         ->test(ExceptionsWidget::class)
@@ -61,7 +61,7 @@ it('shows failed batch items count', function (): void {
         'created_at' => now()->subDays(10),
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(ExceptionsWidget::class)
@@ -76,7 +76,7 @@ it('shows unmapped shipping references count', function (): void {
         'shipping_method_id' => null,
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(ExceptionsWidget::class)
@@ -94,7 +94,7 @@ it('renders when an entry cached before the shipping method count still exists',
     ], 300);
     Shipment::factory()->withoutShippingMethod()->create();
 
-    Livewire::actingAs(User::factory()->create())
+    Livewire::actingAs(User::factory()->manager()->create())
         ->test(ExceptionsWidget::class)
         ->assertSee('Needs Shipping Method');
 });

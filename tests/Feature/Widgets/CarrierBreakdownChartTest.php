@@ -12,7 +12,7 @@ it('renders carrier breakdown chart', function (): void {
     Package::factory()->usps()->create(['shipped_at' => now()]);
     Package::factory()->fedex()->create(['shipped_at' => now()]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CarrierBreakdownChart::class)
@@ -20,7 +20,7 @@ it('renders carrier breakdown chart', function (): void {
 });
 
 it('supports week and month filters', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CarrierBreakdownChart::class)

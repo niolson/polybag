@@ -14,7 +14,7 @@ beforeEach(function (): void {
 });
 
 it('renders with no data', function (): void {
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CostPerPackageTrend::class)
@@ -29,7 +29,7 @@ it('renders with daily shipping stats', function (): void {
         'total_cost' => '125.00',
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CostPerPackageTrend::class)
@@ -46,7 +46,7 @@ it('averages over priced packages and says how many it left out', function (): v
         'total_weight' => '20.00',
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CostPerPackageTrend::class)
@@ -65,7 +65,7 @@ it('plots no point on a day where nothing reported a cost', function (): void {
         'total_weight' => '8.00',
     ]);
 
-    $user = User::factory()->create();
+    $user = User::factory()->manager()->create();
 
     Livewire::actingAs($user)
         ->test(CostPerPackageTrend::class)

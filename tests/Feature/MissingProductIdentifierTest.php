@@ -24,7 +24,6 @@ use App\Models\ShippingOffer;
 use App\Models\ShippingRule;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
-use Filament\Notifications\Livewire\Notifications;
 use Filament\Notifications\Notification;
 use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
@@ -176,10 +175,7 @@ function shipPageWithQuotedRate(Package $package): array
  */
 function notificationBodiesTitled(string $title): array
 {
-    $notifications = new Notifications;
-    $notifications->mount();
-
-    return $notifications->notifications
+    return sentNotifications()
         ->filter(fn (Notification $notification): bool => $notification->getTitle() === $title)
         ->map(fn (Notification $notification): string => (string) $notification->getBody())
         ->values()
