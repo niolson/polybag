@@ -16,3 +16,13 @@ it('includes a scale zero command barcode', function (): void {
                 && $command['label'] === 'Zero Scale',
         ));
 });
+
+it('includes the OK command that acknowledges a mis-scan alert', function (): void {
+    $this->actingAs(User::factory()->create());
+
+    Livewire::test(PrintCommandBarcodes::class)
+        ->assertSet('commands', fn (array $commands): bool => collect($commands)->contains(
+            fn (array $command): bool => $command['code'] === '%COK'
+                && $command['label'] === 'OK',
+        ));
+});

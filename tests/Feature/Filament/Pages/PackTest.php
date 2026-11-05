@@ -220,6 +220,7 @@ describe('PolyBag codes', function (): void {
             '%CVOID' => 'VOID',
             '%CZERO' => 'ZERO',
             '%CCLEAR' => 'CLEAR',
+            '%COK' => 'OK',
         ]);
     });
 });
