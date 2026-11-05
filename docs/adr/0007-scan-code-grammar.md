@@ -220,6 +220,7 @@ where it does not apply rejects it. It is never reinterpreted.
 | `%CVOID` | Void, if this user bought it | The Label this browser session last bought |
 | `%CZERO` | Zero the scale | This workstation's scale |
 | `%CCLEAR` | Clear the loaded Shipment | This page |
+| `%COK` | Acknowledge, like Enter | The alert open on this page; with none open, it says so |
 
 The last Label is remembered by its own ID, not its Package's. If it has since been voided,
 even if the Package has been bought again, `REPRINT` and `VOID` refuse rather than

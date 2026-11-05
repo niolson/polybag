@@ -42,6 +42,10 @@
             transparencyInput: '',
             showTransparencyModal: false,
             isShipping: false,
+            misScan: null,
+            misScanRefused: 0,
+            misScanPulse: false,
+            lastScanAt: 0,
 
             init() {
                 // Save packing progress as it changes, so a package can be set
@@ -62,6 +66,13 @@
             handleScan() {
                 if (this.isShipping) return;
                 const trimmed = this.input.trim();
+
+                if (this.misScan) {
+                    this.input = '';
+                    this.handleScanWhileStopped(trimmed);
+                    return;
+                }
+
                 if (!trimmed) return;
 
                 // A PolyBag code comes first and is never a box, product or
@@ -151,6 +162,11 @@
                     VOID: () => $wire.cancelLastLabel(),
                     ZERO: () => this.zeroScale(),
                     CLEAR: () => this.clearShipment(),
+                    OK: () => new FilamentNotification()
+                        .title('Nothing to Confirm')
+                        .body('OK acknowledges an alert on screen, and none is open.')
+                        .warning()
+                        .send(),
                 };
 
                 return commands[name]?.();
@@ -217,22 +233,18 @@
             scanProduct(barcode) {
                 const idx = this.packingItems.findIndex(item => item.barcode === barcode || item.sku === barcode);
                 if (idx === -1) {
-                    new FilamentNotification()
-                        .title('Item Not Found')
-                        .body(`No item in this shipment matches ${barcode}. Check the barcode and scan again.`)
-                        .danger()
-                        .send();
+                    this.stopPacking('Wrong item', `${barcode} is not on this order.`, 'Take it out of the box.');
                     return;
                 }
 
                 const item = this.packingItems[idx];
 
                 if (item.packed >= item.quantity) {
-                    new FilamentNotification()
-                        .title('Already Packed')
-                        .body('Every unit of this item is already packed.')
-                        .danger()
-                        .send();
+                    this.stopPacking(
+                        'Extra unit',
+                        `Every ${item.name || barcode} on this order is already packed.`,
+                        'Take the extra unit out of the box.'
+                    );
                     return;
                 }
 
@@ -311,6 +323,63 @@
                     this.packingItems = this.packingItems.map(item => ({ ...item, packed: 0, transparency_codes: [] }));
                 }
                 this.$refs.scanInput?.focus();
+            },
+
+            // A scan that may have put the wrong thing in the box stops packing
+            // until the packer acknowledges it. The overlay is the signal; the
+            // tone is extra, since many stations have no speakers.
+            stopPacking(title, detail, instruction) {
+                this.misScan = { title, detail, instruction };
+                this.misScanRefused = 0;
+                this.lastScanAt = Date.now();
+                this.playErrorTone();
+                this.$nextTick(() => this.$refs.scanInput?.focus());
+            },
+
+            // While stopped, only OK or an Enter with nothing typed continues.
+            // A scanner ends every scan with Enter, so any other scan is
+            // refused rather than processed, or the packer would carry on
+            // without looking up.
+            handleScanWhileStopped(trimmed) {
+                // A scanner set to end with CR+LF sends a second Enter right
+                // behind each scan: the one that raised the alert, and every
+                // one refused since. That Enter must not answer the alert.
+                if (trimmed === '' && Date.now() - this.lastScanAt < 500) return;
+
+                if (trimmed === '' || this.commandCodes[trimmed.toUpperCase()] === 'OK') {
+                    this.acknowledgeMisScan();
+                    return;
+                }
+
+                this.misScanRefused++;
+                this.lastScanAt = Date.now();
+                this.misScanPulse = true;
+                setTimeout(() => { this.misScanPulse = false; }, 200);
+                this.playErrorTone();
+            },
+
+            acknowledgeMisScan() {
+                this.misScan = null;
+                this.misScanRefused = 0;
+                this.input = '';
+                this.$nextTick(() => this.$refs.scanInput?.focus());
+            },
+
+            playErrorTone() {
+                try {
+                    const context = new AudioContext();
+                    const oscillator = context.createOscillator();
+                    const gain = context.createGain();
+                    oscillator.type = 'square';
+                    oscillator.frequency.value = 220;
+                    gain.gain.value = 0.15;
+                    oscillator.connect(gain).connect(context.destination);
+                    oscillator.onended = () => context.close();
+                    oscillator.start();
+                    oscillator.stop(context.currentTime + 0.4);
+                } catch {
+                    // No audio device, or the browser refused: the overlay is enough.
+                }
             },
 
             submitTransparency() {
@@ -393,7 +462,7 @@
             },
 
             isReadyToShip() {
-                if (!this.hasShipment) return false;
+                if (!this.hasShipment || this.misScan) return false;
 
                 const w = parseFloat(this.effectiveWeight());
                 const h = parseFloat(this.height);
@@ -488,6 +557,16 @@
             },
 
             handleGlobalKey(e) {
+                // Enter with focus off the scan input (after a click on the
+                // overlay, say) still answers the mis-scan alert.
+                if (this.misScan && e.key === 'Enter' && document.activeElement !== this.$refs.scanInput) {
+                    e.preventDefault();
+                    this.handleScanWhileStopped(this.input.trim());
+                    this.input = '';
+                    this.$refs.scanInput?.focus();
+                    return;
+                }
+
                 if (this.showTransparencyModal) return;
                 if (document.activeElement === this.$refs.scanInput) return;
 
@@ -510,7 +589,7 @@
         @keydown.window="handleGlobalKey($event)"
         @keydown.f12.window.prevent="shipPackage()"
         @scan-to-add-found.window="addScannedProduct($event.detail.product)"
-        @scan-to-add-not-found.window="new FilamentNotification().title('Product Not Found').body(`No product found for '${$event.detail.barcode}'`).danger().send()"
+        @scan-to-add-not-found.window="stopPacking('Unknown product', `No product matches ${$event.detail.barcode}.`, 'Take it out of the box and check its barcode.')"
         @shipping-error.window="isShipping = false"
         @pack-unpack-all.window="unpackAll()"
     >
@@ -952,5 +1031,37 @@
         </div>
     </div>
     @endif
+
+    {{-- A scan that may have put the wrong thing in the box: packing stops until it is acknowledged. --}}
+    <div
+        x-show="misScan"
+        x-cloak
+        data-testid="mis-scan-alert"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="mis-scan-title"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-danger-700 p-8 text-white"
+        x-on:click="$refs.scanInput?.focus()"
+    >
+        <div class="max-w-4xl text-center transition-transform duration-100" x-bind:class="misScanPulse && 'scale-105'">
+            <x-filament::icon icon="heroicon-o-exclamation-triangle" class="mx-auto h-24 w-24" />
+            <h2 id="mis-scan-title" class="mt-4 text-6xl font-black uppercase tracking-tight" x-text="misScan?.title"></h2>
+            <p class="mt-6 break-words text-3xl font-semibold" x-text="misScan?.detail"></p>
+            <p class="mt-4 text-3xl" x-text="misScan?.instruction"></p>
+            <p
+                x-show="misScanRefused > 0"
+                class="mt-8 text-xl font-medium"
+                x-text="`${misScanRefused} ${misScanRefused === 1 ? 'scan' : 'scans'} ignored. Nothing is packed until you continue.`"
+            ></p>
+            <p class="mt-10 text-xl">Scan <strong>OK</strong> on the command sheet, or press Enter, to continue.</p>
+            <button
+                type="button"
+                class="mt-6 rounded-lg bg-white px-12 py-4 text-2xl font-bold text-danger-700 shadow-lg hover:bg-danger-50"
+                x-on:click.stop="acknowledgeMisScan()"
+            >
+                OK
+            </button>
+        </div>
+    </div>
     </div>
 </x-filament-panels::page>
