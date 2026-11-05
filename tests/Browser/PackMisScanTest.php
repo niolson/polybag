@@ -23,6 +23,11 @@ function packedCount(mixed $page): int
     return (int) $page->script('Alpine.$data(document.querySelector(\'input[x-ref="scanInput"]\')).packingItems[0]?.packed ?? 0');
 }
 
+/**
+ * Visit Scan & Pack for an order of one product. Log in before calling it.
+ *
+ * @return array{0: mixed, 1: Product}
+ */
 function visitPackWithOneItem(int $quantity): array
 {
     $product = Product::factory()->create(['barcode' => '2000000000015']);
@@ -34,12 +39,11 @@ function visitPackWithOneItem(int $quantity): array
         'transparency' => false,
     ]);
 
-    test()->actingAs(User::factory()->create(['role' => Role::Packer]));
-
     return [visit('/pack/'.$shipment->id), $product];
 }
 
 it('stops packing on a wrong item and refuses scans until OK is scanned', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     [$page, $product] = visitPackWithOneItem(2);
 
     packScan($page, 'NOT-ON-THIS-ORDER');
@@ -69,6 +73,7 @@ it('stops packing on a wrong item and refuses scans until OK is scanned', functi
 });
 
 it('stops packing on an extra unit, ignoring an Enter that trails any scan', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     [$page, $product] = visitPackWithOneItem(1);
 
     packScan($page, $product->barcode);
@@ -115,6 +120,7 @@ it('stops packing on an unknown product in scan-to-add mode', function (): void 
 });
 
 it('says there is nothing to confirm when OK is scanned with no alert open', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
     [$page] = visitPackWithOneItem(1);
 
     packScan($page, '%COK');
