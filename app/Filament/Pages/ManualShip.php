@@ -89,6 +89,12 @@ class ManualShip extends Page implements HasForms
 
     public bool $hasReportPrinter = false;
 
+    /**
+     * Whether Weight holds a steady 0.00 straight from the scale, set by the page.
+     * The package then ships at the minimum scale weight, as Pack does.
+     */
+    public bool $scaleReadsTooLight = false;
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-pencil-square';
 
     protected static ?string $navigationLabel = 'Manual Ship';
@@ -171,17 +177,16 @@ class ManualShip extends Page implements HasForms
                                                 $set('length', (string) $box->length);
                                             }),
                                         Forms\Components\TextInput::make('weight')
-                                            ->label(new HtmlString(
-                                                'Weight <span x-show="scaleConnected && !scaleStable" x-cloak class="ml-1 text-xs font-normal text-warning-500">In motion...</span>'
-                                            ))
+                                            ->label('Weight')
                                             ->suffix('lbs')
-                                            ->helperText('Auto-fills from the connected scale when stable.')
+                                            ->helperText(new HtmlString(view('components.scale-status')->render()))
                                             ->required()
                                             ->numeric()
-                                            ->minValue(0.01)
+                                            // A steady 0.00 from the scale ships at the minimum weight.
+                                            ->minValue(fn (): float => $this->scaleReadsTooLight ? 0 : 0.01)
                                             ->step(0.01)
                                             ->extraInputAttributes([
-                                                'x-bind:style' => "scaleConnected && !scaleStable ? 'color: var(--warning-500)' : ''",
+                                                'x-bind:style' => "scaleConnected && scaleUnderZero ? 'color: var(--danger-600)' : (scaleConnected && !scaleStable ? 'color: var(--warning-500)' : '')",
                                             ]),
                                         Grid::make(3)
                                             ->schema([
@@ -404,6 +409,10 @@ class ManualShip extends Page implements HasForms
     {
         $data = $this->form->getState();
 
+        if ($this->scaleReadsTooLight && (float) $data['weight'] === 0.0) {
+            $data['weight'] = Measurements::MINIMUM_SCALE_WEIGHT;
+        }
+
         if (! $this->validateBusinessRules($data)) {
             return;
         }
@@ -503,7 +512,7 @@ class ManualShip extends Page implements HasForms
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
         }
 
-        $this->notifySuccess('Label Bought', $result->summaryMessage());
+        $this->notifyLabelBought('Label Bought', $package);
         $this->resetForm();
     }
 

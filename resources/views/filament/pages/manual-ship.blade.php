@@ -6,7 +6,20 @@
         x-data="{
             scaleConnected: false,
             scaleStable: true,
+            scaleUnderZero: false,
+            scaleReadingIsZero: false,
+            lastScaleWeight: null,
+            minimumWeight: @js(\App\DataTransferObjects\PackageDrafts\Measurements::MINIMUM_SCALE_WEIGHT),
             autoShipEnabled: @js($autoShipEnabled),
+
+            // A steady 0.00 from the scale, still in Weight untouched, means the
+            // package is too light to read: it ships at the minimum weight, as on
+            // Pack. A typed or cleared weight never qualifies.
+            usesMinimumWeight() {
+                return this.scaleConnected
+                    && this.scaleReadingIsZero
+                    && String($wire.data.weight) === this.lastScaleWeight;
+            },
 
             init() {
                 $wire.set('labelFormat', PrinterSettings.labelFormat());
@@ -29,21 +42,23 @@
                     await ScaleUtils.claimScale();
 
                     let prevStable = null;
-                    // Write the weight only when the reading changes, as Pack
-                    // does, so a weight typed over a steady reading stays.
-                    let lastScaleWeight = null;
                     await ScaleUtils.startScaleStream((result) => {
                         this.scaleStable = result.isStable;
+                        this.scaleUnderZero = result.weight < 0;
+                        this.scaleReadingIsZero = result.isStable && result.weight >= 0 && result.weight.toFixed(2) === '0.00';
 
+                        // Write every reading, zero and negative included, as Pack
+                        // does, but only when it changes, so a weight typed over a
+                        // steady reading stays.
                         const formatted = result.weight.toFixed(2);
-                        if (result.weight > 0 && formatted !== lastScaleWeight) {
+                        if (formatted !== this.lastScaleWeight) {
+                            this.lastScaleWeight = formatted;
                             $wire.data.weight = formatted;
                         }
-                        lastScaleWeight = formatted;
 
                         // Resync the saved-data hash when the weight settles so
                         // scale autofill doesn't trigger the unsaved-changes alert.
-                        if (result.isStable && prevStable !== true && result.weight > 0) {
+                        if (result.isStable && prevStable !== true) {
                             $wire.syncDataHash();
                         }
 
@@ -56,6 +71,7 @@
                 }
             }
         }"
+        x-effect="$wire.scaleReadsTooLight = usesMinimumWeight()"
     >
         <div class="sticky top-0 z-10 mb-4">
             <div class="flex flex-wrap items-center justify-end gap-3">

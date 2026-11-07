@@ -527,7 +527,7 @@ class Pack extends Page
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
         }
 
-        $this->notifySuccess('Label Bought (Auto Ship)', $result->summaryMessage());
+        $this->notifyLabelBought('Label Bought (Auto Ship)', $package);
         $this->resetForNextShipment();
     }
 

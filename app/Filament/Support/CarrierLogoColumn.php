@@ -36,16 +36,29 @@ class CarrierLogoColumn
                     return '—';
                 }
 
-                $carrierName = $carrier instanceof Carrier ? $carrier->name : (string) $carrier;
-                $carrierLabel = $carrier instanceof Carrier ? $carrier->label() : Carrier::labelForName($carrierName);
-
-                $logoUrl = Carrier::logoUrlForName($carrierName);
-
-                if ($logoUrl) {
-                    return '<img src="'.e($logoUrl).'" alt="'.e($carrierLabel).'" title="'.e($carrierLabel).'" class="h-7 max-w-[4rem] object-contain object-left">';
-                }
-
-                return '<span class="inline-flex items-center h-7">'.e($carrierLabel).'</span>';
+                return self::html($carrier instanceof Carrier ? $carrier : (string) $carrier);
             });
+    }
+
+    /**
+     * The carrier's logo as an inline <img>, or its label where it has none.
+     *
+     * @param  Carrier|string  $carrier  A carrier row, or a carrier name: a name is shown as the label of the carrier row it names, if any
+     * @param  string  $sizeClasses  Height and width classes for the logo, and the height of the label that stands in for it
+     */
+    public static function html(Carrier|string $carrier, string $sizeClasses = 'h-7 max-w-[4rem]'): string
+    {
+        $carrierName = $carrier instanceof Carrier ? $carrier->name : $carrier;
+        $carrierLabel = $carrier instanceof Carrier ? $carrier->label() : Carrier::labelForName($carrierName);
+
+        $logoUrl = Carrier::logoUrlForName($carrierName);
+
+        if ($logoUrl) {
+            return '<img src="'.e($logoUrl).'" alt="'.e($carrierLabel).'" title="'.e($carrierLabel).'" class="'.e($sizeClasses).' object-contain object-left">';
+        }
+
+        $height = str($sizeClasses)->explode(' ')->first(fn (string $class): bool => str_starts_with($class, 'h-')) ?? '';
+
+        return '<span class="inline-flex items-center '.e($height).'">'.e($carrierLabel).'</span>';
     }
 }

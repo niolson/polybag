@@ -915,7 +915,7 @@ class Ship extends Page
         // this Label, not the last one auto-shipped (ADR-0007, decision 4).
         app(SessionLastLabel::class)->remember($this->package);
 
-        $this->notifySuccess($title, $result->summaryMessage());
+        $this->notifyLabelBought($title, $this->package);
 
         // The page re-renders in this same request, and if the print below
         // fails the browser stays here. What it shows must be the shipped
