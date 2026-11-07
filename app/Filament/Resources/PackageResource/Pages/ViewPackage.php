@@ -270,7 +270,7 @@ class ViewPackage extends ViewRecord
             $this->dispatchPrint(PrintRequest::fromShipResponse($result->response, $package));
         }
 
-        $this->notifySuccess('Label Bought', $result->summaryMessage());
+        $this->notifyLabelBought('Label Bought', $package);
     }
 
     private function shopifyShipped(): bool

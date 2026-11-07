@@ -14,7 +14,7 @@
             scaleStable: true,
             scaleUnderZero: false,
             scaleReadingIsZero: false,
-            minimumWeight: '0.05',
+            minimumWeight: @js(\App\DataTransferObjects\PackageDrafts\Measurements::MINIMUM_SCALE_WEIGHT),
             autoShipEnabled: @js((bool) auth()->user()->auto_ship_enabled),
             labelFormat: PrinterSettings.labelFormat(),
             labelDpi: PrinterSettings.labelDpi(),
@@ -634,24 +634,15 @@
                 </div>
             </div>
 
-            <x-filament::fieldset>
+            <x-filament::fieldset class="pb-3">
                 <x-slot name="label">
                     Package Measurements
                 </x-slot>
 
-                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4 -mt-2.5">
                     <div>
                         <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">
                             Weight (lbs)
-                            <span x-show="!scaleConnected" x-cloak class="text-xs font-normal text-gray-500 dark:text-gray-400">
-                                (No scale connected)
-                            </span>
-                            <span x-show="scaleConnected && scaleUnderZero" x-cloak class="text-xs font-normal text-danger-600 dark:text-danger-400">
-                                Negative weight — zero the scale
-                            </span>
-                            <span x-show="scaleConnected && !scaleStable && !scaleUnderZero" x-cloak class="text-xs font-normal text-warning-500">
-                                In motion...
-                            </span>
                         </label>
                         <x-filament::input.wrapper>
                             <x-filament::input
@@ -662,9 +653,6 @@
                                 x-bind:style="scaleConnected && scaleUnderZero ? 'color: var(--danger-600)' : (scaleConnected && !scaleStable ? 'color: var(--warning-500)' : '')"
                             />
                         </x-filament::input.wrapper>
-                        <p x-show="usesMinimumWeight()" x-cloak class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Too light for the scale to read. Ships as <span x-text="minimumWeight"></span> lbs.
-                        </p>
                     </div>
                     <div>
                         <label class="fi-fo-field-wrp-label text-sm font-medium text-gray-950 dark:text-white">
@@ -707,10 +695,21 @@
                     </div>
                 </div>
 
-                {{-- Named, so a wrong box code is seen before the label is bought. --}}
-                <p x-show="boxName()" @if(! $this->boxName()) x-cloak @endif class="mt-3 text-sm text-gray-600 dark:text-gray-300" data-testid="box-name">
-                    Box: <span class="font-medium text-gray-950 dark:text-white" x-text="boxName()">{{ $this->boxName() }}</span>
-                </p>
+                {{--
+                    Each half always reserves its line, so a scale status or box name coming or
+                    going never moves the page. The halves line up with the columns above:
+                    the status under Weight, the box under the dimensions it sets.
+                --}}
+                <div class="mt-2 grid grid-cols-1 gap-x-4 text-sm sm:grid-cols-2">
+                    <x-scale-status />
+
+                    {{-- Named, so a wrong box code is seen before the label is bought. --}}
+                    <div class="min-h-5">
+                        <p x-show="boxName()" @if(! $this->boxName()) x-cloak @endif class="text-gray-600 dark:text-gray-300" data-testid="box-name">
+                            Box: <span class="font-medium text-gray-950 dark:text-white" x-text="boxName()">{{ $this->boxName() }}</span>
+                        </p>
+                    </div>
+                </div>
             </x-filament::fieldset>
 
             <div x-show="isShipping" x-cloak class="flex items-center gap-2 mt-3 text-sm text-primary-600 dark:text-primary-400">

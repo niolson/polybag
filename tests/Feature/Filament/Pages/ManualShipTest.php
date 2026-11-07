@@ -382,7 +382,79 @@ it('warns about the address only when validation did not confirm it', function (
 
 it('writes the scale reading into Weight only when the reading changes', function (): void {
     // The scale stream runs in Alpine, out of a Livewire test's reach, so this
-    // checks the rule the page ships: a typed weight survives a steady reading.
+    // checks the rule the page ships: every changed reading is written, zero and
+    // negative included, and a typed weight survives a steady reading.
     Livewire::test(ManualShip::class)
-        ->assertSee('if (result.weight > 0 && formatted !== lastScaleWeight) {', escape: false);
+        ->assertSee('if (formatted !== this.lastScaleWeight) {', escape: false);
+});
+
+it('shows the scale status under Weight as Pack does', function (): void {
+    Livewire::test(ManualShip::class)
+        ->assertSeeHtml('data-testid="scale-status"')
+        ->assertSee('No scale connected')
+        ->assertSee('Negative weight — zero the scale')
+        ->assertSee('Scale in motion...')
+        ->assertSee('Too light for the scale to read.');
+});
+
+/**
+ * @return array<string, mixed>
+ */
+function manualShipFormWithWeight(string $weight): array
+{
+    return [
+        'shipment_reference' => 'MAN-3001',
+        'first_name' => 'Taylor',
+        'last_name' => 'Jones',
+        'address1' => '123 Main St',
+        'city' => 'Seattle',
+        'country' => 'US',
+        'state_or_province' => 'WA',
+        'postal_code' => '98101',
+        'shipping_method_id' => ShippingMethod::factory()->create()->id,
+        'box_size_id' => BoxSize::factory()->create()->id,
+        'weight' => $weight,
+        'height' => 10,
+        'width' => 8,
+        'length' => 6,
+    ];
+}
+
+it('ships a steady 0.00 scale reading at the minimum weight', function (): void {
+    Channel::factory()->create(['name' => 'Manual']);
+
+    Livewire::test(ManualShip::class)
+        ->fillForm(manualShipFormWithWeight('0.00'))
+        ->set('scaleReadsTooLight', true)
+        ->call('ship')
+        ->assertHasNoFormErrors();
+
+    $package = Shipment::where('shipment_reference', 'MAN-3001')->sole()->packages()->sole();
+
+    expect((float) $package->weight)->toBe(0.05);
+});
+
+it('refuses a zero weight that did not come from the scale', function (): void {
+    Channel::factory()->create(['name' => 'Manual']);
+
+    Livewire::test(ManualShip::class)
+        ->fillForm(manualShipFormWithWeight('0.00'))
+        ->call('ship')
+        ->assertHasFormErrors(['weight']);
+
+    expect(Shipment::where('shipment_reference', 'MAN-3001')->exists())->toBeFalse();
+});
+
+it('keeps a real weight even when the page last reported a too-light reading', function (): void {
+    Channel::factory()->create(['name' => 'Manual']);
+
+    Livewire::test(ManualShip::class)
+        ->fillForm(manualShipFormWithWeight('1.25'))
+        ->set('scaleReadsTooLight', true)
+        ->call('ship')
+        ->assertHasNoFormErrors();
+
+    $package = Shipment::where('shipment_reference', 'MAN-3001')->sole()->packages()->sole();
+
+    expect((float) $package->weight)->toBe(1.25);
 });

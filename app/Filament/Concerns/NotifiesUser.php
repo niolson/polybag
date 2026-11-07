@@ -2,6 +2,8 @@
 
 namespace App\Filament\Concerns;
 
+use App\Filament\Support\LabelBoughtMessage;
+use App\Models\Package;
 use Filament\Notifications\Notification;
 
 /**
@@ -9,6 +11,14 @@ use Filament\Notifications\Notification;
  */
 trait NotifiesUser
 {
+    /**
+     * Say a Label was bought for the package, with its carrier's logo and service.
+     */
+    protected function notifyLabelBought(string $title, Package $package): void
+    {
+        $this->notifySuccess($title, LabelBoughtMessage::for($package));
+    }
+
     protected function notifySuccess(string $title, ?string $body = null): void
     {
         $notification = Notification::make()
