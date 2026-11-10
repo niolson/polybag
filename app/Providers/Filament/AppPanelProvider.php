@@ -11,6 +11,7 @@ use App\Filament\Pages\Auth\Login;
 use App\Filament\Pages\DeviceSettings;
 use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsurePasswordNotExpired;
+use App\Http\Middleware\EnsureRequiredMfaIsEnabled;
 use App\Http\Middleware\EnsureSetupComplete;
 use App\Services\DemoLifetime;
 use App\Services\SettingsService;
@@ -57,14 +58,12 @@ class AppPanelProvider extends PanelProvider
                     AppAuthentication::make()->recoverable(),
                     EmailAuthenticationForEmailUsers::make()->codeExpiryMinutes(10),
                 ],
-                isRequired: function (): bool {
-                    try {
-                        return (bool) app(SettingsService::class)->get('require_mfa', false);
-                    } catch (\Throwable) {
-                        return false;
-                    }
-                },
+                // Always registered: EnsureRequiredMfaIsEnabled reads require_mfa
+                // per request, because Filament reads this flag only when the
+                // (cached) routes are registered.
+                isRequired: true,
             )
+            ->multiFactorAuthenticationRequiredMiddlewareName(EnsureRequiredMfaIsEnabled::class)
             ->brandName($appName)
             ->brandLogo(new HtmlString('<div style="display:flex;align-items:center;gap:0.625rem;"><svg width="20" height="24" viewBox="0 0 32 38" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="1.5" y="1.5" width="29" height="35" rx="2" stroke="#0d9488" stroke-width="2.5"/><rect x="1.5" y="1.5" width="29" height="7.5" rx="2" fill="rgba(13,148,136,0.08)" stroke="#0d9488" stroke-width="2.5"/><line x1="15" y1="26" x2="15" y2="34" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round"/><line x1="18.5" y1="26" x2="18.5" y2="34" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round"/><line x1="22" y1="26" x2="22" y2="34" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round"/><line x1="25.5" y1="26" x2="25.5" y2="34" stroke="#0d9488" stroke-width="2.5" stroke-linecap="round"/></svg><span style="font-weight:600;font-size:1.125rem;color:#0f172a;">'.$escapedAppName.'</span></div>'))
             ->darkModeBrandLogo(new HtmlString('<div style="display:flex;align-items:center;gap:0.625rem;"><svg width="20" height="24" viewBox="0 0 32 38" fill="none" xmlns="http://www.w3.org/2000/svg"><rect x="0" y="0" width="32" height="38" rx="4" fill="#0d9488"/><rect x="0" y="0" width="32" height="9" rx="4" fill="rgba(255,255,255,0.18)"/><rect x="0" y="5" width="32" height="4" fill="rgba(255,255,255,0.18)"/><line x1="15" y1="26" x2="15" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="18.5" y1="26" x2="18.5" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="22" y1="26" x2="22" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/><line x1="25.5" y1="26" x2="25.5" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/></svg><span style="font-weight:600;font-size:1.125rem;color:#f1f5f9;">'.$escapedAppName.'</span></div>'))
