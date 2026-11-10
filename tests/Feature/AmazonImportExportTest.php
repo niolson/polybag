@@ -482,6 +482,41 @@ it('refreshes the Amazon programs when the order is imported again', function ()
     expect($shipment->metadata['amazon_programs'])->toBe([]);
 });
 
+it('marks an item enrolled in Transparency so Pack asks for its codes', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    $order = v2026AmazonOrder(['PRIME']);
+    $order['orderItems'][0]['programs'] = ['TRANSPARENCY'];
+    $order['orderItems'][1]['programs'] = ['SUBSCRIBE_AND_SAVE'];
+    assertMatchesSpApiSchema($order, 'Order', 'orders_2026-01-01');
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$order])]);
+
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $items = Shipment::where('shipment_reference', '111-2222222-3333333')->firstOrFail()
+        ->shipmentItems->keyBy('source_item_id');
+
+    expect($items['AMAZON-ITEM-100']->transparency)->toBeTrue()
+        ->and($items['AMAZON-ITEM-200']->transparency)->toBeFalse();
+});
+
+it('sets Transparency on an item imported before it was recorded', function (): void {
+    tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
+
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([v2026AmazonOrder(['PRIME'])])]);
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $order = v2026AmazonOrder(['PRIME']);
+    $order['orderItems'][0]['programs'] = ['TRANSPARENCY'];
+    Saloon::fake([SearchOrders::class => amazonOrdersResponse([$order])]);
+    ShipmentImportService::forSource(amazonSourceForTest(), $this->dataSource)->import();
+
+    $item = ShipmentItem::where('source_item_id', 'AMAZON-ITEM-100')->firstOrFail();
+
+    expect($item->transparency)->toBeTrue();
+});
+
 it('records the deliver-by date and ship-by window from the Amazon fulfillment block', function (): void {
     tap(Channel::factory()->create(['name' => 'Amazon']), fn ($c) => ChannelAlias::create(['reference' => 'Amazon', 'channel_id' => $c->id]));
 
