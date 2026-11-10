@@ -3,6 +3,7 @@
 namespace App\Http\Integrations\Amazon;
 
 use App\Enums\AmazonSpApiRegion;
+use App\Services\Carriers\FakeAmazonSpApi;
 use App\Services\OAuthService;
 use App\Services\SettingsService;
 use Illuminate\Support\Facades\Cache;
@@ -29,6 +30,7 @@ class AmazonSpApiConnector extends Connector
         private string $refreshToken,
         private readonly string $authMode,
         private readonly ?int $dataSourceId,
+        private readonly bool $fixture = false,
     ) {}
 
     /**
@@ -49,15 +51,26 @@ class AmazonSpApiConnector extends Connector
      */
     public static function fromSettings(array $settings): self
     {
-        return new self(
+        $dataSourceId = isset($settings['_data_source_id']) ? (int) $settings['_data_source_id'] : null;
+        $fixture = FakeAmazonSpApi::isFixture($settings);
+
+        $connector = new self(
             baseUrl: config('services.amazon.base_url') ?? 'https://sellingpartnerapi-na.amazon.com',
             sandboxUrl: config('services.amazon.sandbox_url') ?? AmazonSpApiRegion::NorthAmerica->sandboxUrl(),
             clientId: (string) ($settings['client_id'] ?? ''),
             clientSecret: (string) ($settings['client_secret'] ?? ''),
             refreshToken: (string) ($settings['refresh_token'] ?? ''),
             authMode: (string) ($settings['auth_mode'] ?? 'manual'),
-            dataSourceId: isset($settings['_data_source_id']) ? (int) $settings['_data_source_id'] : null,
+            dataSourceId: $dataSourceId,
+            fixture: $fixture,
         );
+
+        // A demo fixture is answered on this install and never sent to Amazon.
+        if ($fixture) {
+            $connector->withMockClient(FakeAmazonSpApi::mockClientFor($dataSourceId));
+        }
+
+        return $connector;
     }
 
     /**
@@ -109,6 +122,10 @@ class AmazonSpApiConnector extends Connector
 
     private function getAccessToken(): string
     {
+        if ($this->fixture) {
+            return 'fixture';
+        }
+
         $cacheKey = self::CACHE_KEY_PREFIX.md5($this->refreshToken);
 
         return Cache::get($cacheKey) ?? $this->requestNewToken();
