@@ -16,10 +16,6 @@ it('allows required MFA setup before changing an expired password without openin
     app(SettingsService::class)->set('setup_complete', true, 'boolean');
     app(SettingsService::class)->set('require_mfa', true, 'boolean');
 
-    // MFA routes are conditional on settings when Filament registers its routes.
-    require base_path('vendor/filament/filament/routes/web.php');
-    app('router')->getRoutes()->refreshNameLookups();
-
     $user = User::factory()->create(['role' => Role::Packer]);
     $this->actingAs($user)->withSession(['password_expired' => true]);
     $setupUrl = Filament::getSetUpRequiredMultiFactorAuthenticationUrl();
