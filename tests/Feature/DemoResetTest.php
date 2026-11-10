@@ -11,6 +11,7 @@ use App\Enums\ShipmentStatusOrigin;
 use App\Enums\TrackingStatus;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Models\BoxSize;
+use App\Models\Carrier;
 use App\Models\ChannelAlias;
 use App\Models\Client;
 use App\Models\DataSource;
@@ -181,13 +182,17 @@ it('resets demo data end to end', function (): void {
         expect($package->status)->toBe(PackageStatus::Shipped)
             ->and($package->tracking_number)->not->toBeNull()
             ->and($package->cost)->not->toBeNull()
-            ->and($package->manifest_id)->not->toBeNull()
             ->and($package->packageItems)->toHaveCount(1)
             // Fabricated shipped, so the label row a shipped package has to
             // have is fabricated with it, from the same facts.
             ->and($package->activeLabel?->tracking_number)->toBe($package->tracking_number)
             ->and((float) $package->activeLabel?->cost)->toBe((float) $package->cost);
     }
+
+    // Only a carrier with a manifest program has manifests in the history.
+    expect(Package::where('status', PackageStatus::Shipped)->where('carrier', Carrier::USPS)->whereNull('manifest_id')->exists())->toBeFalse()
+        ->and(Package::where('carrier', '!=', Carrier::USPS)->whereNotNull('manifest_id')->exists())->toBeFalse()
+        ->and(Manifest::where('carrier', '!=', Carrier::USPS)->exists())->toBeFalse();
 
     // The leftover package's label went with it: nothing orphaned an active row.
     expect(PackageLabel::count())->toBe(Package::where('status', PackageStatus::Shipped)->count());
@@ -465,7 +470,11 @@ describe('demo preparation', function (): void {
     });
 
     it('stores a sample label and manifest image so Reprint is offered', function (): void {
-        insertImportShipment($this->dataSource, 'D00OLD0001', now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+        // Carriers are drawn at random and only USPS history is manifested, so
+        // ship enough that a USPS manifest is all but certain (0.4^20 to miss).
+        foreach (range(1, 20) as $n) {
+            insertImportShipment($this->dataSource, sprintf('D00OLD%04d', $n), now('UTC')->subDays(2)->format('Y-m-d H:i:s'));
+        }
 
         $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
 

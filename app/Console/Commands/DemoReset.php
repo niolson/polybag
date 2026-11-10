@@ -26,6 +26,7 @@ use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Carriers\CarrierRegistry;
 use App\Services\ClientContext;
 use App\Services\ShipmentImport\DataSourceFactory;
 use App\Services\ShipmentImport\ImportReferenceResolver;
@@ -811,13 +812,20 @@ class DemoReset extends Command
     }
 
     /**
-     * Historical packages must belong to a manifest, otherwise they pile up on the
-     * End of Day page and bury the packages shipped live during the demo.
+     * Historical packages of a carrier that runs a manifest program (USPS) belong
+     * to a manifest, as End of Day would have left them. Other carriers' packages
+     * have none, because PolyBag cannot create one for them; End of Day only counts
+     * unmanifested packages for carriers that support manifests, so they do not
+     * pile up there.
      *
      * @param  array<string, array<string, int>>  $manifests
      */
-    private function manifestIdFor(array &$manifests, string $carrier, string $shipDate, ?int $locationId): int
+    private function manifestIdFor(array &$manifests, string $carrier, string $shipDate, ?int $locationId): ?int
     {
+        if (! (app(CarrierRegistry::class)->policyFor($carrier)?->supportsCarrierManifest() ?? false)) {
+            return null;
+        }
+
         if (! isset($manifests[$carrier][$shipDate])) {
             $manifests[$carrier][$shipDate] = DB::table('manifests')->insertGetId([
                 'carrier' => $carrier,
