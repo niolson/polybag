@@ -4,6 +4,7 @@ use App\Enums\CarrierPackaging;
 use App\Filament\Pages\SetupWizard;
 use App\Models\BoxSize;
 use App\Models\Channel;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
@@ -121,6 +122,125 @@ it('prepopulates starter shipping methods when selected', function (): void {
         ->and($standardGround)->not->toBeNull()
         ->and($standardGround->carrierServices()->count())->toBeGreaterThan(0)
         ->and(ShippingMethodAlias::where('shipping_method_id', $standardGround->id)->where('reference', '1')->exists())->toBeTrue();
+});
+
+// ── A fresh install ───────────────────────────────────────────────────────────
+// Every test starts with a default Client (tests/Pest.php); a fresh production
+// install has none until the Company Info step makes one.
+
+it('creates the default client from the company name on a fresh install', function (): void {
+    Client::query()->delete();
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component));
+
+    invokePrivateMethod($component->instance(), 'saveCompanyInfo');
+
+    $client = Client::where('is_default', true)->sole();
+
+    expect($client->name)->toBe('Acme Fulfillment')
+        ->and($client->active)->toBeTrue();
+});
+
+it('keeps the name of an existing default client', function (): void {
+    $existing = Client::where('is_default', true)->sole();
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component));
+
+    invokePrivateMethod($component->instance(), 'saveCompanyInfo');
+
+    expect(Client::count())->toBe(1)
+        ->and(Client::sole()->name)->toBe($existing->name);
+});
+
+it('loads the starter shipping methods on a fresh install', function (): void {
+    Client::query()->delete();
+    $this->seed(ReferenceDataSeeder::class);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.prepopulate_shipping_methods', true);
+
+    invokePrivateMethod($component->instance(), 'saveCompanyInfo');
+    invokePrivateMethod($component->instance(), 'saveChannelsAndMethods');
+
+    expect(ShippingMethod::where('name', 'Standard Ground')->exists())->toBeTrue()
+        ->and(ShippingMethodAlias::where('reference', '1')->exists())->toBeTrue();
+});
+
+it('creates a Shopify connection on a fresh install', function (): void {
+    Client::query()->delete();
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.import_source', 'shopify')
+        ->set('data.shopify_shop_domain', 'acme.myshopify.com');
+
+    invokePrivateMethod($component->instance(), 'saveCompanyInfo');
+    invokePrivateMethod($component->instance(), 'saveImportSource');
+
+    expect(DataSource::where('source_type', ShopifySource::class)->sole()->client_id)
+        ->toBe(Client::where('is_default', true)->sole()->id);
+});
+
+it('does not repeat a channel, shipping method or alias when its step is saved again', function (): void {
+    $this->seed(ReferenceDataSeeder::class);
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component));
+
+    // Back, then Next again: the same rows, saved twice.
+    foreach ([1, 2] as $pass) {
+        $component
+            ->set('data.channels', [['name' => 'Shopify', 'icon' => null, 'aliases' => ['shopify']]])
+            ->set('data.shipping_methods', [['name' => 'Ground', 'commitment_days' => 5, 'carrier_services' => [], 'aliases' => ['GROUND']]]);
+
+        invokePrivateMethod($component->instance(), 'saveChannelsAndMethods');
+    }
+
+    expect(Channel::where('name', 'Shopify')->count())->toBe(1)
+        ->and(Channel::where('name', 'Shopify')->sole()->aliases()->count())->toBe(1)
+        ->and(ShippingMethod::where('name', 'Ground')->count())->toBe(1)
+        ->and(ShippingMethodAlias::where('reference', 'GROUND')->count())->toBe(1);
+});
+
+it('clears the saved channels and methods from the step, which lists them as existing', function (): void {
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.channels', [['name' => 'Shopify', 'icon' => null, 'aliases' => []]]);
+
+    invokePrivateMethod($component->instance(), 'saveChannelsAndMethods');
+
+    $component->assertSet('data.channels', [])
+        ->assertSet('data.shipping_methods', []);
+});
+
+it('saves none of a step that fails part way', function (): void {
+    // No default Client, so the alias, saved after its channel, fails.
+    Client::query()->delete();
+
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
+        ->set('data.channels', [['name' => 'Shopify', 'icon' => null, 'aliases' => ['shopify']]]);
+
+    expect(fn () => invokePrivateMethod($component->instance(), 'saveChannelsAndMethods'))
+        ->toThrow(RuntimeException::class);
+
+    expect(Channel::where('name', 'Shopify')->exists())->toBeFalse();
+});
+
+it('does not repeat a box size when its step is saved again', function (): void {
+    $component = Livewire::test(SetupWizard::class)
+        ->tap(fn ($component) => fillRequiredSetupWizardFields($component));
+
+    foreach ([1, 2] as $pass) {
+        $component->set('data.box_sizes', [setupWizardBoxSize('S12')]);
+        invokePrivateMethod($component->instance(), 'saveBoxSizes');
+    }
+
+    expect(BoxSize::where('code', 'S12')->count())->toBe(1);
+    $component->assertSet('data.box_sizes', []);
 });
 
 // ── Data source step ──────────────────────────────────────────────────────────
