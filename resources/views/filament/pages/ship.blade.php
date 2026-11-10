@@ -353,13 +353,16 @@
                                     >
                                 @endif
                                     <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-2 font-medium text-sm text-gray-900 dark:text-white">
+                                        {{-- Badges wrap to a second line rather than squeeze the
+                                             names: a carrier with no logo is spelled out, and its
+                                             badges were being cut to "via Am…". --}}
+                                        <div class="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium text-sm text-gray-900 dark:text-white">
                                             @if($logoFile)
                                                 <img src="{{ asset('images/' . $logoFile) }}" class="h-5 w-auto flex-shrink-0" alt="{{ $rate['carrier'] }}">
                                             @else
-                                                <span>{{ $rate['carrier'] }}</span>
+                                                <span class="whitespace-nowrap">{{ $rate['carrier'] }}</span>
                                             @endif
-                                            <span>{{ $rate['serviceName'] }}</span>
+                                            <span class="whitespace-nowrap">{{ $rate['serviceName'] }}</span>
                                             @php
                                                 $resoldVia = match($rate['observedService']['source'] ?? null) {
                                                     'amazon' => 'via Amazon',
