@@ -539,17 +539,30 @@ it('routes secret keys to encrypted secret_settings on create', function (): voi
     expect($record->secret('client_secret'))->toBe('secret_client_secret');
 });
 
-it('disables Sync Shopify Locations until the connection holds credentials', function (array $secrets, bool $enabled): void {
+it('disables the Shopify store actions until the connection holds credentials', function (array $secrets, bool $enabled): void {
     $this->actingAs($this->admin);
 
     $source = DataSource::factory()->shopify()->create(['secret_settings' => $secrets]);
 
-    $page = Livewire::test(EditDataSource::class, ['record' => $source->id])
-        ->assertActionVisible('sync_shopify_locations');
+    $page = Livewire::test(EditDataSource::class, ['record' => $source->id]);
+
+    foreach (['run_import', 'sync_product_catalog', 'sync_shopify_locations'] as $action) {
+        $page->assertActionVisible($action);
+
+        $enabled
+            ? $page->assertActionEnabled($action)
+            : $page->assertActionDisabled($action)->assertSee(match ($action) {
+                'run_import' => 'Connect Shopify before running imports.',
+                'sync_product_catalog' => 'Connect Shopify before syncing its product catalog.',
+                'sync_shopify_locations' => 'Connect Shopify before synchronizing its locations.',
+            });
+    }
+
+    $table = Livewire::test(ListDataSources::class);
 
     $enabled
-        ? $page->assertActionEnabled('sync_shopify_locations')
-        : $page->assertActionDisabled('sync_shopify_locations');
+        ? $table->assertActionEnabled(TestAction::make('run_import')->table($source))
+        : $table->assertActionDisabled(TestAction::make('run_import')->table($source));
 })->with([
     'nothing' => [[], false],
     'a client ID alone' => [['client_id' => 'id'], false],

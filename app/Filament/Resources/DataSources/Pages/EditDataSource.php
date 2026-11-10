@@ -79,6 +79,15 @@ class EditDataSource extends EditRecord
         return $dataSource->syncsProductCatalog() && ProductCatalogSync::writesProducts();
     }
 
+    /**
+     * A Shopify connection with neither an OAuth token nor its own client ID
+     * and secret, which can call nothing in the store until it is connected.
+     */
+    private function shopifyIsNotConnected(): bool
+    {
+        return $this->dataSource()->isShopify() && ! $this->dataSource()->hasShopifyCredentials();
+    }
+
     protected function getHeaderActions(): array
     {
         return [
@@ -88,9 +97,10 @@ class EditDataSource extends EditRecord
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
                 ->visible(fn (): bool => $this->dataSource()->import_enabled)
-                ->disabled(fn (): bool => ! $this->record->active || $this->amazonMarketplaceIsMissing())
+                ->disabled(fn (): bool => ! $this->record->active || $this->shopifyIsNotConnected() || $this->amazonMarketplaceIsMissing())
                 ->tooltip(fn (): ?string => match (true) {
                     ! $this->record->active => 'This connection is inactive. Activate it to run imports.',
+                    $this->shopifyIsNotConnected() => 'Connect Shopify before running imports.',
                     $this->amazonMarketplaceIsMissing() => 'Choose an Amazon marketplace before running imports.',
                     default => null,
                 })
@@ -113,10 +123,12 @@ class EditDataSource extends EditRecord
                 ->icon('heroicon-o-cube')
                 ->color('gray')
                 ->visible(fn (): bool => self::canSyncProductCatalog($this->dataSource()))
-                ->disabled(fn (): bool => (bool) $this->dataSource()->productCatalogSyncRun()?->isRunning())
-                ->tooltip(fn (): ?string => $this->dataSource()->productCatalogSyncRun()?->isRunning()
-                    ? 'A catalog sync of this connection is running.'
-                    : null)
+                ->disabled(fn (): bool => $this->shopifyIsNotConnected() || (bool) $this->dataSource()->productCatalogSyncRun()?->isRunning())
+                ->tooltip(fn (): ?string => match (true) {
+                    $this->shopifyIsNotConnected() => 'Connect Shopify before syncing its product catalog.',
+                    (bool) $this->dataSource()->productCatalogSyncRun()?->isRunning() => 'A catalog sync of this connection is running.',
+                    default => null,
+                })
                 ->requiresConfirmation()
                 ->modalHeading('Sync product catalog?')
                 ->modalDescription(fn (): string => $this->dataSource()->isAmazon()
@@ -279,10 +291,10 @@ class EditDataSource extends EditRecord
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->visible(fn (): bool => $this->dataSource()->isShopify())
-                ->disabled(fn (): bool => ! $this->dataSource()->hasShopifyCredentials())
-                ->tooltip(fn (): ?string => $this->dataSource()->hasShopifyCredentials()
-                    ? null
-                    : 'Connect Shopify before synchronizing its locations.')
+                ->disabled(fn (): bool => $this->shopifyIsNotConnected())
+                ->tooltip(fn (): ?string => $this->shopifyIsNotConnected()
+                    ? 'Connect Shopify before synchronizing its locations.'
+                    : null)
                 ->action(function (): void {
                     try {
                         $dataSource = $this->dataSource();

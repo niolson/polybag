@@ -85,6 +85,10 @@ class DataSourcesTable
                     ->label('Run Import')
                     ->icon(Heroicon::ArrowDownTray)
                     ->visible(fn (DataSource $record): bool => $record->importsOrders())
+                    ->disabled(fn (DataSource $record): bool => $record->isShopify() && ! $record->hasShopifyCredentials())
+                    ->tooltip(fn (DataSource $record): ?string => $record->isShopify() && ! $record->hasShopifyCredentials()
+                        ? 'Connect Shopify before running imports.'
+                        : null)
                     ->requiresConfirmation()
                     ->modalHeading('Run import now?')
                     ->modalDescription('Fetch new shipments from this connection in the background. You will receive a notification when it finishes.')
