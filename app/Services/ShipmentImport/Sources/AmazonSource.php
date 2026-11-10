@@ -930,6 +930,9 @@ class AmazonSource implements ClosesRecordsClosedAtSource, DataSourceInterface, 
             'source_item_id' => $item['orderItemId'] ?? null,
             'quantity' => $qtyRemaining,
             'value' => round($unitPrice, 2),
+            // The item's own programs, not the order's: Pack asks for a
+            // Transparency code per unit of an item enrolled in it.
+            'transparency' => in_array('TRANSPARENCY', is_array($item['programs'] ?? null) ? $item['programs'] : [], true),
             'barcode' => $catalog['barcode'] ?? null,
             'manufacturer_part_number' => $catalog['part_number'] ?? null,
             'identifiers_checked_at' => $catalog === null ? null : $this->catalogCheckedAt,
