@@ -17,6 +17,7 @@ use App\Models\Carrier;
 use App\Models\CarrierAccount;
 use App\Models\CarrierService;
 use App\Models\Channel;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
@@ -38,6 +39,7 @@ use Filament\Schemas\Components\Wizard;
 use Filament\Schemas\Components\Wizard\Step;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\HtmlString;
 
 class SetupWizard extends Page
@@ -731,6 +733,15 @@ class SetupWizard extends Page
 
         $settings->set('company_name', $data['company_name'], group: 'company');
 
+        // Nothing else creates a default Client on a fresh install (only
+        // `db:seed` and `demo:provision` do), and every channel, shipping method
+        // alias and connection the later steps save is scoped to it. An existing
+        // default keeps its name: in a 3PL it is a brand, not this company.
+        Client::firstOrCreate(
+            ['is_default' => true],
+            ['name' => $data['company_name'], 'active' => true],
+        );
+
         $locationStateOrProvince = $data['location_state_or_province'] ?? null;
 
         Location::updateOrCreate(
@@ -804,23 +815,29 @@ class SetupWizard extends Page
         $data = $this->form->getState();
         $boxSizes = $data['box_sizes'] ?? [];
 
-        if ($data['prepopulate_box_sizes'] ?? false) {
-            app(CommonBoxSizeSeeder::class)->run();
-        }
+        // A step is saved each time Next is pressed, so going back and on again
+        // saves it again: keyed by code, a box is updated rather than repeated.
+        DB::transaction(function () use ($data, $boxSizes): void {
+            if ($data['prepopulate_box_sizes'] ?? false) {
+                app(CommonBoxSizeSeeder::class)->run();
+            }
 
-        foreach ($boxSizes as $box) {
-            BoxSize::create([
-                'label' => $box['label'],
-                'code' => $box['code'],
-                'type' => $box['type'],
-                'height' => $box['height'],
-                'width' => $box['width'],
-                'length' => $box['length'],
-                'max_weight' => $box['max_weight'],
-                'empty_weight' => $box['empty_weight'] ?? 0,
-                'carrier_packaging' => $box['carrier_packaging'] ?? null,
-            ]);
-        }
+            foreach ($boxSizes as $box) {
+                BoxSize::updateOrCreate(['code' => $box['code']], [
+                    'label' => $box['label'],
+                    'type' => $box['type'],
+                    'height' => $box['height'],
+                    'width' => $box['width'],
+                    'length' => $box['length'],
+                    'max_weight' => $box['max_weight'],
+                    'empty_weight' => $box['empty_weight'] ?? 0,
+                    'carrier_packaging' => $box['carrier_packaging'] ?? null,
+                ]);
+            }
+        });
+
+        // Saved, they now show among the existing ones above the repeater.
+        $this->data['box_sizes'] = [];
 
         if (empty($boxSizes) && ! BoxSize::active()->exists()) {
             Notification::make()
@@ -835,41 +852,48 @@ class SetupWizard extends Page
     {
         $data = $this->form->getState();
 
-        foreach ($data['channels'] ?? [] as $channelData) {
-            $channel = Channel::create([
-                'name' => $channelData['name'],
-                'icon' => $channelData['icon'] ?? null,
-                'active' => true,
-            ]);
+        // Saved again each time Next is pressed: keyed by name, a channel or
+        // method is updated rather than repeated, and all of it is saved or none,
+        // so a step that fails leaves nothing behind to be repeated either.
+        DB::transaction(function () use ($data): void {
+            foreach ($data['channels'] ?? [] as $channelData) {
+                $channel = Channel::updateOrCreate(
+                    ['name' => $channelData['name']],
+                    ['icon' => $channelData['icon'] ?? null, 'active' => true],
+                );
 
-            foreach ($channelData['aliases'] ?? [] as $alias) {
-                if (! empty($alias)) {
-                    $channel->aliases()->create(['reference' => $alias]);
+                foreach ($channelData['aliases'] ?? [] as $alias) {
+                    if (! empty($alias)) {
+                        $channel->aliases()->firstOrCreate(['reference' => $alias]);
+                    }
                 }
             }
-        }
 
-        if ($data['prepopulate_shipping_methods'] ?? false) {
-            app(ShippingMethodSeeder::class)->run();
-        }
-
-        foreach ($data['shipping_methods'] ?? [] as $methodData) {
-            $method = ShippingMethod::create([
-                'name' => $methodData['name'],
-                'commitment_days' => $methodData['commitment_days'] ?? null,
-                'active' => true,
-            ]);
-
-            if (! empty($methodData['carrier_services'])) {
-                $method->carrierServices()->sync($methodData['carrier_services']);
+            if ($data['prepopulate_shipping_methods'] ?? false) {
+                app(ShippingMethodSeeder::class)->run();
             }
 
-            foreach ($methodData['aliases'] ?? [] as $alias) {
-                if (! empty($alias)) {
-                    $method->aliases()->create(['reference' => $alias]);
+            foreach ($data['shipping_methods'] ?? [] as $methodData) {
+                $method = ShippingMethod::updateOrCreate(
+                    ['name' => $methodData['name']],
+                    ['commitment_days' => $methodData['commitment_days'] ?? null, 'active' => true],
+                );
+
+                if (! empty($methodData['carrier_services'])) {
+                    $method->carrierServices()->sync($methodData['carrier_services']);
+                }
+
+                foreach ($methodData['aliases'] ?? [] as $alias) {
+                    if (! empty($alias)) {
+                        $method->aliases()->firstOrCreate(['reference' => $alias]);
+                    }
                 }
             }
-        }
+        });
+
+        // Saved, they now show among the existing ones above the repeaters.
+        $this->data['channels'] = [];
+        $this->data['shipping_methods'] = [];
     }
 
     private function saveWorkflow(): void
