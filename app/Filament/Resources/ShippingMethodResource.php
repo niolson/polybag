@@ -2,7 +2,6 @@
 
 namespace App\Filament\Resources;
 
-use App\Enums\OtdrProtectedOrders;
 use App\Enums\PostageSourceKind;
 use App\Filament\Resources\ShippingMethodResource\Pages;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\AliasesRelationManager;
@@ -10,7 +9,6 @@ use App\Filament\Resources\ShippingMethodResource\RelationManagers\CarrierServic
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\PostageSourcesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\SpecialServicesRelationManager;
-use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
 use BackedEnum;
@@ -68,11 +66,6 @@ class ShippingMethodResource extends Resource
                             ->default(true)
                             ->live()
                             ->helperText('Automated purchases skip any rate whose delivery date is after the shipment\'s due-by date, or that gives no delivery date. A Shopify Shipping purchase has no delivery date and is bought anyway when a shipping rule names it or it is the method\'s only choice. With this off, the cheapest late rate is bought when nothing arrives on time.'),
-                        Forms\Components\CheckboxList::make('otdr_protection_orders')
-                            ->label('Require On-Time Delivery Rate (OTDR) Protection For')
-                            ->options(OtdrProtectedOrders::class)
-                            ->helperText('For the Amazon orders ticked, only buy offers marked OTDR Protected. A protected label that arrives late does not count against your on-time delivery rate. Requires Shipping Settings Automation and Average Handling Time automation in Seller Central. Without them no offer is protected, and every order this applies to goes to a person.')
-                            ->visible(fn (): bool => DataSource::hasActiveAmazonConnection()),
                     ])
                     ->columnSpanFull(),
             ]);

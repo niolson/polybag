@@ -9,8 +9,10 @@ use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\OtdrProtectedOrders;
 use App\Enums\PackageStatus;
+use App\Enums\PostageSourceKind;
 use App\Filament\Resources\DataSources\Pages\EditDataSource;
 use App\Filament\Resources\ShippingMethodResource\Pages\EditShippingMethod;
+use App\Filament\Resources\ShippingMethodResource\RelationManagers\PostageSourcesRelationManager;
 use App\Models\BoxSize;
 use App\Models\Carrier;
 use App\Models\CarrierService;
@@ -26,6 +28,9 @@ use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
 use Carbon\Carbon;
+use Filament\Actions\CreateAction;
+use Filament\Actions\EditAction;
+use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 
@@ -101,16 +106,22 @@ function registerRequirementsAdapter(array $rates): void
 /**
  * @param  array<string, mixed>  $method  Shipping method attributes
  * @param  list<string>|null  $programs  The Amazon order's `amazon_programs`
+ * @param  list<OtdrProtectedOrders>|null  $otdr  Give the method an Amazon Buy Shipping row requiring protection for these
  */
 function packageForOrderFrom(
     ?DataSource $connection,
     ?Carbon $deliverBy = new Carbon('tomorrow'),
     array $method = [],
     ?array $programs = null,
+    ?array $otdr = null,
 ): Package {
     $carrierService = requirementsService();
     $shippingMethod = ShippingMethod::factory()->create(['name' => 'Standard', 'commitment_days' => null, ...$method]);
     $shippingMethod->carrierServices()->attach($carrierService->id);
+
+    if ($otdr !== null) {
+        ShippingMethodPostageSource::factory()->amazon()->for($shippingMethod)->create(['otdr_protection_orders' => $otdr]);
+    }
 
     $product = Product::factory()->create(['weight' => 1.5]);
     $shipment = Shipment::factory()->create([
@@ -209,8 +220,8 @@ it('still buys the cheapest rate for a Shopify order with no due-by date', funct
 it('requires protection only for the kinds of Amazon order the method ticks', function (?array $programs, bool $refused): void {
     $package = packageForOrderFrom(
         DataSource::factory()->amazon()->create(),
-        method: ['otdr_protection_orders' => [OtdrProtectedOrders::Prime]],
         programs: $programs,
+        otdr: [OtdrProtectedOrders::Prime],
     );
     registerRequirementsAdapter([
         requirementsRate(6.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
@@ -229,35 +240,32 @@ it('requires protection only for the kinds of Amazon order the method ticks', fu
 ]);
 
 it('refuses unprotected rates for every Amazon order with all three ticked, and leaves a Shopify order alone', function (): void {
-    $everything = ['otdr_protection_orders' => OtdrProtectedOrders::cases()];
+    $everything = OtdrProtectedOrders::cases();
     registerRequirementsAdapter([
         requirementsRate(6.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_SSA_ORDER']),
         requirementsRate(3.00, Carbon::today()->toDateString()),
     ]);
 
     foreach ([['PRIME'], ['PREMIUM'], null] as $programs) {
-        $result = autoShipForRequirements(packageForOrderFrom(DataSource::factory()->amazon()->create(), method: $everything, programs: $programs));
+        $result = autoShipForRequirements(packageForOrderFrom(DataSource::factory()->amazon()->create(), programs: $programs, otdr: $everything));
 
         expect($result->success)->toBeFalse()
             ->and($result->title)->toBe('No OTDR-Protected Rates')
             ->and($result->message)->toContain('is OTDR-protected');
     }
 
-    expect(autoShipForRequirements(packageForOrderFrom(DataSource::factory()->shopify()->create(), method: $everything))->success)->toBeTrue();
+    expect(autoShipForRequirements(packageForOrderFrom(DataSource::factory()->shopify()->create(), otdr: $everything))->success)->toBeTrue();
 });
 
 it('buys a protected rate that is late when only protection is required', function (): void {
-    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), method: [
-        'excludes_late_rates' => false,
-        'otdr_protection_orders' => [OtdrProtectedOrders::Other],
-    ]);
+    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), method: ['excludes_late_rates' => false], otdr: [OtdrProtectedOrders::Other]);
     registerRequirementsAdapter([requirementsRate(6.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true)]);
 
     expect(autoShipForRequirements($package)->success)->toBeTrue();
 });
 
 it('names both requirements when rates fail each of them', function (): void {
-    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), method: ['otdr_protection_orders' => [OtdrProtectedOrders::Other]]);
+    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), otdr: [OtdrProtectedOrders::Other]);
     registerRequirementsAdapter([
         requirementsRate(6.00, Carbon::parse('+5 days')->toDateString(), otdrProtected: true),
         requirementsRate(7.00, Carbon::today()->toDateString(), otdrProtected: false, reasonCodes: ['NON_AHT_ORDER']),
@@ -356,23 +364,99 @@ it('still skips a rate with no delivery date when the method excludes late rates
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
-it('saves both requirements from the shipping method form', function (): void {
+it('saves the on-time requirement from the shipping method form, which no longer offers OTDR protection', function (): void {
     $this->actingAs(User::factory()->admin()->create());
     DataSource::factory()->amazon()->create(['active' => true]);
     $method = ShippingMethod::factory()->create()->refresh();
+    ShippingMethodPostageSource::factory()->amazon()->for($method)->create();
 
     Livewire::test(EditShippingMethod::class, ['record' => $method->id])
-        ->assertFormSet(['excludes_late_rates' => true, 'otdr_protection_orders' => []])
-        ->assertFormFieldVisible('otdr_protection_orders')
-        ->fillForm(['excludes_late_rates' => false, 'otdr_protection_orders' => ['prime', 'other']])
+        ->assertFormSet(['excludes_late_rates' => true])
+        ->assertFormFieldDoesNotExist('otdr_protection_orders')
+        ->fillForm(['excludes_late_rates' => false])
         ->call('save')
         ->assertHasNoFormErrors();
 
-    $method->refresh();
-
-    expect($method->excludes_late_rates)->toBeFalse()
-        ->and($method->otdr_protection_orders->all())->toBe([OtdrProtectedOrders::Prime, OtdrProtectedOrders::Other]);
+    expect($method->refresh()->excludes_late_rates)->toBeFalse()
+        ->and(Schema::hasColumn('shipping_methods', 'otdr_protection_orders'))->toBeFalse();
 });
+
+it('offers OTDR protection on the Amazon Buy Shipping row only, and saves it there', function (): void {
+    $this->actingAs(User::factory()->admin()->create());
+    $method = ShippingMethod::factory()->create();
+
+    Livewire::test(PostageSourcesRelationManager::class, ['ownerRecord' => $method, 'pageClass' => EditShippingMethod::class])
+        ->mountAction(TestAction::make(CreateAction::class)->table())
+        ->fillForm(['source_kind' => PostageSourceKind::Shopify->value])
+        ->assertFormFieldHidden('otdr_protection_orders')
+        ->fillForm(['source_kind' => PostageSourceKind::Amazon->value])
+        ->assertFormFieldVisible('otdr_protection_orders')
+        ->fillForm(['otdr_protection_orders' => ['prime', 'other']])
+        ->callMountedAction()
+        ->assertHasNoFormErrors();
+
+    $row = $method->fresh()->postageSourceFor(PostageSourceKind::Amazon);
+
+    expect($row->otdr_protection_orders->all())->toBe([OtdrProtectedOrders::Prime, OtdrProtectedOrders::Other]);
+
+    Livewire::test(PostageSourcesRelationManager::class, ['ownerRecord' => $method, 'pageClass' => EditShippingMethod::class])
+        ->assertTableColumnStateSet('otdr_protection_orders', 'Prime orders, Other Amazon orders', $row)
+        ->mountAction(TestAction::make(EditAction::class)->table($row))
+        ->assertSchemaStateSet(['otdr_protection_orders' => [OtdrProtectedOrders::Prime, OtdrProtectedOrders::Other]])
+        ->fillForm(['otdr_protection_orders' => []])
+        ->callMountedAction()
+        ->assertHasNoFormErrors();
+
+    expect($row->refresh()->otdr_protection_orders->all())->toBe([]);
+});
+
+it('drops ticked boxes when the source is switched away from Amazon Buy Shipping before saving', function (PostageSourceKind $kind): void {
+    $this->actingAs(User::factory()->admin()->create());
+    $method = ShippingMethod::factory()->create();
+    $method->postageSources()->delete();
+
+    Livewire::test(PostageSourcesRelationManager::class, ['ownerRecord' => $method, 'pageClass' => EditShippingMethod::class])
+        ->mountAction(TestAction::make(CreateAction::class)->table())
+        ->fillForm(['source_kind' => PostageSourceKind::Amazon->value, 'otdr_protection_orders' => ['prime']])
+        ->fillForm(['source_kind' => $kind->value])
+        ->callMountedAction()
+        ->assertHasNoFormErrors();
+
+    expect($method->fresh()->postageSourceFor($kind)->otdr_protection_orders)->toBeNull();
+})->with([PostageSourceKind::Shopify, PostageSourceKind::Direct]);
+
+it('requires nothing of an Amazon row saved with no boxes ticked', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), programs: ['PRIME'], otdr: []);
+
+    expect($package->shipment->shippingMethod->requiresOtdrProtectionFor($package->shipment))->toBeFalse();
+});
+
+it('shows a Manager the OTDR choice but does not let them change it', function (): void {
+    $this->actingAs(User::factory()->manager()->create());
+    $method = ShippingMethod::factory()->create();
+    $amazon = ShippingMethodPostageSource::factory()->amazon()->for($method)->create(['otdr_protection_orders' => [OtdrProtectedOrders::Prime]]);
+
+    Livewire::test(PostageSourcesRelationManager::class, ['ownerRecord' => $method, 'pageClass' => EditShippingMethod::class])
+        ->assertTableColumnStateSet('otdr_protection_orders', 'Prime orders', $amazon)
+        ->assertActionHidden(TestAction::make(EditAction::class)->table($amazon));
+});
+
+it('stops requiring protection once the method no longer lets Amazon Buy Shipping sell', function (): void {
+    $package = packageForOrderFrom(DataSource::factory()->amazon()->create(), otdr: OtdrProtectedOrders::cases());
+    $method = $package->shipment->shippingMethod;
+
+    expect($method->requiresOtdrProtectionFor($package->shipment))->toBeTrue();
+
+    $method->postageSourceFor(PostageSourceKind::Amazon)->delete();
+    registerRequirementsAdapter([requirementsRate(3.00, Carbon::today()->toDateString())]);
+
+    expect($method->fresh()->requiresOtdrProtectionFor($package->shipment))->toBeFalse()
+        ->and(autoShipForRequirements($package->fresh())->success)->toBeTrue();
+});
+
+it('refuses OTDR protection on a source other than Amazon Buy Shipping', function (): void {
+    ShippingMethodPostageSource::factory()->shopify()->create(['otdr_protection_orders' => [OtdrProtectedOrders::Prime]]);
+})->throws(DomainException::class, 'Only Amazon Buy Shipping offers can be OTDR-protected');
 
 it('warns that Shopify Shipping is bought without a delivery date when the method allows it and orders can have a due-by date', function (): void {
     $this->actingAs(User::factory()->admin()->create());
@@ -393,22 +477,6 @@ it('does not warn about Shopify Shipping on a method that does not allow it', fu
 
     Livewire::test(EditShippingMethod::class, ['record' => $method->id])
         ->assertDontSeeText('Shopify Shipping is bought without a delivery date');
-});
-
-it('hides the OTDR choice when no Amazon connection is active, and keeps what was saved', function (): void {
-    $this->actingAs(User::factory()->admin()->create());
-    DataSource::factory()->amazon()->create(['active' => false]);
-    DataSource::factory()->shopify()->create(['active' => true]);
-    $method = ShippingMethod::factory()->create(['otdr_protection_orders' => [OtdrProtectedOrders::Prime]]);
-
-    Livewire::test(EditShippingMethod::class, ['record' => $method->id])
-        ->assertFormFieldVisible('excludes_late_rates')
-        ->assertFormFieldHidden('otdr_protection_orders')
-        ->fillForm(['excludes_late_rates' => false])
-        ->call('save')
-        ->assertHasNoFormErrors();
-
-    expect($method->refresh()->otdr_protection_orders->all())->toBe([OtdrProtectedOrders::Prime]);
 });
 
 it('no longer keeps the requirements on the Amazon connection', function (): void {

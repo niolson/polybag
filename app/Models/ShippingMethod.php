@@ -2,9 +2,7 @@
 
 namespace App\Models;
 
-use App\Enums\OtdrProtectedOrders;
 use App\Enums\PostageSourceKind;
-use Illuminate\Database\Eloquent\Casts\AsEnumCollection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -20,14 +18,12 @@ class ShippingMethod extends Model
         'active',
         'is_expedited',
         'excludes_late_rates',
-        'otdr_protection_orders',
     ];
 
     protected $casts = [
         'active' => 'boolean',
         'is_expedited' => 'boolean',
         'excludes_late_rates' => 'boolean',
-        'otdr_protection_orders' => AsEnumCollection::class.':'.OtdrProtectedOrders::class,
     ];
 
     /**
@@ -68,15 +64,13 @@ class ShippingMethod extends Model
 
     /**
      * Whether automation must buy an OTDR-protected offer for this Amazon
-     * order (`amazon-buy-shipping/17`). An order that counts as more than
-     * one kind is covered if any of them is ticked.
+     * order (`amazon-buy-shipping/17`). Set on the method's Amazon Buy
+     * Shipping row, since only its offers can be protected: a method that
+     * does not let Amazon sell never requires it.
      */
     public function requiresOtdrProtectionFor(Shipment $shipment): bool
     {
-        $required = $this->otdr_protection_orders ?? collect();
-
-        return collect(OtdrProtectedOrders::forShipment($shipment))
-            ->contains(fn (OtdrProtectedOrders $kind): bool => $required->contains($kind));
+        return $this->postageSourceFor(PostageSourceKind::Amazon)?->requiresOtdrProtectionFor($shipment) ?? false;
     }
 
     /**

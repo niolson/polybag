@@ -32,6 +32,11 @@ Amended 2026-10-26: a connection's postage setting is a yes or no, *sells postag
 third value only let one connection override the method for the unattended paths, and made
 the same setting appear in two places (decision 6).
 
+Amended 2026-11-11 (`amazon-buy-shipping/17`): the OTDR requirement moves from the method
+to its Amazon Buy Shipping row, and so becomes Admin-only (decision 5). The Manager rights
+decision 5 described never matched the code for a method's services; that, and making the
+rest of a method's configuration Admin-only, is `warehouse-permissions/02`.
+
 Supersedes in part:
 
 - **ADR-0002.** The 2026-09-22 amendment's choice of the `Amazon` postage-source row as the
@@ -191,13 +196,14 @@ resolved source's adapter is still found in `CarrierRegistry` by its carrier's l
 `resolve()` a list of carrier names, and rating does not group a method's services by
 carrier to decide whom to ask.
 
-**5. The shipping method holds the unattended allowance.** Beside its due-by and OTDR
-settings it gains a source policy:
+**5. The shipping method holds the unattended allowance.** Beside its due-by setting it
+gains a source policy:
 
 - which sources may sell for it: direct on by default, Shopify and Amazon Buy Shipping
   opt-in;
 - for Shopify, whether `auto` is allowed;
-- for Amazon Buy Shipping, either *services on this method* or *any service*.
+- for Amazon Buy Shipping, either *services on this method* or *any service*, and the
+  kinds of Amazon order that must be bought OTDR-protected.
 
 Automation may buy an offer when all three hold:
 
@@ -211,8 +217,19 @@ services when its source policy gives it something to buy. `RateSelector` enforc
 at selection. It never works by dropping offers, so the attended list is untouched.
 
 **The source policy is edited by an Admin only**, for the same reason the mapping page
-is (see the trade-off). A Manager still edits the method's services, its due-by and OTDR
-settings, and its rules. Those pick within what an Admin allowed and grant nothing.
+is (see the trade-off). A Manager still edits the method's services, its due-by
+setting, and its rules. Those pick within what an Admin allowed and grant nothing.
+
+*Amended 2026-11-11* (`amazon-buy-shipping/17`). The OTDR requirement was a setting on
+the method beside the due-by toggle, shown whenever any Amazon connection was active. Only
+a Buy Shipping offer can be protected, and the requirement refuses every other rate for
+the ticked Amazon orders, direct ones included. On a method that did not let Amazon sell,
+it could only send those orders to a person. It now lives on the Amazon row, so it exists
+only where it can be met and goes when the row does, and an Admin edits it with the rest
+of the row. The Manager rights above are also out of date: the Carrier Services and
+Special Services tabs are hidden from a Manager by their Admin-only policies, so a Manager
+has never edited a method's services. The maintainer's direction is that a method's
+configuration should generally be Admin-only (`warehouse-permissions/02`).
 
 **The source policy is its own table**, with one row per source kind that may sell for
 the method: the kind, and whether it may sell beyond the method's listed services

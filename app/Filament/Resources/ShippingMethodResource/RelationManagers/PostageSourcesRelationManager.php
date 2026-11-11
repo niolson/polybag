@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShippingMethodResource\RelationManagers;
 
+use App\Enums\OtdrProtectedOrders;
 use App\Enums\PostageSourceKind;
 use App\Enums\UnlistedServices;
 use App\Models\ShippingMethodPostageSource;
@@ -57,6 +58,13 @@ class PostageSourcesRelationManager extends RelationManager
                     })
                     ->dehydrateStateUsing(fn (bool $state): UnlistedServices => $state ? UnlistedServices::Any : UnlistedServices::None)
                     ->visible(fn (Get $get): bool => in_array(UnlistedServices::Any, self::kindFrom($get)?->acceptedUnlistedServices() ?? [], true)),
+                // `amazon-buy-shipping/17`: only a Buy Shipping offer can be
+                // protected, so the requirement lives on the Amazon row.
+                Forms\Components\CheckboxList::make('otdr_protection_orders')
+                    ->label('Only Buy OTDR-Protected Labels For')
+                    ->options(OtdrProtectedOrders::class)
+                    ->helperText('For the ticked Amazon orders, automated purchases only buy Amazon Buy Shipping offers that Amazon marks OTDR Protected, so a late delivery does not count against your On-Time Delivery Rate. Direct carrier rates are skipped for these orders even when they are cheaper. If Amazon returns no protected offer, the order is held for a person. Amazon only protects offers when Shipping Settings Automation and Average Handling Time automation are on in Seller Central. A packer on the Ship page can still pick any rate.')
+                    ->visible(fn (Get $get): bool => self::kindFrom($get) === PostageSourceKind::Amazon),
             ]);
     }
 
@@ -73,6 +81,12 @@ class PostageSourcesRelationManager extends RelationManager
                     ->state(fn (ShippingMethodPostageSource $record): ?string => $record->allowsUnlistedServices()
                         ? $record->source_kind->unlistedServicesLabel()
                         : $record->source_kind->listedServicesLabel()),
+                Tables\Columns\TextColumn::make('otdr_protection_orders')
+                    ->label('OTDR Protection Required For')
+                    ->state(fn (ShippingMethodPostageSource $record): ?string => $record->otdr_protection_orders?->isNotEmpty()
+                        ? $record->otdr_protection_orders->map(fn (OtdrProtectedOrders $kind): string => $kind->getLabel())->join(', ')
+                        : null)
+                    ->placeholder('—'),
             ])
             ->headerActions([
                 Actions\CreateAction::make(),

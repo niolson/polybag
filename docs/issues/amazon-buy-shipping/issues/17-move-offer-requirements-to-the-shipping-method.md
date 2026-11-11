@@ -1,6 +1,6 @@
 # Move the on-time and OTDR requirements to the shipping method
 
-Status: done — shipped 2026-09-23; the OTDR boxes are hidden unless an Amazon connection is active
+Status: done — shipped 2026-09-23; on 2026-11-11 the OTDR boxes moved to the method's Amazon Buy Shipping row (see *Also decided*)
 
 Repo: `polybag`
 
@@ -98,11 +98,18 @@ Help text, in words a seller reads:
 
 ## Also decided
 
-- **The OTDR boxes appear only while an Amazon connection is active** (2026-09-23).
-  Protection is a Buy Shipping benefit, so without a connection to buy through the choice
-  means nothing. Hidden, the field is not saved, so a method keeps what was ticked and
-  it applies again if the connection is reactivated. The due-by toggle always shows,
-  because it applies to every order.
+- **The OTDR boxes live on the method's Amazon Buy Shipping row** (2026-11-11,
+  superseding a 2026-09-23 decision). They first sat on the method form and showed
+  whenever any Amazon connection was active, keeping what was ticked while hidden. That
+  let a method with no Amazon row require protection: Amazon was never asked, every
+  other rate was refused, and every ticked Amazon order went to a person. On the row,
+  the boxes exist only where Amazon can sell, `ShippingMethod::requiresOtdrProtectionFor()`
+  is false without the row, and deleting the row drops the choice. A non-Amazon row
+  refuses one. The row is Admin-only, so the boxes are too (ADR-0006, amended
+  2026-11-11). The migration moved each method's boxes onto its Amazon row and dropped
+  them from methods without one. The label is now *Only Buy OTDR-Protected Labels For*,
+  and its help text says that direct carrier rates are skipped for the ticked orders.
+  The due-by toggle stays on the method form, because it applies to every order.
 
 ## Blocked by
 
