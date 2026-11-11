@@ -12,7 +12,8 @@ use App\Models\Shipment;
  * included: the due-by date is the method's speed guarantee whoever sells the
  * Label, and only a Buy Shipping offer can be OTDR-protected. Protection is
  * only ever required of Amazon's own orders, since nothing else counts toward
- * the account's OTDR. A Shipment with no method is never rated or bought for
+ * the account's OTDR, and only by a method that lets Amazon Buy Shipping sell,
+ * whose Amazon row carries the requirement. A Shipment with no method is never rated or bought for
  * (`carrier-catalog-reset/16`), so it has no requirements to read. {@see none()}
  * is what a caller with no requirements to apply passes: on-time rates first,
  * the cheapest late one when nothing is on time.
