@@ -103,9 +103,17 @@ class User extends Authenticatable implements FilamentUser, HasAppAuthentication
         return $this->password !== null;
     }
 
+    /**
+     * The account label shown in an authenticator app, qualified with this
+     * instance's host so entries from different instances can be told apart.
+     * The host comes from APP_URL, never the request, so it cannot be spoofed.
+     */
     public function getAppAuthenticationHolderName(): string
     {
-        return $this->email ?? $this->username ?? $this->name;
+        $holder = $this->email ?? $this->username ?? $this->name;
+        $host = parse_url((string) config('app.url'), PHP_URL_HOST);
+
+        return is_string($host) && $host !== '' ? "{$holder} ({$host})" : $holder;
     }
 
     public function canAccessPanel(Panel $panel): bool
