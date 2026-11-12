@@ -220,7 +220,7 @@ class DataSourceForm
                         ->visible(self::importsOrders(...)),
 
                     LazyOptionsSelect::make('settings.part_number_metafield')
-                        ->label('Manufacturer Part Number')
+                        ->label('Part Number Metafield (Fallback)')
                         ->searchable()
                         // Choices cost a few Shopify queries, so they are fetched
                         // when the dropdown opens rather than on every form
@@ -251,7 +251,7 @@ class DataSourceForm
                             $data['owner'] instanceof ShopifyMetafieldOwner ? $data['owner'] : ShopifyMetafieldOwner::from($data['owner']),
                         )?->optionValue())
                         ->createOptionModalHeading('Type a metafield')
-                        ->helperText('The metafield holding the EU NS-PID. When the metafield is empty for an item, the product keeps the part number it already has.')
+                        ->helperText('Part numbers come from each variant\'s NS-PID barcode, the manufacturer part number EU customs asks for, with no setting needed. Choose a metafield only if some products keep their part number there instead. It is read when a variant has no NS-PID barcode, and an empty one leaves the product\'s part number unchanged.')
                         ->visible(fn (Get $get, ?DataSource $record): bool => self::importsOrders($get) && self::canListShopifyMetafields($record)),
 
                     Toggle::make('settings.notify_customer')
