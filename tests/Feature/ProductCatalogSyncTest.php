@@ -860,7 +860,7 @@ describe('slices', function (): void {
             ->and($queue->pushed(SyncProductCatalogJob::class))->toHaveCount(2);
 
         // The first run's job, reached late, writes nothing to the new run.
-        Saloon::fake([GraphQL::class => fn () => throw new RuntimeException('should not read')]);
+        Saloon::fake([GraphQL::class => fn (): never => throw new RuntimeException('should not read')]);
         app()->call([$queue->pushed(SyncProductCatalogJob::class)->first(), 'handle']);
 
         expect(catalogRun($dataSource)->runId)->toBe($second->runId)
@@ -915,7 +915,7 @@ describe('the job', function (): void {
         Cache::lock('product-catalog-sync:42', 360)->get();
         $job = (new SyncProductCatalogJob(42, 'run-1'))->withFakeQueueInteractions();
 
-        $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
+        $job->middleware()[0]->handle($job, fn (): never => throw new RuntimeException('should not run'));
 
         $job->assertReleased(delay: 60);
         $job->assertNotFailed();

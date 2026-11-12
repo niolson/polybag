@@ -477,24 +477,24 @@ The package versions below reflect the lockfiles. Check `composer.lock` and
 when dependencies change.
 
 - php - 8.4
-- filament/filament (FILAMENT) - v5.9.0
-- laravel/framework (LARAVEL) - v13.34.0
-- laravel/prompts (PROMPTS) - v0.3.21
-- laravel/scout (SCOUT) - v11.4.0
-- laravel/socialite (SOCIALITE) - v5.29.0
+- filament/filament (FILAMENT) - v5.11.2
+- laravel/framework (LARAVEL) - v13.42.0
+- laravel/prompts (PROMPTS) - v0.3.27
+- laravel/scout (SCOUT) - v11.9.0
+- laravel/socialite (SOCIALITE) - v5.32.0
 - livewire/livewire (LIVEWIRE) - v4.4.8
 - larastan/larastan (LARASTAN) - v3.10.0
 - laravel/boost (BOOST) - v2.4.13
 - laravel/mcp (MCP) - v0.9.1
 - laravel/pail (PAIL) - v1.2.7
-- laravel/pint (PINT) - v1.29.3
-- laravel/sail (SAIL) - v1.64.0
+- laravel/pint (PINT) - v1.32.1
+- laravel/sail (SAIL) - v1.70.0
 - pestphp/pest (PEST) - v4.7.5
 - phpunit/phpunit (PHPUNIT) - v12.5.30
-- rector/rector (RECTOR) - v2.5.7
-- saloonphp/laravel-plugin (SALOON_LARAVEL) - v4.3.0
-- saloonphp/saloon (SALOON) - v4.0.0
-- tailwindcss (TAILWINDCSS) - v4.3.3
+- rector/rector (RECTOR) - v2.8.4
+- saloonphp/laravel-plugin (SALOON_LARAVEL) - v5.0.1
+- saloonphp/saloon (SALOON) - v4.5.2
+- tailwindcss (TAILWINDCSS) - v4.3.5
 
 ## Conventions
 
@@ -668,7 +668,7 @@ Testing setup:
 
 - This project uses Saloon v4 for carrier and marketplace API integrations under `app/Http/Integrations/`.
 - Documentation: https://docs.saloon.dev
-- Check `composer.json` for the installed major version before implementing. Current dependencies are `saloonphp/saloon` v4 and `saloonphp/laravel-plugin` v4.
+- Check `composer.json` for the installed major version before implementing. Current dependencies are `saloonphp/saloon` v4 and `saloonphp/laravel-plugin` v5.
 - Use official Saloon v4 documentation before implementing new integration patterns.
 - Prefer existing connectors, request classes, response classes, OAuth providers, and concerns in `app/Http/Integrations/` before adding new abstractions.
 - Always use Artisan commands to generate SaloonPHP classes when available: `php artisan saloon:connector`, `php artisan saloon:request`, `php artisan saloon:response`, `php artisan saloon:plugin`, `php artisan saloon:auth`.
