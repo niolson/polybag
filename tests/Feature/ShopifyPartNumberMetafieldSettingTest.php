@@ -243,6 +243,12 @@ describe('the setting', function (): void {
         Livewire::test(EditDataSource::class, ['record' => connectedShopifySource()->id])
             ->assertFormFieldVisible('settings.part_number_metafield');
     });
+
+    it('presents the metafield as a fallback to the NS-PID barcode', function (): void {
+        Livewire::test(EditDataSource::class, ['record' => connectedShopifySource()->id])
+            ->assertSee('Part Number Metafield (Fallback)')
+            ->assertSee('when a variant has no NS-PID barcode');
+    });
 });
 
 it('round-trips a reference through the setting and the option value', function (): void {

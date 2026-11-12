@@ -140,7 +140,6 @@ Verified: read at `dfd842c5`. Fix by category, worst first. Each finding lists i
   - "hosted OAuth broker" and "broker credentials" — `OAuthService.php:44`, `DataSourceForm.php:169`, `:172`, `:177`, `:180`, `:346`, `:354` and `:362`, and `CarrierAccountForm.php:206`
   - `Settings.php:433` and `:437` — "tenants" / "this tenant" → "this installation"
   - `DataSourceForm.php:110` — "write-back"
-  - `DataSourceForm.php:235` — "EU NS-PID"
   - `DataSourceForm.php:600` — "Overrides table + filters" (the form has no filters)
   - `DataSourceForm.php:143` — "an account of our own" → "your own USPS account"
   - `EditDataSource.php:166` — "custom access token or client credentials flow"
