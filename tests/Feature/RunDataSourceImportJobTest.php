@@ -228,7 +228,7 @@ it('makes an import someone asked for wait behind a running import', function ()
     Cache::lock('data-source-import:42', 1860)->get();
     $job = (new RunDataSourceImportJob(42, 1))->withFakeQueueInteractions();
 
-    $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
+    $job->middleware()[0]->handle($job, fn (): never => throw new RuntimeException('should not run'));
 
     $job->assertReleased(delay: 60);
 });
@@ -237,7 +237,7 @@ it('skips a scheduled import while another import of the connection is running',
     Cache::lock('data-source-import:42', 1860)->get();
     $job = (new ScheduledDataSourceImportJob(42))->withFakeQueueInteractions();
 
-    $job->middleware()[0]->handle($job, fn () => throw new RuntimeException('should not run'));
+    $job->middleware()[0]->handle($job, fn (): never => throw new RuntimeException('should not run'));
 
     $job->assertNotReleased();
     $job->assertNotFailed();
