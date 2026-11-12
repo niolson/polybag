@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b5241e922ff2afcad8785ea0c1dcd135",
+    "content-hash": "da42b59ffc5afa53205e02adf8aba855",
     "packages": [
         {
             "name": "anourvalar/eloquent-serialize",
@@ -6310,30 +6310,30 @@
         },
         {
             "name": "saloonphp/laravel-plugin",
-            "version": "v4.3.0",
+            "version": "v5.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/saloonphp/laravel-plugin.git",
-                "reference": "c9754084dabe1002000d01cc2192fd08cfa6079d"
+                "reference": "47d06ef8621a5a25a2041e4a9004d96539db3f34"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/saloonphp/laravel-plugin/zipball/c9754084dabe1002000d01cc2192fd08cfa6079d",
-                "reference": "c9754084dabe1002000d01cc2192fd08cfa6079d",
+                "url": "https://api.github.com/repos/saloonphp/laravel-plugin/zipball/47d06ef8621a5a25a2041e4a9004d96539db3f34",
+                "reference": "47d06ef8621a5a25a2041e4a9004d96539db3f34",
                 "shasum": ""
             },
             "require": {
-                "illuminate/console": "^11.0 || ^12.39.0 || ^13.0",
-                "illuminate/support": "^11.0 || ^12.39.0 || ^13.0",
+                "illuminate/console": "^12.39.0 || ^13.0",
+                "illuminate/support": "^12.39.0 || ^13.0",
                 "php": "^8.2",
                 "saloonphp/saloon": "^4.0",
-                "symfony/finder": "^6.4 || ^7.0 || ^8.0"
+                "symfony/finder": "^7.0 || ^8.0"
             },
             "require-dev": {
                 "friendsofphp/php-cs-fixer": "^3.48",
                 "laravel/pulse": "^1.4",
                 "laravel/telescope": "^5.16",
-                "orchestra/testbench": "^9.15 || ^10.7 || ^11.0",
+                "orchestra/testbench": "^10.7 || ^11.0",
                 "pestphp/pest": "^3.0|^4.0",
                 "phpstan/phpstan": "^1.10.57|^2.0.2"
             },
@@ -6374,9 +6374,9 @@
                 "sdk"
             ],
             "support": {
-                "source": "https://github.com/saloonphp/laravel-plugin/tree/v4.3.0"
+                "source": "https://github.com/saloonphp/laravel-plugin/tree/v5.0.1"
             },
-            "time": "2026-04-23T23:22:12+00:00"
+            "time": "2026-09-24T15:22:45+00:00"
         },
         {
             "name": "saloonphp/saloon",
