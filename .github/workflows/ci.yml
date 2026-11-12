@@ -148,6 +148,14 @@ jobs:
           # overnight upstream advisory could block an unrelated branch.
           - name: Static Analysis
             run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+          # composer install runs filament:upgrade (post-autoload-dump), which
+          # republishes Filament's assets for the locked version. The Docker
+          # image installs with --no-scripts and ships the committed copies, so
+          # a lockfile bump without a republish serves stale Filament JS/CSS.
+          # Dependabot's Filament bumps change only the lockfile and fail here
+          # until someone runs php artisan filament:upgrade and commits public/.
+          - name: Filament Assets
+            run: git diff --exit-code --stat -- public/css/filament public/js/filament public/fonts/filament
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
