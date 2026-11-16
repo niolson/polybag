@@ -5,6 +5,7 @@ namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
 use App\Models\Package;
+use App\Services\PostageSources\OfferStore;
 use Filament\Actions;
 use Filament\Forms;
 use Filament\Notifications\Notification;
@@ -76,6 +77,16 @@ class PackagesRelationManager extends RelationManager
 
                             $action->cancel();
                         }
+
+                        if (app(OfferStore::class)->hasUnresolvedPurchase($record)) {
+                            Notification::make()
+                                ->title('Cannot delete package')
+                                ->body('A label purchase for this package has not been accounted for, so a label may exist. Settle it on the package page first.')
+                                ->danger()
+                                ->send();
+
+                            $action->cancel();
+                        }
                     }),
             ])
             ->groupedBulkActions([
@@ -89,6 +100,18 @@ class PackagesRelationManager extends RelationManager
                             Notification::make()
                                 ->title('Cannot delete packages')
                                 ->body('At least one selected package has been shipped. Void its label first before deleting.')
+                                ->danger()
+                                ->send();
+
+                            $action->cancel();
+                        }
+
+                        $offers = app(OfferStore::class);
+
+                        if ($records->contains(fn (Package $record): bool => $offers->hasUnresolvedPurchase($record))) {
+                            Notification::make()
+                                ->title('Cannot delete packages')
+                                ->body('A label purchase for at least one selected package has not been accounted for, so a label may exist. Settle it on the package page first.')
                                 ->danger()
                                 ->send();
 
