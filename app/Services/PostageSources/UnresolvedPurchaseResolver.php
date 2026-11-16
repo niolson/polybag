@@ -69,6 +69,34 @@ class UnresolvedPurchaseResolver
     }
 
     /**
+     * How many packages have an offer {@see needingAPerson()}, read through
+     * indexes for the sidebar.
+     *
+     * Read as a whole, `needingAPerson()` checks every bought offer still kept
+     * for a Label since. Its two kinds are each found by index instead:
+     *
+     * - no reply at all (`purchase_reference` null), which is rare;
+     * - a confirmed sale with no Label since, which can only be on an unshipped
+     *   package: a purchase starts from an unshipped package, and shipping it
+     *   afterwards saves a Label later than the offer.
+     */
+    public function packagesNeedingAPersonCount(): int
+    {
+        $unanswered = $this->needingAPerson()
+            ->whereNull('purchase_reference')
+            ->distinct()
+            ->pluck('package_id');
+
+        $confirmedWithoutLabel = $this->needingAPerson()
+            ->whereNotNull('purchase_reference')
+            ->whereIn('package_id', Package::query()->select('id')->where('status', PackageStatus::Unshipped))
+            ->distinct()
+            ->pluck('package_id');
+
+        return $unanswered->merge($confirmedWithoutLabel)->unique()->count();
+    }
+
+    /**
      * Whether the source that sold this offer can be asked what became of it
      * — USPS, UPS and Amazon — so *Check again* has something to do.
      */

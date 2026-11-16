@@ -94,7 +94,7 @@ class ExceptionsWidget extends BaseWidget
                 ->count(),
             'unmapped_references' => UnmappedShippingReferences::unmappedCount(),
             'needs_shipping_method' => Shipment::query()->needingShippingMethod()->count(),
-            'unresolved_purchases' => app(UnresolvedPurchaseResolver::class)->needingAPerson()->distinct()->count('package_id'),
+            'unresolved_purchases' => app(UnresolvedPurchaseResolver::class)->packagesNeedingAPersonCount(),
             'tracking_exceptions' => Package::query()
                 ->where('status', PackageStatus::Shipped)
                 ->where('tracking_status', TrackingStatus::Exception)

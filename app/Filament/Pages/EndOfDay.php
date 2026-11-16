@@ -25,6 +25,7 @@ use Filament\Pages\Page;
 use Filament\Support\Enums\Size;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Cache;
 use Livewire\WithPagination;
 
 class EndOfDay extends Page
@@ -52,6 +53,42 @@ class EndOfDay extends Page
     public static function canAccess(): bool
     {
         return auth()->user()->role->isAtLeast(Role::Manager);
+    }
+
+    /**
+     * Labels a manifest would take today, across the carriers that run one —
+     * the page's "not on a manifest" counts, for the person's location when
+     * multi-location is on.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $locationId = app(SettingsService::class)->get('multi_location_enabled', false)
+            ? auth()->user()?->resolveLocation()?->id
+            : null;
+
+        $count = Cache::remember('nav:end_of_day_unmanifested:'.($locationId ?? 'all'), 60, fn (): int => self::unmanifestedCount($locationId));
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Labels not on a manifest';
+    }
+
+    private static function unmanifestedCount(?int $locationId): int
+    {
+        $shipDateService = app(ShipDateService::class);
+        $registry = app(CarrierRegistry::class);
+
+        return Carrier::active()
+            ->get()
+            ->filter(fn (Carrier $carrier): bool => $registry->policyFor($carrier->name)?->supportsCarrierManifest() ?? false)
+            ->sum(fn (Carrier $carrier): int => self::manifestablePackages(
+                $carrier,
+                $shipDateService->getShipDate($carrier, $locationId),
+                $locationId,
+            )->count());
     }
 
     public function mount(): void
@@ -107,14 +144,14 @@ class EndOfDay extends Page
 
                 $batchStartedAt = $shipDateService->currentBatchStartedAt($carrier, $locationId);
 
-                $packageCount = $this->shippedPackages($carrier, $locationId)
+                $packageCount = self::shippedPackages($carrier, $locationId)
                     ->where(fn (Builder $query): Builder => $query
                         ->whereDate('ship_date', $shipDate)
                         ->orWhere('shipped_at', '>', $batchStartedAt->setTimezone(config('app.timezone'))))
                     ->count();
 
                 $unmanifestedCount = $supportsManifest
-                    ? $this->manifestablePackages($carrier, $shipDate, $locationId)->count()
+                    ? self::manifestablePackages($carrier, $shipDate, $locationId)->count()
                     : 0;
 
                 if ($packageCount === 0 && $unmanifestedCount === 0 && ! in_array($carrier->id, $carriersWithAccount, true)) {
@@ -278,7 +315,7 @@ class EndOfDay extends Page
         $shipDate = app(ShipDateService::class)->getShipDate($carrier, $locationId);
         $print = $print && ! $this->printingSuppressed();
 
-        $packages = $this->manifestablePackages($carrier, $shipDate, $locationId)->get();
+        $packages = self::manifestablePackages($carrier, $shipDate, $locationId)->get();
 
         if ($packages->isEmpty()) {
             $this->notifyWarning('No Packages', "No packages to manifest for {$carrier->label()}.");
@@ -345,7 +382,7 @@ class EndOfDay extends Page
      *
      * @return Builder<Package>
      */
-    private function shippedPackages(Carrier $carrier, ?int $locationId): Builder
+    private static function shippedPackages(Carrier $carrier, ?int $locationId): Builder
     {
         return Package::query()
             ->where('normalized_carrier_id', $carrier->id)
@@ -365,15 +402,17 @@ class EndOfDay extends Page
      *
      * @return Builder<Package>
      */
-    private function manifestablePackages(Carrier $carrier, CarbonImmutable $shipDate, ?int $locationId): Builder
+    private static function manifestablePackages(Carrier $carrier, CarbonImmutable $shipDate, ?int $locationId): Builder
     {
         $today = app(ShipDateService::class)->today($locationId);
 
-        return $this->shippedPackages($carrier, $locationId)
+        return self::shippedPackages($carrier, $locationId)
             ->boughtOnCarrierAccount()
             ->whereNull('manifest_id')
-            ->whereDate('ship_date', '>=', $today->min($shipDate)->toDateString())
-            ->whereDate('ship_date', '<=', $shipDate->toDateString());
+            // A bare range rather than whereDate(), which wraps the column in
+            // date() and so cannot use the (carrier, ship_date) index.
+            ->where('ship_date', '>=', $today->min($shipDate)->toDateString())
+            ->where('ship_date', '<', $shipDate->addDay()->toDateString());
     }
 
     public function reprintManifest(int $manifestId): void

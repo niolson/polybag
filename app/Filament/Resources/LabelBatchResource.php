@@ -2,12 +2,15 @@
 
 namespace App\Filament\Resources;
 
+use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\Role;
 use App\Filament\Resources\LabelBatchResource\Pages;
 use App\Filament\Resources\LabelBatchResource\RelationManagers\LabelBatchItemsRelationManager;
 use App\Models\LabelBatch;
+use App\Models\LabelBatchItem;
 use App\Models\Location;
+use App\Models\Package;
 use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Actions;
@@ -16,6 +19,7 @@ use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Cache;
 
 class LabelBatchResource extends Resource
 {
@@ -41,6 +45,62 @@ class LabelBatchResource extends Resource
         // able to open it to print the labels and read the failures.
         return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
             && app(SettingsService::class)->get('batch_shipping_enabled', true);
+    }
+
+    /**
+     * Batches needing someone: holding Labels still to print, or stalled.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = count(self::batchesNeedingAttention()['ids']);
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    /**
+     * Warning while a batch in flight has stopped making progress, which is
+     * what a stopped label queue worker looks like.
+     */
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return self::batchesNeedingAttention()['stalled'] ? 'warning' : null;
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return self::batchesNeedingAttention()['stalled']
+            ? 'A label batch has stalled — is the label queue worker running?'
+            : 'Batches with labels to print';
+    }
+
+    /**
+     * Batches with `unprintedItems()`, read from the few shipped packages not
+     * yet printed rather than every batch item, plus batches in flight that
+     * have stalled. A stall usually comes before any Label succeeds, so it
+     * counts on its own.
+     *
+     * @return array{ids: list<int>, stalled: bool}
+     */
+    private static function batchesNeedingAttention(): array
+    {
+        return Cache::remember('nav:label_batches_attention', 60, function (): array {
+            $unprinted = LabelBatchItem::query()
+                ->where('status', LabelBatchItemStatus::Success)
+                ->whereIn('package_id', Package::query()->select('id')->whereNull('label_printed_at')->printable())
+                ->distinct()
+                ->pluck('label_batch_id');
+
+            $stalled = LabelBatch::query()
+                ->whereIn('status', [LabelBatchStatus::Pending, LabelBatchStatus::Processing])
+                ->get()
+                ->filter(fn (LabelBatch $batch): bool => $batch->isStalled())
+                ->modelKeys();
+
+            return [
+                'ids' => $unprinted->merge($stalled)->map(fn (mixed $id): int => (int) $id)->unique()->values()->all(),
+                'stalled' => $stalled !== [],
+            ];
+        });
     }
 
     public static function table(Table $table): Table

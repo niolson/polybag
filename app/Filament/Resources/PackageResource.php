@@ -42,6 +42,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
 
 class PackageResource extends Resource
@@ -56,6 +57,27 @@ class PackageResource extends Resource
     private const UNMAPPED_SERVICE = 'unmapped';
 
     protected static ?string $model = Package::class;
+
+    /**
+     * Packages blocked on an unfinished Label purchase until a person settles
+     * it — the Unfinished Label Purchase filter.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('nav:packages_unresolved_purchase', 60, fn (): int => app(UnresolvedPurchaseResolver::class)->packagesNeedingAPersonCount());
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeColor(): ?string
+    {
+        return 'warning';
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Unfinished Label purchases';
+    }
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cube';
 

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PickBatches;
 
+use App\Enums\PickBatchStatus;
 use App\Enums\Role;
 use App\Filament\Pages\GeneratePickBatch;
 use App\Filament\Resources\PickBatches\Pages\ListPickBatches;
@@ -13,6 +14,7 @@ use App\Services\SettingsService;
 use BackedEnum;
 use Filament\Resources\Resource;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Cache;
 use UnitEnum;
 
 class PickBatchResource extends Resource
@@ -35,6 +37,23 @@ class PickBatchResource extends Resource
     {
         return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
             && app(SettingsService::class)->get('picking_enabled', false);
+    }
+
+    /**
+     * Pick batches out on the floor.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('nav:pick_batches_in_progress', 60, fn (): int => PickBatch::query()
+            ->where('status', PickBatchStatus::InProgress)
+            ->count());
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Pick batches in progress';
     }
 
     /**
