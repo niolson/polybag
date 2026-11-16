@@ -296,7 +296,7 @@ describe('an unfinished Shopify purchase', function (): void {
 
         Livewire::test(Ship::class, ['package_id' => $this->package->id])
             ->assertSeeHtml('data-testid="unfinished-purchase"')
-            ->assertSee('Shopify accepted a label purchase for this package')
+            ->assertSee('A Shopify label purchase was started for this package')
             ->assertSee('Choose Shopify Shipping below and buy')
             ->assertActionHidden('checkEarlierPurchase');
     });

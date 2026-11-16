@@ -30,6 +30,15 @@ class PurchaseNotResolvableException extends RuntimeException
         return new self('The connection this label was bought through no longer exists, so the label could not be voided or tracked from here. Restore the connection before recording the label.');
     }
 
+    public static function shopifyShowsALabel(?string $trackingNumber): self
+    {
+        return new self(
+            'Shopify shows this order fulfilled'
+            .(filled($trackingNumber) ? " with tracking number {$trackingNumber}" : '')
+            .', which PolyBag did not record, so a label was bought. Print or void it in the Shopify admin.'
+        );
+    }
+
     public static function purchaseInProgress(): self
     {
         return new self('Postage for this package is being bought or checked right now. Wait for that to finish, then try again.');

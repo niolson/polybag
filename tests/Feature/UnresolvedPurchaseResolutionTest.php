@@ -15,6 +15,7 @@ use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Filament\Support\ResolveUnaccountedPurchaseAction;
+use App\Filament\Support\ResolveUnansweredShopifyPurchaseAction;
 use App\Filament\Widgets\ExceptionsWidget;
 use App\Models\AuditLog;
 use App\Models\CarrierService;
@@ -28,6 +29,7 @@ use App\Services\PackageShipping\PurchaseLock;
 use App\Services\PostageSources\OfferStore;
 use App\Services\PostageSources\UnresolvedPurchaseResolver;
 use App\Services\ShipmentImport\PackageExportService;
+use App\Services\ShopifyShippingLabelService;
 use Filament\Actions\Testing\TestAction;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
@@ -622,4 +624,55 @@ it('keeps Amazon\'s shipment and carrier identifiers on a label recorded by hand
         ->and($package->metadata[AmazonBuyShippingAdapter::CARRIER_ID_KEY])->toBe('USPS')
         ->and($package->metadata[AmazonBuyShippingAdapter::SERVICE_ID_KEY])->toBe('std-us-swa-mfn')
         ->and($package->labels()->sole()->source_label_reference)->toBe('amzn-shipment-123');
+});
+
+// A Shopify purchase keeps no offer. One whose reply never arrived is marked
+// on the package, and Shopify cannot be asked about it, so it stands until a
+// manager says no label was bought.
+
+function shopifyNothingWasBought(): TestAction
+{
+    return TestAction::make('shopifyNothingWasBought')->schemaComponent(ResolveUnansweredShopifyPurchaseAction::CALLOUT_KEY, 'infolist');
+}
+
+function packageWithUnansweredShopifyAttempt(): Package
+{
+    $package = unshippedPackage();
+    $package->update(['metadata' => [
+        ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY => now()->subHour()->toIso8601String(),
+    ]]);
+
+    return $package;
+}
+
+it('shows an unanswered Shopify purchase on the package page, and lets a manager record that nothing was bought', function (): void {
+    $package = unshippedPackage();
+    $manager = User::factory()->manager()->create();
+
+    $this->actingAs($manager);
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertDontSee('Unanswered Shopify Label Purchase');
+
+    $package = packageWithUnansweredShopifyAttempt();
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertSee('Unanswered Shopify Label Purchase')
+        ->assertActionVisible(shopifyNothingWasBought())
+        ->callAction(shopifyNothingWasBought(), ['note' => 'Order is unfulfilled in the admin.'])
+        ->assertNotified('Recorded: no label');
+
+    expect($package->fresh()->metadata ?? [])->not->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY)
+        ->and(app(OfferStore::class)->hasUnresolvedPurchase($package->fresh()))->toBeFalse()
+        ->and(AuditLog::query()->where('action', AuditAction::PurchaseResolvedByHand)->latest('id')->value('user_id'))->toBe($manager->id);
+});
+
+it('does not offer a shipper the way out of an unanswered Shopify purchase', function (): void {
+    $package = packageWithUnansweredShopifyAttempt();
+
+    $this->actingAs(User::factory()->create(['role' => Role::Packer]));
+
+    Livewire::test(ViewPackage::class, ['record' => $package->id])
+        ->assertSee('Unanswered Shopify Label Purchase')
+        ->assertActionHidden(shopifyNothingWasBought());
 });

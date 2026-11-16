@@ -22,6 +22,7 @@ use App\Services\CatalogServiceResolver;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
+use App\Services\ShopifyShippingLabelService;
 use App\Services\SpecialServiceResolver;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -52,6 +53,7 @@ class Package extends Model
         AmazonBuyShippingAdapter::SERVICE_ID_KEY,
         'shopify_shipping_label_id',
         'shopify_purchase_result_id',
+        ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY,
         'shopify_label_document_url',
         'shopify_customs_form_url',
     ];

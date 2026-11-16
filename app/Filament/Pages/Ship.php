@@ -297,9 +297,9 @@ class Ship extends Page
         }
 
         return $this->blindPurchaseOffers !== []
-            ? 'Shopify accepted a label purchase for this package that PolyBag has not finished recording. '
-                .'Choose Shopify Shipping below and buy: PolyBag picks up that purchase from Shopify instead of buying another.'
-            : 'Shopify accepted a label purchase for this package that PolyBag has not finished recording, and Shopify Shipping is not offered now. '
+            ? 'A Shopify label purchase was started for this package that PolyBag has not finished recording. '
+                .'Choose Shopify Shipping below and buy: PolyBag picks up that purchase where Shopify can still be asked for it, and buys nothing new otherwise.'
+            : 'A Shopify label purchase was started for this package that PolyBag has not finished recording, and Shopify Shipping is not offered now. '
                 .'Do not buy another label: a manager can check the order in the Shopify admin.';
     }
 
