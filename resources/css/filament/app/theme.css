@@ -17,59 +17,80 @@
         border-right-color: rgba(255, 255, 255, 0.06);
     }
 
-    /* Sidebar nav items */
-    .fi-sidebar-nav-item-button {
+    /* Narrower side padding than Filament's px-6, so a label beside a count
+       badge ("Print Pack Slips") is not cut off. The collapsed sidebar keeps
+       none, which centers its icons. */
+    .fi-sidebar-nav {
+        @apply px-4;
+    }
+
+    .fi-body-has-sidebar-collapsible-on-desktop .fi-sidebar:not(.fi-sidebar-open) .fi-sidebar-nav {
+        @apply lg:px-0;
+    }
+
+    /* Sidebar nav items. Filament 5 colors the label and icon themselves, so
+       the colors go on them rather than on the button. */
+    .fi-sidebar-item-btn {
         border-radius: 0.375rem;
         transition: all 0.15s ease;
     }
 
-    .fi-sidebar-nav-item-button:hover {
+    .fi-sidebar-item-has-url > .fi-sidebar-item-btn:hover {
         background: rgba(13, 148, 136, 0.06);
     }
 
-    .fi-sidebar-nav-item-button[data-active] {
+    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
         background: rgba(13, 148, 136, 0.1);
+    }
+
+    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn:hover {
+        background: rgba(13, 148, 136, 0.14);
+    }
+
+    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-sidebar-item-label {
         color: #0d9488;
         font-weight: 600;
     }
 
-    .fi-sidebar-nav-item-button[data-active]:hover {
-        background: rgba(13, 148, 136, 0.14);
-    }
-
     /* Sidebar nav item icons — active state teal */
-    .fi-sidebar-nav-item-button[data-active] .fi-sidebar-nav-item-icon {
+    .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-sidebar-item-icon {
         color: #0d9488;
     }
 
     /* Dark mode sidebar nav */
-    .dark .fi-sidebar-nav-item-button {
+    .dark .fi-sidebar-item-label {
         color: rgba(255, 255, 255, 0.55);
     }
 
-    .dark .fi-sidebar-nav-item-button:hover {
+    .dark .fi-sidebar-item-has-url > .fi-sidebar-item-btn:hover {
         background: rgba(255, 255, 255, 0.06);
+    }
+
+    .dark .fi-sidebar-item-btn:hover > .fi-sidebar-item-label {
         color: rgba(255, 255, 255, 0.9);
     }
 
-    .dark .fi-sidebar-nav-item-button[data-active] {
+    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn {
         background: rgba(13, 148, 136, 0.15);
-        color: #5eead4;
     }
 
-    .dark .fi-sidebar-nav-item-button[data-active]:hover {
+    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn:hover {
         background: rgba(13, 148, 136, 0.2);
     }
 
-    .dark .fi-sidebar-nav-item-icon {
+    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-sidebar-item-label {
+        color: #5eead4;
+    }
+
+    .dark .fi-sidebar-item-icon {
         color: rgba(255, 255, 255, 0.35);
     }
 
-    .dark .fi-sidebar-nav-item-button:hover .fi-sidebar-nav-item-icon {
+    .dark .fi-sidebar-item-btn:hover > .fi-sidebar-item-icon {
         color: rgba(255, 255, 255, 0.7);
     }
 
-    .dark .fi-sidebar-nav-item-button[data-active] .fi-sidebar-nav-item-icon {
+    .dark .fi-sidebar-item.fi-active > .fi-sidebar-item-btn > .fi-sidebar-item-icon {
         color: #5eead4;
     }
 
@@ -231,7 +252,8 @@
     }
 
     /* Notification toast */
-    .fi-notification {
+    /* Toasts only: the database notifications panel lists the same class. */
+    .fi-no .fi-no-notification {
         box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.12);
     }
 
@@ -261,11 +283,11 @@
     /* ═══════════════════════════════════════════
        SIDEBAR GROUP COLLAPSE BUTTON
        ═══════════════════════════════════════════ */
-    .dark .fi-sidebar-group-button {
+    .dark .fi-sidebar-group-collapse-btn {
         color: rgba(255, 255, 255, 0.25);
     }
 
-    .dark .fi-sidebar-group-button:hover {
+    .dark .fi-sidebar-group-collapse-btn:hover {
         color: rgba(255, 255, 255, 0.5);
     }
 
