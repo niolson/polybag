@@ -29,6 +29,7 @@ use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Attributes\On;
 use Livewire\Attributes\Url;
 use LogicException;
@@ -64,6 +65,25 @@ class PrintPackSlips extends Page implements HasTable
     public static function canAccess(): bool
     {
         return auth()->check() && app(SettingsService::class)->packSlipsEnabled();
+    }
+
+    /**
+     * The Not Printed tab's count. Empty when slips print from pick batches,
+     * since the queue then lists nothing.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = Cache::remember('nav:pack_slips_not_printed', 60, fn (): int => app(PackSlipQueue::class)
+            ->notPrinted()
+            ->reorder()
+            ->count());
+
+        return $count > 0 ? number_format($count) : null;
+    }
+
+    public static function getNavigationBadgeTooltip(): ?string
+    {
+        return 'Pack slips not printed';
     }
 
     /**
