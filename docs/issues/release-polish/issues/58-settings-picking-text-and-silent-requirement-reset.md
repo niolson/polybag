@@ -24,3 +24,7 @@ Screenshot: `.scratch/release-polish/picking-pack-slips/C-7-picking-back-on.png`
 Reword the helper text to name the real roles. Either keep the requirement's value while it is hidden, or say on the toggle that turning pick batches off also turns the requirement off.
 
 ## Comments
+
+- 2026-11-17: The silent-reset half is gone: Require Picking Before Shipping was removed
+  (see `54`). The helper text still says "pickers" can create pick batches; since `53`
+  Packers can too, so only that wording is left.

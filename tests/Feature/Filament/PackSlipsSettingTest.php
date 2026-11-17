@@ -61,14 +61,13 @@ describe('the setting', function (): void {
         expect(app(SettingsService::class)->packSlipsEnabled())->toBeFalse();
     });
 
-    it('relabels picking and says pack slips then print from pick batches', function (): void {
+    it('relabels pack slips and picking', function (): void {
         $this->actingAs(User::factory()->admin()->create());
 
         Livewire::test(Settings::class)
             ->fillForm(['picking_enabled' => true])
             ->assertSee('PolyBag Prints Pack Slips')
-            ->assertSee('PolyBag Prints Pick Batches')
-            ->assertSee('Pack slips then print from pick batches.');
+            ->assertSee('PolyBag Prints Pick Batches');
     });
 });
 

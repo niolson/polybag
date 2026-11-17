@@ -244,10 +244,6 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return PackageShippingResult::shipmentCancelled();
         }
 
-        if ($package->shipment?->isBlockedByPicking()) {
-            return PackageShippingResult::notReady("Shipment {$package->shipment->shipment_reference} has not been picked yet.", 'Picking Required');
-        }
-
         try {
             $this->packageDrafts->assertPackageReadyToShip($package);
         } catch (PackageDraftIncompleteException $e) {

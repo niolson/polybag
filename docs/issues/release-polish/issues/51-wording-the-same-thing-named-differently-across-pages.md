@@ -54,6 +54,9 @@ alongside those, and settle the capitalization convention at the end first.
 
 ### The picking gate has four names
 
+- 2026-11-17: Moot. The picking gate was removed with Require Picking Before Shipping
+  (`release-polish/54`), so none of these messages exist any more.
+
 - Severity: medium. It fires on Pack, Ship and batch ship whenever picking is required.
 - Locations:
   - `Pack.php:164` — "Picking Required — Shipment {ref} has not been picked. Complete picking

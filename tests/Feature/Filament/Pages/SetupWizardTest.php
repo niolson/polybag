@@ -503,23 +503,20 @@ it('turns import off, but leaves the connection active, when none is saved', fun
 it('starts the workflow answers on the Settings defaults', function (): void {
     Livewire::test(SetupWizard::class)
         ->assertSet('data.pack_slips_enabled', 1)
-        ->assertSet('data.picking_enabled', 0)
-        ->assertSet('data.require_picking_before_shipping', false);
+        ->assertSet('data.picking_enabled', 0);
 });
 
 it('prefills the workflow answers from current settings', function (): void {
     $settings = app(SettingsService::class);
     $settings->set('pack_slips_enabled', false, 'boolean', group: 'general');
     $settings->set('picking_enabled', true, 'boolean', group: 'general');
-    $settings->set('require_picking_before_shipping', true, 'boolean', group: 'general');
 
     Livewire::test(SetupWizard::class)
         ->assertSet('data.pack_slips_enabled', 0)
-        ->assertSet('data.picking_enabled', 1)
-        ->assertSet('data.require_picking_before_shipping', true);
+        ->assertSet('data.picking_enabled', 1);
 });
 
-it('saves both workflow answers and require picking from the workflow step', function (): void {
+it('saves both workflow answers from the workflow step', function (): void {
     setupWizardStep(5);
 
     Livewire::test(SetupWizard::class)
@@ -527,7 +524,6 @@ it('saves both workflow answers and require picking from the workflow step', fun
         ->assertWizardCurrentStep(5)
         ->set('data.pack_slips_enabled', 0)
         ->set('data.picking_enabled', 1)
-        ->set('data.require_picking_before_shipping', true)
         ->goToNextWizardStep()
         ->assertHasNoFormErrors()
         ->assertWizardCurrentStep(6);
@@ -536,23 +532,7 @@ it('saves both workflow answers and require picking from the workflow step', fun
 
     expect($settings->packSlipsEnabled())->toBeFalse()
         ->and($settings->get('picking_enabled'))->toBeTrue()
-        ->and($settings->get('require_picking_before_shipping'))->toBeTrue()
         ->and($settings->get('setup_wizard_step'))->toBe(6);
-});
-
-it('saves require picking as off when picking is off', function (): void {
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean', group: 'general');
-    setupWizardStep(5);
-
-    Livewire::test(SetupWizard::class)
-        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
-        ->set('data.picking_enabled', 0)
-        ->set('data.require_picking_before_shipping', true)
-        ->assertFormFieldIsHidden('require_picking_before_shipping')
-        ->goToNextWizardStep()
-        ->assertHasNoFormErrors();
-
-    expect(app(SettingsService::class)->get('require_picking_before_shipping'))->toBeFalse();
 });
 
 it('advances from Order Import to the Summary step after the new step', function (): void {
@@ -595,11 +575,10 @@ it('summarizes both workflow answers', function (): void {
     $settings = app(SettingsService::class);
     $settings->set('pack_slips_enabled', false, 'boolean', group: 'general');
     $settings->set('picking_enabled', true, 'boolean', group: 'general');
-    $settings->set('require_picking_before_shipping', true, 'boolean', group: 'general');
 
     Livewire::test(SetupWizard::class)
         ->assertSee('Printed by another system')
-        ->assertSee('Pick batches in PolyBag, required before shipping');
+        ->assertSee('Pick batches in PolyBag');
 });
 
 function setupWizardStep(int $step): void

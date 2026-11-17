@@ -192,10 +192,6 @@ class ViewPackage extends ViewRecord
 
         $this->notReadyReasonResolved = true;
 
-        if ($this->package()->shipment?->isBlockedByPicking()) {
-            return $this->notReadyReason = 'This shipment has not been picked yet.';
-        }
-
         try {
             app(PackageDraftWorkflow::class)->assertPackageReadyToShip($this->package());
         } catch (PackageDraftIncompleteException $e) {

@@ -153,7 +153,8 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 
 ## Key Workflows
 
-1. **Picking** (`/pick-batches`) — Optional; generate pick batches (the Generate Pick Batch button on that list, `/generate-pick-batch`) and print picking summaries before packing. Gated by `picking_enabled`; `require_picking_before_shipping` enforces it before packing/batch shipping
+1. **Picking** (`/pick-batches`) — Optional; generate pick batches (the Generate Pick Batch button on that list, `/generate-pick-batch`) and print picking summaries before packing. Gated by `picking_enabled`. Picking never blocks
+   packing or shipping: a Shipment fully shipped while in an open pick batch leaves the batch
 2. **Packing** (`/pack/{shipment_id}`) — Scan box code, scan items, read weight from scale;
    save progress as a resumable Package Draft. Opening the page alone creates no draft.
    Purchase requires positive weight/dimensions and complete items when validation is on
@@ -172,7 +173,7 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 8. **Pack slips** (`/print-pack-slips`) — Print from the queue, a Shipment, or a pick batch;
    Shipment-level receipts track the rendered item version and print acknowledgment.
    Changed items make a printed slip out of date. Turning off `pack_slips_enabled` hides these flows;
-   when picking is required, slips print from pick batches
+   a Shipment in an in-progress pick batch prints with its batch, not from the queue
 
 ## Hardware Integration
 

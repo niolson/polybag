@@ -184,18 +184,6 @@ it('links a Packer to the batches too, since Packers can open pick batches', fun
         ->assertSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
 });
 
-it('shows that pack slips print from pick batches when picking is required', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
-    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
-    Shipment::factory()->create();
-
-    Livewire::test(PrintPackSlips::class)
-        ->assertSee('Pack slips print from pick batches')
-        ->assertSee('Go to Pick Batches')
-        ->assertActionHidden('printNext');
-});
-
 it('reports the renderer being unavailable when the browser asks for a job, and records nothing', function (): void {
     $this->mock(GotenbergService::class)
         ->shouldReceive('pdfFromView')
@@ -336,15 +324,4 @@ it('explains printed Shipments left off the Printed tab for in-progress pick bat
         ->assertCanNotSeeTableRecords([$printed])
         ->assertSee('1 Shipment left off')
         ->assertSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
-});
-
-it('shows the picking-required empty state on the Printed tab', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
-    Shipment::factory()->create(['pack_slip_items_version' => 0]);
-
-    Livewire::test(PrintPackSlips::class)
-        ->set('activeTab', 'printed')
-        ->assertSee('Pack slips print from pick batches')
-        ->assertActionHidden('printNext');
 });
