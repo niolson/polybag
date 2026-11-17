@@ -8,7 +8,9 @@ use App\Enums\ShipmentStatus;
 use App\Enums\ShipmentStatusOrigin;
 use App\Filament\Resources\ShipmentResource;
 use App\Models\AuditLog;
+use App\Models\Package;
 use App\Models\Shipment;
+use App\Services\PostageSources\OfferStore;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -35,6 +37,18 @@ class EditShipment extends EditRecord
                         Notification::make()
                             ->title('Cannot delete shipment')
                             ->body('This shipment has shipped packages. Void the label first.')
+                            ->danger()
+                            ->send();
+
+                        $action->cancel();
+                    }
+
+                    $offers = app(OfferStore::class);
+
+                    if ($this->shipment()->packages->contains(fn (Package $package): bool => $offers->hasUnresolvedPurchase($package))) {
+                        Notification::make()
+                            ->title('Cannot delete shipment')
+                            ->body('A label purchase for one of this shipment\'s packages has not been accounted for, so a label may exist. Settle it on the package page first.')
                             ->danger()
                             ->send();
 

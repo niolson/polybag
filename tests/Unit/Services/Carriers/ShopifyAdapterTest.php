@@ -7,20 +7,29 @@ use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
 use App\DataTransferObjects\Shipping\ServiceInference;
 use App\DataTransferObjects\Shipping\ShipRequest;
+use App\Enums\AuditAction;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\PostageSourceKind;
+use App\Enums\Role;
 use App\Enums\VoidReason;
+use App\Exceptions\PurchaseNotResolvableException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
+use App\Models\AuditLog;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\SourceServiceMapping;
+use App\Models\User;
 use App\Services\Carriers\ShopifyAdapter;
+use App\Services\PackageShipping\PurchaseLock;
+use App\Services\PostageSources\OfferStore;
 use App\Services\ServiceInference\ServiceInferrer;
+use App\Services\ShopifyShippingLabelService;
 use Illuminate\Support\Facades\Http;
+use Saloon\Exceptions\Request\ServerException;
 use Saloon\Http\Faking\MockResponse;
 use Saloon\Laravel\Facades\Saloon;
 
@@ -1237,6 +1246,213 @@ it('counts a variant with no measured weight as declaring nothing', function ():
  * The catalog services these tests ask Shopify for, and the Shopify mapping
  * each is sold under (`carrier-catalog-reset/09`). `auto` needs neither.
  */
+// A purchase mutation carries no idempotency key, and its reply is the only
+// place the purchase result ID appears. So it is sent once, an attempt is
+// marked before it leaves, and an attempt with no answer is settled against
+// the fulfillment order before another is sent.
+
+/** @return array<string, mixed> */
+function fulfillmentLookup(array $fulfillments = []): array
+{
+    return ['data' => ['nodes' => [[
+        'id' => 'gid://shopify/FulfillmentOrder/12345',
+        'fulfillments' => ['pageInfo' => ['hasNextPage' => false, 'endCursor' => null], 'nodes' => $fulfillments],
+    ]]]];
+}
+
+function purchaseMutationsSent(): int
+{
+    return collect(Saloon::mockClient()->getRecordedResponses())
+        ->filter(fn ($response): bool => str_contains((string) ($response->getPendingRequest()->body()?->all()['query'] ?? ''), 'mutation PurchaseShippingLabel'))
+        ->count();
+}
+
+function packageWithUnansweredAttempt(int $secondsAgo): Package
+{
+    $package = shopifyPackage();
+    $package->update(['metadata' => [
+        ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY => now()->subSeconds($secondsAgo)->toIso8601String(),
+    ]]);
+
+    return $package;
+}
+
+it('sends the purchase once, and keeps a record of an attempt Shopify never answered', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    // Were the mutation retried, the second reply would buy a second label.
+    Saloon::fake([
+        MockResponse::make(['errors' => 'Service Unavailable'], 503),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+
+    expect(fn () => $this->adapter->createShipment(shopifyShipRequest($package)))
+        ->toThrow(ServerException::class);
+
+    expect(purchaseMutationsSent())->toBe(1)
+        ->and($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY)
+        // So no cleanup path deletes the package.
+        ->and(app(OfferStore::class)->hasUnresolvedPurchase($package->fresh()))->toBeTrue();
+});
+
+it('keeps no attempt once Shopify answers, with a purchase or with a refusal', function (array $replies, bool $bought): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake($replies);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBe($bought)
+        ->and($package->fresh()->metadata ?? [])->not->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+})->with([
+    'bought' => fn (): array => [[MockResponse::make(purchaseAccepted()), MockResponse::make(purchasePurchased())], true],
+    'validation error' => fn (): array => [[MockResponse::make(['data' => ['shippingLabelPurchase' => [
+        'shippingLabelPurchaseResult' => null,
+        'userErrors' => [['field' => null, 'code' => 'INVALID', 'message' => 'Not allowed.']],
+    ]]])], false],
+    'throttled' => fn (): array => [[MockResponse::make(['errors' => [['message' => 'Throttled', 'extensions' => ['code' => 'THROTTLED']]]])], false],
+]);
+
+it('keeps the attempt when Shopify fails internally, which may be after it started buying', function (): void {
+    seedShopifyCarrierServices();
+    $package = shopifyPackage();
+
+    Saloon::fake([MockResponse::make(['errors' => [['message' => 'Internal error', 'extensions' => ['code' => 'INTERNAL_SERVER_ERROR']]]])]);
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package))->success)->toBeFalse()
+        ->and($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+it('does not buy again after an unanswered attempt, however old, while Shopify shows no label', function (int $secondsAgo, array $fulfillments): void {
+    seedShopifyCarrierServices();
+    $package = packageWithUnansweredAttempt($secondsAgo);
+
+    // Shopify promises no time by which a pending purchase ends, so an empty
+    // lookup settles nothing at any age.
+    Saloon::fake([MockResponse::make(fulfillmentLookup($fulfillments))]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('may still be buying')
+        ->and(purchaseMutationsSent())->toBe(0)
+        ->and($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+})->with([
+    'seconds old' => [20, []],
+    'a day old' => [86400, []],
+    'a day old, with only a voided fulfillment' => [86400, [[
+        'id' => 'gid://shopify/Fulfillment/8',
+        'status' => 'CANCELLED',
+        'displayStatus' => 'LABEL_VOIDED',
+        'trackingInfo' => [['number' => '9400100000000000000000', 'company' => 'USPS', 'url' => null]],
+    ]]],
+]);
+
+it('does not buy again when Shopify shows a label the unanswered attempt bought', function (): void {
+    seedShopifyCarrierServices();
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+
+    Saloon::fake([MockResponse::make(fulfillmentLookup([unrecordedShopifyFulfillment()]))]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeFalse()
+        ->and($response->errorMessage)->toContain('9400111899223197428490')
+        ->and(purchaseMutationsSent())->toBe(0)
+        ->and($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+it('does not buy again when Shopify cannot be asked about an unanswered attempt', function (): void {
+    seedShopifyCarrierServices();
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+
+    // The fulfillment order is no longer returned.
+    Saloon::fake([MockResponse::make(['data' => ['nodes' => [null]]])]);
+
+    $response = $this->adapter->createShipment(shopifyShipRequest($package));
+
+    expect($response->success)->toBeFalse()
+        ->and(purchaseMutationsSent())->toBe(0)
+        ->and($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+it('buys again once a person has recorded that the unanswered attempt bought nothing', function (): void {
+    seedShopifyCarrierServices();
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+    $manager = User::factory()->create(['role' => Role::Manager]);
+
+    Saloon::fake([
+        MockResponse::make(fulfillmentLookup()),
+        MockResponse::make(purchaseAccepted()),
+        MockResponse::make(purchasePurchased()),
+    ]);
+    Http::fake(['*' => Http::response('LABEL-BYTES')]);
+
+    app(ShopifyShippingLabelService::class)->recordUnansweredAttemptAsNotBought($package, $manager, 'Checked the order: unfulfilled.');
+
+    expect($package->fresh()->metadata ?? [])->not->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+
+    $audit = AuditLog::query()->where('action', AuditAction::PurchaseResolvedByHand)->latest('id')->first();
+
+    expect($audit->user_id)->toBe($manager->id)
+        ->and($audit->new_values['outcome'])->toBe('nothing_bought')
+        ->and($audit->metadata['note'])->toBe('Checked the order: unfulfilled.');
+
+    expect($this->adapter->createShipment(shopifyShipRequest($package->fresh()))->success)->toBeTrue()
+        ->and(purchaseMutationsSent())->toBe(1);
+});
+
+it('refuses to record nothing bought while Shopify shows a label nothing records', function (): void {
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+
+    Saloon::fake([MockResponse::make(fulfillmentLookup([unrecordedShopifyFulfillment()]))]);
+
+    expect(fn () => app(ShopifyShippingLabelService::class)->recordUnansweredAttemptAsNotBought($package, User::factory()->create()))
+        ->toThrow(PurchaseNotResolvableException::class, '9400111899223197428490');
+
+    expect($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+it('takes a person\'s word that nothing was bought when Shopify cannot be asked', function (): void {
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+
+    Saloon::fake([MockResponse::make(['data' => ['nodes' => [null]]])]);
+
+    app(ShopifyShippingLabelService::class)->recordUnansweredAttemptAsNotBought($package, User::factory()->create());
+
+    expect($package->fresh()->metadata ?? [])->not->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+it('does not settle an unanswered attempt while a purchase holds the package', function (): void {
+    $package = packageWithUnansweredAttempt(secondsAgo: 600);
+    $lock = PurchaseLock::for($package);
+    $lock->get();
+
+    try {
+        expect(fn () => app(ShopifyShippingLabelService::class)->recordUnansweredAttemptAsNotBought($package, User::factory()->create()))
+            ->toThrow(PurchaseNotResolvableException::class);
+    } finally {
+        $lock->release();
+    }
+
+    expect($package->fresh()->metadata)->toHaveKey(ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY);
+});
+
+/** @return array<string, mixed> */
+function unrecordedShopifyFulfillment(): array
+{
+    return [
+        'id' => 'gid://shopify/Fulfillment/9',
+        'status' => 'SUCCESS',
+        'displayStatus' => 'LABEL_PURCHASED',
+        'trackingInfo' => [['number' => '9400111899223197428490', 'company' => 'USPS', 'url' => null]],
+    ];
+}
+
 function seedShopifyCarrierServices(): void
 {
     $usps = Carrier::seedSystem(Carrier::USPS);

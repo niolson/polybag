@@ -389,7 +389,8 @@ class ShopifyAdapter implements BlindPurchaseSource
 
     /**
      * Narrow a package query to packages holding a Shopify purchase: one
-     * Shopify accepted and may still be running, or one that sold a label.
+     * sent whose reply never arrived, one Shopify accepted and may still be
+     * running, or one that sold a label.
      *
      * Static for the same reason as {@see shippingLabelIdFor()}: the cleanup
      * paths that must not delete such a package hold no adapter. On an
@@ -405,7 +406,8 @@ class ShopifyAdapter implements BlindPurchaseSource
     {
         return $query->where(fn (Builder $markers): Builder => $markers
             ->whereNotNull('metadata->shopify_shipping_label_id')
-            ->orWhereNotNull('metadata->shopify_purchase_result_id'), boolean: $boolean);
+            ->orWhereNotNull('metadata->shopify_purchase_result_id')
+            ->orWhereNotNull('metadata->'.ShopifyShippingLabelService::PURCHASE_ATTEMPT_KEY), boolean: $boolean);
     }
 
     /**

@@ -7,19 +7,27 @@ use App\DataTransferObjects\Shipping\AddressData;
 use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShopifyFulfillmentLookup;
 use App\DataTransferObjects\Shipping\ShopifyPurchasedLabel;
+use App\Enums\AuditAction;
+use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Exceptions\Carriers\ShopifyLabelPurchaseException;
+use App\Exceptions\PurchaseNotResolvableException;
 use App\Exceptions\ShopifyDeclaredWeightException;
 use App\Http\Integrations\Shopify\Requests\GraphQL;
 use App\Http\Integrations\Shopify\ShopifyConnector;
+use App\Models\AuditLog;
 use App\Models\Carrier;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\User;
 use App\Services\Carriers\ShopifyAdapter;
+use App\Services\PackageShipping\PurchaseLock;
 use App\Services\PostageSources\PostageSourceResolver;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Saloon\Exceptions\Request\RequestException;
 
 /**
  * Buys shipping labels through Shopify Shipping.
@@ -331,6 +339,21 @@ class ShopifyShippingLabelService
      */
     public const DECLARED_WEIGHT_TOLERANCE = 0.1;
 
+    /**
+     * The package metadata key stamped just before the purchase mutation
+     * leaves, with the time it left.
+     *
+     * The mutation carries no idempotency key and its reply is the only place
+     * the purchase result ID appears, so a reply that never arrives would
+     * otherwise leave nothing saying a purchase may be running at Shopify.
+     * Cleared when Shopify answers that it started nothing, and replaced by
+     * the result ID when it answers that it did. With no answer it stands,
+     * and nothing is bought from Shopify for the package, until a person
+     * confirms no label was bought — see {@see refuseAfterUnansweredAttempt()}
+     * and {@see recordUnansweredAttemptAsNotBought()}.
+     */
+    public const PURCHASE_ATTEMPT_KEY = 'shopify_purchase_attempted_at';
+
     /** Fulfillment states that mean the label PolyBag holds is no longer live. */
     private const VOIDED_STATES = ['LABEL_VOIDED', 'CANCELED', 'CANCELLED'];
 
@@ -393,6 +416,14 @@ class ShopifyShippingLabelService
             return $this->awaitLabel($connector, (string) $pendingResultId, null, $package);
         }
 
+        // An earlier mutation whose reply never arrived may have bought a
+        // label nothing here records. Shopify is asked before another leaves.
+        $attemptedAt = $package->metadata[self::PURCHASE_ATTEMPT_KEY] ?? null;
+
+        if (filled($attemptedAt)) {
+            throw $this->refuseAfterUnansweredAttempt($package, $dataSource, $fulfillmentOrderId);
+        }
+
         // Rating already withholds the offer, and the purchase re-derives it,
         // so this is the last word rather than the first: nothing reaches the
         // mutation below for a live store in Demo, whoever sent it
@@ -406,7 +437,35 @@ class ShopifyShippingLabelService
 
         $input = $this->buildPurchaseInput($fulfillmentOrderId, $request, $carrierCode, $serviceCode, $dataSource, $totalWeight);
 
-        $json = $connector->send(new GraphQL(self::PURCHASE_MUTATION, ['input' => $input]))->json();
+        // Sent once. The connector retries a failed request, and this one
+        // has no idempotency key: a retry after a lost reply is a second
+        // purchase. USPS and UPS purchases are sent once for the same reason.
+        $mutation = new GraphQL(self::PURCHASE_MUTATION, ['input' => $input]);
+        $mutation->tries = 1;
+
+        // Before it leaves: from here until Shopify answers, a purchase may
+        // be running that only this marker records.
+        $this->rememberPurchaseAttempt($package);
+
+        try {
+            // Sent once, a failed reply comes back rather than thrown.
+            $json = $connector->send($mutation)->throw()->json();
+        } catch (RequestException $e) {
+            // A 4xx is Shopify refusing the request before running it. A
+            // timeout (408) or a 5xx may have run it, so the marker stays.
+            if ($e->getResponse()->clientError() && $e->getResponse()->status() !== 408) {
+                $this->forgetPurchaseAttempt($package);
+            }
+
+            throw $e;
+        }
+
+        // A reply that says nothing was started settles the attempt. An
+        // internal error is not that reply: Shopify may have started before
+        // failing.
+        if ($this->refusedBeforeRunning($json)) {
+            $this->forgetPurchaseAttempt($package);
+        }
 
         $this->assertNoGraphQLErrors($json);
 
@@ -1092,13 +1151,205 @@ class ShopifyShippingLabelService
     }
 
     /**
+     * Why nothing is bought while a purchase mutation stands unanswered.
+     *
+     * Shopify links a label to nothing but the purchase result, whose ID was
+     * in the lost reply, so neither the purchase nor its label can be asked
+     * for. The fulfillment a finished purchase creates can be read, and one
+     * no Label of this shipment records is that purchase. Finding none proves
+     * nothing: Shopify buys asynchronously and promises no time by which a
+     * pending purchase ends, so the marker never lapses with age. It is
+     * cleared only by {@see recordUnansweredAttemptAsNotBought()}.
+     */
+    private function refuseAfterUnansweredAttempt(Package $package, DataSource $dataSource, string $fulfillmentOrderId): ShopifyLabelPurchaseException
+    {
+        try {
+            $unrecorded = $this->unrecordedFulfillment($package, $dataSource, $fulfillmentOrderId);
+        } catch (\Exception $e) {
+            logger()->warning('Could not ask Shopify about an unanswered label purchase', [
+                'package_id' => $package->id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return new ShopifyLabelPurchaseException(
+                'An earlier attempt to buy this label got no reply from Shopify, and Shopify cannot be asked about the order right now. '
+                .'Do not buy another label: a manager can check the order in the Shopify admin and settle it on the package page.'
+            );
+        }
+
+        if ($unrecorded !== null) {
+            $trackingNumber = $unrecorded['trackingInfo'][0]['number'] ?? null;
+
+            logger()->error('Shopify holds a fulfillment for a label purchase whose reply never arrived', [
+                'package_id' => $package->id,
+                'fulfillment_id' => $unrecorded['id'] ?? null,
+                'tracking_number' => $trackingNumber,
+            ]);
+
+            return new ShopifyLabelPurchaseException(
+                'An earlier attempt to buy this label got no reply, and Shopify now shows the order fulfilled'
+                .(filled($trackingNumber) ? " with tracking number {$trackingNumber}" : '')
+                .', which PolyBag did not record. Do not buy another label: print or void that one in the Shopify admin.'
+            );
+        }
+
+        return new ShopifyLabelPurchaseException(
+            'An earlier attempt to buy this label got no reply from Shopify. It shows no label for the order yet, but may still be buying one. '
+            .'Do not buy another label: a manager can check the order in the Shopify admin and, if no label was bought, say so on the package page.'
+        );
+    }
+
+    /**
+     * A live fulfillment on the fulfillment order that no Label of this
+     * shipment records, or null when there is none.
+     *
+     * @return array<string, mixed>|null
+     *
+     * @throws ShopifyLabelPurchaseException when Shopify cannot say
+     */
+    private function unrecordedFulfillment(Package $package, DataSource $dataSource, string $fulfillmentOrderId): ?array
+    {
+        $lookup = $this->lookUpFulfillments($dataSource, [$fulfillmentOrderId]);
+        $fulfillments = $lookup->fulfillments[$fulfillmentOrderId] ?? null;
+
+        if (isset($lookup->failures[$fulfillmentOrderId]) || $fulfillments === null) {
+            throw new ShopifyLabelPurchaseException('Shopify did not return the fulfillment order.');
+        }
+
+        $recorded = DB::table('package_labels')
+            ->whereIn('package_id', Package::query()->select('id')->where('shipment_id', $package->shipment_id))
+            ->pluck('tracking_number')
+            ->filter()
+            ->all();
+
+        return collect($fulfillments)->first(
+            fn (array $fulfillment): bool => ! $this->isVoided($fulfillment)
+                && ! in_array($fulfillment['trackingInfo'][0]['number'] ?? null, $recorded, true),
+        );
+    }
+
+    /**
+     * Whether a purchase mutation for this package stands unanswered, read
+     * from the database.
+     */
+    public function hasUnansweredAttempt(Package $package): bool
+    {
+        return Package::query()
+            ->whereKey($package->id)
+            ->where('status', '!=', PackageStatus::Shipped)
+            ->whereNotNull('metadata->'.self::PURCHASE_ATTEMPT_KEY)
+            ->exists();
+    }
+
+    /**
+     * A person's answer to an unanswered purchase: they checked the order in
+     * the Shopify admin and no label was bought.
+     *
+     * The only thing that clears the marker without a reply from Shopify.
+     * Under the purchase lock, so an attempt in flight is not settled beneath
+     * itself, and refused when Shopify shows a fulfillment nothing records,
+     * which is a label whatever anyone says. When Shopify cannot be asked the
+     * person's word stands, as it does for a carrier that cannot be asked;
+     * it is audit-logged with who gave it.
+     *
+     * @throws PurchaseNotResolvableException
+     */
+    public function recordUnansweredAttemptAsNotBought(Package $package, User $user, ?string $note = null): void
+    {
+        $lock = PurchaseLock::for($package);
+
+        if (! $lock->get()) {
+            throw PurchaseNotResolvableException::purchaseInProgress();
+        }
+
+        try {
+            $stored = Package::query()->find($package->id);
+            $attemptedAt = $stored?->metadata[self::PURCHASE_ATTEMPT_KEY] ?? null;
+
+            if ($stored === null || $stored->status === PackageStatus::Shipped || blank($attemptedAt)) {
+                throw PurchaseNotResolvableException::alreadyResolved();
+            }
+
+            $dataSource = $this->dataSourceFor($stored);
+            $fulfillmentOrderId = $this->fulfillmentOrderId($stored);
+
+            if ($dataSource && $fulfillmentOrderId) {
+                $unrecorded = rescue(
+                    fn (): ?array => $this->unrecordedFulfillment($stored, $dataSource, $fulfillmentOrderId),
+                    null,
+                    report: false,
+                );
+
+                if ($unrecorded !== null) {
+                    throw PurchaseNotResolvableException::shopifyShowsALabel($unrecorded['trackingInfo'][0]['number'] ?? null);
+                }
+            }
+
+            $this->forgetPurchaseAttempt($stored);
+
+            AuditLog::record(
+                AuditAction::PurchaseResolvedByHand,
+                $stored,
+                newValues: ['outcome' => 'nothing_bought'],
+                metadata: array_filter([
+                    'source' => 'Shopify',
+                    'attempted_at' => (string) $attemptedAt,
+                    'note' => filled($note) ? $note : null,
+                ], fn (mixed $value): bool => $value !== null),
+                userId: $user->id,
+            );
+        } finally {
+            $lock->release();
+        }
+    }
+
+    /**
+     * Whether a reply to the purchase mutation says Shopify started nothing:
+     * the mutation's own validation errors, or a GraphQL error other than an
+     * internal one.
+     *
+     * @param  array<string, mixed>  $json
+     */
+    private function refusedBeforeRunning(array $json): bool
+    {
+        if (! empty($json['data']['shippingLabelPurchase']['userErrors'])) {
+            return true;
+        }
+
+        $errors = $json['errors'] ?? [];
+
+        return is_array($errors) && $errors !== [] && collect($errors)->doesntContain(
+            fn (mixed $error): bool => in_array(data_get($error, 'extensions.code'), ['INTERNAL_SERVER_ERROR', 'TIMEOUT'], true),
+        );
+    }
+
+    private function rememberPurchaseAttempt(Package $package): void
+    {
+        $package->metadata = array_merge($package->metadata ?? [], [
+            self::PURCHASE_ATTEMPT_KEY => now()->toIso8601String(),
+        ]);
+
+        $package->save();
+    }
+
+    private function forgetPurchaseAttempt(Package $package): void
+    {
+        $package->metadata = collect($package->metadata ?? [])
+            ->except([self::PURCHASE_ATTEMPT_KEY])
+            ->all();
+
+        $package->save();
+    }
+
+    /**
      * Record the in-flight purchase so it can be resumed rather than repeated.
+     * The result ID supersedes the attempt marker: Shopify has answered.
      */
     private function rememberPurchaseResult(Package $package, string $resultId): void
     {
-        $package->metadata = array_merge($package->metadata ?? [], [
+        $package->metadata = collect(array_merge($package->metadata ?? [], [
             'shopify_purchase_result_id' => $resultId,
-        ]);
+        ]))->except([self::PURCHASE_ATTEMPT_KEY])->all();
 
         $package->save();
     }
@@ -1127,7 +1378,7 @@ class ShopifyShippingLabelService
             'shopify_label_document_url' => $documents->firstWhere('documentType', 'LABEL')['url'] ?? null,
             'shopify_customs_form_url' => $documents->firstWhere('documentType', 'CUSTOMS_FORM')['url'] ?? null,
         ], fn (?string $value): bool => filled($value))))
-            ->except(['shopify_purchase_result_id'])
+            ->except(['shopify_purchase_result_id', self::PURCHASE_ATTEMPT_KEY])
             ->all();
 
         $package->save();

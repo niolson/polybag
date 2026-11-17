@@ -12,6 +12,7 @@ use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
+use App\Models\ShippingOffer;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
@@ -140,4 +141,17 @@ it('names a Manual Ship draft on its package instead of leaving the shipment bla
 it('calls the Packages list\'s draft state filter Packing Progress, apart from Draft Shipments', function (): void {
     Livewire::test(ListPackages::class)
         ->assertSee('Packing Progress');
+});
+
+it('keeps an abandoned draft whose label purchase nobody has accounted for', function (): void {
+    $draft = Shipment::factory()->create(['status' => ShipmentStatus::Draft, 'updated_at' => now()->subHours(25)]);
+    $package = Package::factory()->create(['shipment_id' => $draft->id]);
+    // Spent, with no answer from the carrier: a label may exist, and this row
+    // is the only record of the attempt.
+    $offer = ShippingOffer::factory()->awaitingConfirmation()->create(['package_id' => $package->id]);
+
+    $this->artisan('shipments:delete-abandoned-drafts')->assertSuccessful();
+
+    expect(Shipment::find($draft->id))->not->toBeNull()
+        ->and(ShippingOffer::find($offer->id))->not->toBeNull();
 });
