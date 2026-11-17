@@ -642,7 +642,7 @@ class ShipmentResource extends Resource
                 Actions\BulkAction::make('create-picking-batch')
                     ->label('Create Pick Batch')
                     ->icon('heroicon-o-inbox-stack')
-                    ->visible(fn (): bool => auth()->user()->role->isAtLeast(Role::Manager) && app(SettingsService::class)->get('picking_enabled', false))
+                    ->visible(fn (): bool => app(SettingsService::class)->get('picking_enabled', false))
                     ->requiresConfirmation()
                     ->modalHeading('Create Pick Batch')
                     ->modalDescription('Create a pick batch from the selected shipments. Only open shipments with pending picking status will be included.')

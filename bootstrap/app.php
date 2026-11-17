@@ -4,7 +4,6 @@ use App\Http\Middleware\AddRequestLogContext;
 use App\Http\Middleware\ContentSecurityPolicy;
 use App\Http\Middleware\EnsureDemoHasNotEnded;
 use App\Http\Middleware\EnsureUserIsAdmin;
-use App\Http\Middleware\EnsureUserIsManager;
 use App\Http\Middleware\RecordRequestTiming;
 use App\Support\FatalErrorHeadroom;
 use Illuminate\Console\Scheduling\Schedule;
@@ -90,7 +89,6 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->encryptCookies(except: ['polybag_last_instance']);
         $middleware->alias([
             'admin' => EnsureUserIsAdmin::class,
-            'manager' => EnsureUserIsManager::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

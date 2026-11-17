@@ -86,7 +86,7 @@ Route::post('/pack-slips/print-runs/{key}/jobs/{index}', [PackSlipPrintJobContro
     ->name('pack-slips.print-jobs.show')
     ->middleware(['auth', 'throttle:120,1']);
 
-Route::middleware(['auth', 'manager'])->group(function (): void {
+Route::middleware('auth')->group(function (): void {
     Route::get('/pick-batches/{pickBatch}/summary', [PickBatchController::class, 'summary'])
         ->name('pick-batches.summary');
     Route::get('/pick-batches/{pickBatch}/pack-slips', [PickBatchController::class, 'packSlips'])

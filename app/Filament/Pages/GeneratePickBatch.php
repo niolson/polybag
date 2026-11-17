@@ -2,7 +2,6 @@
 
 namespace App\Filament\Pages;
 
-use App\Enums\Role;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\Channel;
 use App\Models\Client;
@@ -39,7 +38,7 @@ class GeneratePickBatch extends Page implements HasForms
 
     public static function canAccess(): bool
     {
-        return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
+        return auth()->check()
             && app(SettingsService::class)->get('picking_enabled', false);
     }
 
