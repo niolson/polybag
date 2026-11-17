@@ -153,7 +153,7 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 
 ## Key Workflows
 
-1. **Picking** (`/generate-pick-batch`) — Optional; generate pick batches and print picking summaries before packing. Gated by `picking_enabled`; `require_picking_before_shipping` enforces it before packing/batch shipping
+1. **Picking** (`/pick-batches`) — Optional; generate pick batches (the Generate Pick Batch button on that list, `/generate-pick-batch`) and print picking summaries before packing. Gated by `picking_enabled`; `require_picking_before_shipping` enforces it before packing/batch shipping
 2. **Packing** (`/pack/{shipment_id}`) — Scan box code, scan items, read weight from scale;
    save progress as a resumable Package Draft. Opening the page alone creates no draft.
    Purchase requires positive weight/dimensions and complete items when validation is on
