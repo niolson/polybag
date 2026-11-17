@@ -50,14 +50,6 @@ it('counts pack slips not yet printed or out of date, leaving out those a pick b
     expect(PrintPackSlips::getNavigationBadge())->toBe('3');
 });
 
-it('shows no pack slip count when slips print from pick batches', function (): void {
-    Shipment::factory()->create();
-    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
-
-    expect(PrintPackSlips::getNavigationBadge())->toBeNull();
-});
-
 it('counts pick batches in progress', function (): void {
     PickBatch::factory()->count(2)->create(['status' => PickBatchStatus::InProgress]);
     PickBatch::factory()->completed()->create();

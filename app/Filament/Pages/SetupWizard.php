@@ -110,7 +110,6 @@ class SetupWizard extends Page
             // Step 5: Workflow
             'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => (bool) $settings->get('picking_enabled', false),
-            'require_picking_before_shipping' => (bool) $settings->get('require_picking_before_shipping', false),
 
             // Step 6: Order import (prefill from a connection that imports orders;
             // a postage-only connection is not an import source)
@@ -434,13 +433,7 @@ class SetupWizard extends Page
                     ->label('Do you pick orders with PolyBag?')
                     ->boolean('Yes', 'No')
                     ->default(false)
-                    ->required()
-                    ->live(),
-                Forms\Components\Toggle::make('require_picking_before_shipping')
-                    ->label('Require Picking Before Shipping')
-                    ->helperText(Settings::REQUIRE_PICKING_HELP)
-                    ->default(false)
-                    ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
+                    ->required(),
             ])
             ->afterValidation(function (): void {
                 $this->saveWorkflow();
@@ -644,13 +637,9 @@ class SetupWizard extends Page
                     ->content(function (): string {
                         $settings = app(SettingsService::class);
 
-                        if (! $settings->get('picking_enabled', false)) {
-                            return 'Not done in PolyBag';
-                        }
-
-                        return $settings->get('require_picking_before_shipping', false)
-                            ? 'Pick batches in PolyBag, required before shipping'
-                            : 'Pick batches in PolyBag';
+                        return $settings->get('picking_enabled', false)
+                            ? 'Pick batches in PolyBag'
+                            : 'Not done in PolyBag';
                     }),
                 Forms\Components\Placeholder::make('summary_import')
                     ->label('Order Import')
@@ -900,16 +889,9 @@ class SetupWizard extends Page
     {
         $data = $this->form->getState();
         $settings = app(SettingsService::class);
-        $pickingEnabled = (bool) ($data['picking_enabled'] ?? false);
 
         $settings->set('pack_slips_enabled', (bool) ($data['pack_slips_enabled'] ?? true), 'boolean', group: 'general');
-        $settings->set('picking_enabled', $pickingEnabled, 'boolean', group: 'general');
-        $settings->set(
-            'require_picking_before_shipping',
-            $pickingEnabled && (bool) ($data['require_picking_before_shipping'] ?? false),
-            'boolean',
-            group: 'general',
-        );
+        $settings->set('picking_enabled', (bool) ($data['picking_enabled'] ?? false), 'boolean', group: 'general');
     }
 
     /**

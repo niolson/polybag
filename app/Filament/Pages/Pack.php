@@ -177,17 +177,6 @@ class Pack extends Page
                 return;
             }
 
-            if ($this->shipment->isBlockedByPicking()) {
-                $this->notifyWarning(
-                    'Picking Required',
-                    "Shipment {$this->shipment->shipment_reference} has not been picked yet.",
-                );
-                $this->shipment = null;
-                $this->redirect('/pack');
-
-                return;
-            }
-
             if (! auth()->user()->can('reship', $this->shipment)) {
                 $this->notifyWarning('Already Shipped', $this->alreadyShippedMessage());
                 $this->shipment = null;

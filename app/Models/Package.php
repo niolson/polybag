@@ -9,7 +9,6 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\ContentClass;
 use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
-use App\Enums\PickingStatus;
 use App\Enums\PostageSource;
 use App\Enums\SpecialServiceSource;
 use App\Enums\TrackingStatus;
@@ -277,8 +276,7 @@ class Package extends Model
      * any other status.
      *
      * Ready is the purchase's readiness rule, the one in
-     * {@see PackageDraftWorkflow::assertPackageReadyToShip()} plus the
-     * picking check the purchase makes before it, restated in SQL so the
+     * {@see PackageDraftWorkflow::assertPackageReadyToShip()}, restated in SQL so the
      * Packages list can show and filter it without loading every draft.
      * PackageDraftStateTest holds the two versions together.
      */
@@ -286,11 +284,6 @@ class Package extends Model
     {
         $settings = app(SettingsService::class);
         $unshipped = PackageStatus::Unshipped->value;
-
-        $shipmentMayShip = (bool) $settings->get('picking_enabled', false)
-            && (bool) $settings->get('require_picking_before_shipping', false)
-            ? "EXISTS (SELECT 1 FROM shipments WHERE shipments.id = packages.shipment_id AND shipments.picking_status = '".PickingStatus::Picked->value."')"
-            : 'EXISTS (SELECT 1 FROM shipments WHERE shipments.id = packages.shipment_id)';
 
         // Scan-to-add and manual shipments have no shipment items, so they
         // are complete by definition, as in the workflow.
@@ -308,7 +301,8 @@ class Package extends Model
                 AND NOT EXISTS (SELECT 1 FROM package_items WHERE package_items.package_id = packages.id AND package_items.quantity > 0)
                 THEN '".PackageDraftState::Empty->value."'
             WHEN packages.weight > 0 AND packages.height > 0 AND packages.width > 0 AND packages.length > 0
-                AND {$shipmentMayShip} AND {$itemsComplete}
+                AND EXISTS (SELECT 1 FROM shipments WHERE shipments.id = packages.shipment_id)
+                AND {$itemsComplete}
                 THEN '".PackageDraftState::Ready->value."'
             ELSE '".PackageDraftState::Packing->value."'
         END";

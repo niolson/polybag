@@ -66,10 +66,6 @@ class BatchLabelService
             return 'Fulfilled by Amazon (FBA)';
         }
 
-        if ($shipment->isBlockedByPicking()) {
-            return 'Not picked yet';
-        }
-
         if ($shipment->needsShippingMethod()) {
             return 'No shipping method assigned';
         }
@@ -111,8 +107,7 @@ class BatchLabelService
 
     /**
      * Whether this batch cannot buy anything for the shipment without a report
-     * printer — `shopify-shipping-carrier/07` constraint 4, the skip beside
-     * "Not picked yet".
+     * printer — `shopify-shipping-carrier/07` constraint 4.
      *
      * Asked of every carrier the shipping method could rate-shop, because the
      * batch has not chosen one yet: a method that offers USPS beside UPS can

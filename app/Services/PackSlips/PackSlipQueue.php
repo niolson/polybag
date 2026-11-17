@@ -11,7 +11,6 @@ use App\Models\PickBatch;
 use App\Models\PickBatchShipment;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
-use App\Services\SettingsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Collection;
@@ -26,18 +25,6 @@ use Illuminate\Support\Collection;
  */
 class PackSlipQueue
 {
-    public function __construct(private readonly SettingsService $settings) {}
-
-    /**
-     * Whether pack slips print from pick batches instead, because picking is
-     * required before shipping. The queue then lists nothing.
-     */
-    public function printsFromPickBatches(): bool
-    {
-        return (bool) $this->settings->get('picking_enabled', false)
-            && (bool) $this->settings->get('require_picking_before_shipping', false);
-    }
-
     /**
      * Open Shipments never printed or whose slip is out of date, outside any
      * in-progress pick batch, most urgent first.
@@ -70,10 +57,6 @@ class PackSlipQueue
         $query = $this->inStates($tab, $filters)
             ->whereDoesntHave('pickBatchShipments', $this->inActiveBatch(...));
 
-        if ($this->printsFromPickBatches()) {
-            $query->whereRaw('1 = 0');
-        }
-
         return match ($tab) {
             PackSlipQueueTab::NotPrinted => $this->inUrgencyOrder($query),
             PackSlipQueueTab::Printed => $this->inPrintedOrder($query),
@@ -104,10 +87,6 @@ class PackSlipQueue
         PackSlipQueueFilters $filters = new PackSlipQueueFilters,
         PackSlipQueueTab $tab = PackSlipQueueTab::NotPrinted,
     ): array {
-        if ($this->printsFromPickBatches()) {
-            return ['count' => 0, 'batches' => new EloquentCollection];
-        }
-
         $shipmentIds = $this->inStates($tab, $filters)
             ->whereHas('pickBatchShipments', $this->inActiveBatch(...))
             ->pluck('shipments.id');

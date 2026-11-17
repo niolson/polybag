@@ -14,9 +14,11 @@ use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\CarrierPackaging;
 use App\Enums\CustomsDocumentDelivery;
 use App\Enums\PackageStatus;
+use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
+use App\Enums\ShipmentStatus;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnclassifiablePackagingException;
 use App\Exceptions\NoActiveCarrierServicesException;
@@ -28,6 +30,8 @@ use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\DataSource;
 use App\Models\Package;
+use App\Models\PickBatch;
+use App\Models\PickBatchShipment;
 use App\Models\Product;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
@@ -188,6 +192,37 @@ it('ships a package with the selected rate and marks it shipped', function (): v
         ->and($package->fresh()->status)->toBe(PackageStatus::Shipped)
         ->and($package->fresh()->tracking_number)->toBe('TRACK123')
         ->and($package->fresh()->shipped_by_user_id)->toBe($user->id);
+});
+
+it('takes a fully shipped shipment out of its in-progress pick batch', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    $package = createWorkflowPackage();
+    $batch = PickBatch::factory()->create(['status' => PickBatchStatus::InProgress, 'total_shipments' => 2]);
+    PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id, 'shipment_id' => $package->shipment_id]);
+    PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id, 'shipment_id' => Shipment::factory()->create(['picking_status' => PickingStatus::Batched])->id]);
+    $package->shipment->update(['picking_status' => PickingStatus::Batched]);
+
+    $adapter = Mockery::mock(CarrierAdapterInterface::class);
+    $adapter->shouldReceive('packagingRequirementFor')->andReturn(PackagingRequirement::shipperPackaging());
+    $adapter->shouldReceive('createShipment')->once()->andReturn(
+        ShipResponse::success(trackingNumber: 'TRACK123', cost: 7.25, carrier: 'MockCarrier', service: 'Ground', labelData: base64_encode('label'))
+    );
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package,
+        new PackageShippingRequest(
+            selectedRate: quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days')),
+            userId: $user->id,
+        ),
+    );
+
+    expect($result->success)->toBeTrue()
+        ->and($package->shipment->fresh()->status)->toBe(ShipmentStatus::Shipped)
+        ->and($package->shipment->fresh()->picking_status)->toBe(PickingStatus::Pending)
+        ->and($batch->pickBatchShipments()->where('shipment_id', $package->shipment_id)->exists())->toBeFalse()
+        ->and($batch->fresh()->status)->toBe(PickBatchStatus::InProgress)
+        ->and($batch->fresh()->total_shipments)->toBe(1);
 });
 
 it('refuses a rate that requires carrier packaging the package is not in', function (): void {
@@ -1296,21 +1331,6 @@ it('buys for a partly packed package when packing validation is off, but still w
 
     expect(fn () => app(PackageDraftWorkflow::class)->assertPackageReadyToShip($package))
         ->toThrow(PackageDraftIncompleteException::class, 'Enter the package\'s weight and dimensions.');
-});
-
-it('refuses to buy for a shipment that must be picked first', function (): void {
-    $this->actingAs($user = User::factory()->create());
-    $package = createWorkflowPackage();
-    $rate = quotedDirectly($package, new RateResponse('MockCarrier', 'GROUND', 'Ground', 7.25, '3 days'));
-    app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', true);
-    $package->shipment->update(['picking_status' => PickingStatus::Pending]);
-    refusingAdapter();
-
-    $result = app(PackageShippingWorkflow::class)->ship($package, new PackageShippingRequest(selectedRate: $rate, userId: $user->id));
-
-    expect($result->title)->toBe('Picking Required')
-        ->and($result->message)->toContain('has not been picked yet');
 });
 
 it('refuses an unready package on auto ship without quoting it, and keeps it for the packer to finish', function (): void {

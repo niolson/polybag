@@ -91,18 +91,6 @@ it('does not list a shipped Shipment', function (): void {
     expect(queuedIds())->toBe([]);
 });
 
-it('lists nothing when picking is required before shipping, and says slips print from batches', function (): void {
-    Shipment::factory()->create();
-    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
-
-    $queue = app(PackSlipQueue::class);
-
-    expect($queue->printsFromPickBatches())->toBeTrue()
-        ->and(queuedIds())->toBe([])
-        ->and($queue->next(10))->toBe([]);
-});
-
 it('orders expedited first, then oldest first, counting no shipping method as standard', function (): void {
     $expedited = ShippingMethod::factory()->create(['is_expedited' => true]);
     $standard = ShippingMethod::factory()->create(['is_expedited' => false]);
@@ -224,14 +212,6 @@ it('leaves off the Printed tab a Shipment in an in-progress pick batch, and repo
     expect(printedIds())->not->toContain($printed->id)
         ->and($leftOff['count'])->toBe(1)
         ->and($leftOff['batches']->modelKeys())->toBe([$batch->id]);
-});
-
-it('lists nothing on the Printed tab when picking is required before shipping', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
-    app(SettingsService::class)->set('require_picking_before_shipping', true, 'boolean');
-    printedShipment();
-
-    expect(printedIds())->toBe([]);
 });
 
 it('filters the Printed tab by Client, Channel and Shipping Method', function (): void {

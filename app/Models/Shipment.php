@@ -408,22 +408,6 @@ class Shipment extends Model
     }
 
     /**
-     * Whether picking is required and this shipment has not been picked yet,
-     * blocking packing and batch shipping.
-     */
-    public function isBlockedByPicking(): bool
-    {
-        if ($this->picking_status === PickingStatus::Picked) {
-            return false;
-        }
-
-        $settings = app(SettingsService::class);
-
-        return (bool) $settings->get('picking_enabled', false)
-            && (bool) $settings->get('require_picking_before_shipping', false);
-    }
-
-    /**
      * Whether this shipment has no shipping method, so nothing may be bought
      * for it (`carrier-catalog-reset/16`). It can still be packed.
      *

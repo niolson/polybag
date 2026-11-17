@@ -68,8 +68,7 @@ class PrintPackSlips extends Page implements HasTable
     }
 
     /**
-     * The Not Printed tab's count. Empty when slips print from pick batches,
-     * since the queue then lists nothing.
+     * The Not Printed tab's count.
      */
     public static function getNavigationBadge(): ?string
     {
@@ -106,11 +105,6 @@ class PrintPackSlips extends Page implements HasTable
         return PackSlipQueueTab::tryFrom($this->activeTab) ?? PackSlipQueueTab::NotPrinted;
     }
 
-    public function printsFromPickBatches(): bool
-    {
-        return app(PackSlipQueue::class)->printsFromPickBatches();
-    }
-
     /**
      * @return array{count: int, batches: EloquentCollection<int, PickBatch>}
      */
@@ -119,15 +113,13 @@ class PrintPackSlips extends Page implements HasTable
         return app(PackSlipQueue::class)->leftOffForPickBatches($this->queueFilters(), $this->activeTab());
     }
 
-    public function pickBatchUrl(?PickBatch $batch = null): ?string
+    public function pickBatchUrl(PickBatch $batch): ?string
     {
         if (! PickBatchResource::canAccess()) {
             return null;
         }
 
-        return $batch
-            ? PickBatchResource::getUrl('view', ['record' => $batch])
-            : PickBatchResource::getUrl();
+        return PickBatchResource::getUrl('view', ['record' => $batch]);
     }
 
     public function table(Table $table): Table
@@ -243,7 +235,7 @@ class PrintPackSlips extends Page implements HasTable
             Action::make('printNext')
                 ->label(fn (): string => 'Print next '.$this->user()->pack_slip_batch_size)
                 ->icon('heroicon-o-printer')
-                ->hidden(fn (): bool => $this->printsFromPickBatches() || $this->activeTab() === PackSlipQueueTab::Printed)
+                ->hidden(fn (): bool => $this->activeTab() === PackSlipQueueTab::Printed)
                 ->action(fn () => $this->print(app(PackSlipQueue::class)->run(
                     app(PackSlipQueue::class)->next($this->user()->pack_slip_batch_size, $this->queueFilters()),
                 ))),
@@ -251,7 +243,7 @@ class PrintPackSlips extends Page implements HasTable
                 ->label('Batch size')
                 ->icon('heroicon-o-adjustments-horizontal')
                 ->color('gray')
-                ->hidden(fn (): bool => $this->printsFromPickBatches() || $this->activeTab() === PackSlipQueueTab::Printed)
+                ->hidden(fn (): bool => $this->activeTab() === PackSlipQueueTab::Printed)
                 ->fillForm(fn (): array => ['pack_slip_batch_size' => $this->user()->pack_slip_batch_size])
                 ->schema([
                     TextInput::make('pack_slip_batch_size')

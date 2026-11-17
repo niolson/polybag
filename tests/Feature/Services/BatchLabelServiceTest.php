@@ -155,35 +155,8 @@ it('marks shipments with transparency-required items as ineligible', function ()
         ->and($result->ineligible->first()['reason'])->toBe('Contains transparency-required items');
 });
 
-it('marks unpicked shipments as ineligible when picking is required before shipping', function (): void {
+it('batch ships a shipment that has not been picked, even with picking on', function (): void {
     app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', true);
-
-    $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
-    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
-
-    $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
-
-    expect($result->ineligible)->toHaveCount(1)
-        ->and($result->ineligible->first()['reason'])->toBe('Not picked yet');
-});
-
-it('marks picked shipments as eligible when picking is required before shipping', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', true);
-
-    $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Picked]);
-    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
-
-    $result = $this->service->validateShipmentsForBatch(collect([$shipment]));
-
-    expect($result->eligible)->toHaveCount(1)
-        ->and($result->ineligible)->toBeEmpty();
-});
-
-it('does not require picking when the require setting is disabled', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', false);
 
     $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);

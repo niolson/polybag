@@ -55,10 +55,6 @@ function draftStatePack(Package $package, ShipmentItem $item, int $quantity): vo
  */
 function draftStatePurchaseAccepts(Package $package): bool
 {
-    if ($package->shipment?->isBlockedByPicking()) {
-        return false;
-    }
-
     try {
         app(PackageDraftWorkflow::class)->assertPackageReadyToShip($package);
 
@@ -116,17 +112,10 @@ it('computes the draft state the purchase readiness rule would', function (Closu
 
         return draftStatePackage($shipment, draftStateMeasured());
     }, PackageDraftState::Ready],
-    'fully packed but not picked' => [function (): Package {
+    'fully packed, picking on, not picked' => [function (): Package {
         app(SettingsService::class)->set('picking_enabled', true);
-        app(SettingsService::class)->set('require_picking_before_shipping', true);
 
-        return draftStatePackage(Shipment::factory()->create(['picking_status' => PickingStatus::Pending]), draftStateMeasured());
-    }, PackageDraftState::Packing],
-    'fully packed and picked' => [function (): Package {
-        app(SettingsService::class)->set('picking_enabled', true);
-        app(SettingsService::class)->set('require_picking_before_shipping', true);
-
-        return draftStatePackage(Shipment::factory()->create(['picking_status' => PickingStatus::Picked]), draftStateMeasured());
+        return draftStatePackage(Shipment::factory()->create(['picking_status' => PickingStatus::Batched]), draftStateMeasured());
     }, PackageDraftState::Ready],
 ]);
 

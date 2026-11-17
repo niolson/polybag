@@ -1087,39 +1087,15 @@ it('redirects to attended shipping when auto-ship requires a person to choose', 
 
 // --- picking gate ---
 
-it('blocks packing when picking is required and the shipment is not picked', function (): void {
+it('packs a shipment that has not been picked, even with picking on', function (PickingStatus $status): void {
     app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', true);
 
-    $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
-
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-        ->assertSet('shipment', null)
-        ->assertRedirect('/pack')
-        ->assertNotified();
-});
-
-it('allows packing a picked shipment when picking is required', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', true);
-
-    $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Picked]);
+    $shipment = Shipment::factory()->create(['picking_status' => $status]);
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSet('shipment.id', $shipment->id)
         ->assertNoRedirect();
-});
-
-it('allows packing an unpicked shipment when picking is not required before shipping', function (): void {
-    app(SettingsService::class)->set('picking_enabled', true);
-    app(SettingsService::class)->set('require_picking_before_shipping', false);
-
-    $shipment = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
-
-    Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-        ->assertSet('shipment.id', $shipment->id)
-        ->assertNoRedirect();
-});
+})->with([PickingStatus::Pending, PickingStatus::Batched]);
 
 // --- FBA gate ---
 

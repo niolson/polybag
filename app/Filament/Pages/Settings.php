@@ -68,11 +68,6 @@ class Settings extends Page
      */
     public const PACK_SLIPS_OFF_NOTE = 'PolyBag does not print pack slips (see Features), so this is not used. It is kept for when it does.';
 
-    /**
-     * Help for "Require Picking Before Shipping", shared with the Setup Wizard.
-     */
-    public const REQUIRE_PICKING_HELP = 'When enabled, shipments must be picked before they can be packed or batch shipped. Applies to all open shipments, including those created before picking was enabled. Pack slips then print from pick batches.';
-
     public static function canAccess(): bool
     {
         return auth()->user()->role->isAtLeast(Role::Admin);
@@ -101,7 +96,6 @@ class Settings extends Page
             'manual_ship_items_enabled' => $settings->manualShipItemsEnabled(),
             'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => $settings->get('picking_enabled', false),
-            'require_picking_before_shipping' => $settings->get('require_picking_before_shipping', false),
             'pick_to_tote_enabled' => $settings->get('pick_to_tote_enabled', true),
             'pick_summary_show_bin' => $settings->get('pick_summary_show_bin', true),
             'pick_summary_show_sku' => $settings->get('pick_summary_show_sku', true),
@@ -254,11 +248,6 @@ class Settings extends Page
                                                 ->helperText('When enabled, pickers can create pick batches and print picking summaries before packing.')
                                                 ->default(false)
                                                 ->live(),
-                                            Toggle::make('require_picking_before_shipping')
-                                                ->label('Require Picking Before Shipping')
-                                                ->helperText(self::REQUIRE_PICKING_HELP)
-                                                ->default(false)
-                                                ->visible(fn (Get $get): bool => (bool) $get('picking_enabled')),
                                             Toggle::make('amazon_features_enabled')
                                                 ->label('Amazon Features')
                                                 ->helperText(fn (): string => DataSource::hasActiveAmazonConnection()
@@ -737,7 +726,6 @@ class Settings extends Page
             'manual_ship_items_enabled' => (bool) ($data['manual_ship_items_enabled'] ?? false),
             'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),
             'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
-            'require_picking_before_shipping' => (bool) ($data['require_picking_before_shipping'] ?? false),
             'pick_to_tote_enabled' => (bool) ($data['pick_to_tote_enabled'] ?? true),
             'pick_summary_show_bin' => (bool) ($data['pick_summary_show_bin'] ?? true),
             'pick_summary_show_sku' => (bool) ($data['pick_summary_show_sku'] ?? true),

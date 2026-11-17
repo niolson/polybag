@@ -344,14 +344,6 @@ class Ship extends Page
             return;
         }
 
-        if ($this->package->shipment->isBlockedByPicking()) {
-            $this->notifyError('Picking Required', "Shipment {$this->package->shipment->shipment_reference} has not been picked yet.");
-            $this->package = null;
-            $this->redirect($this->returnUrl);
-
-            return;
-        }
-
         try {
             app(PackageDraftWorkflow::class)->assertPackageReadyToShip($this->package);
         } catch (PackageDraftIncompleteException $e) {
