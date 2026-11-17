@@ -160,7 +160,7 @@ it('returns a Shipment to the list when its items change after printing', functi
     Livewire::test(PrintPackSlips::class)->assertCanSeeTableRecords([$shipment]);
 });
 
-it('explains Shipments left off for in-progress pick batches and links managers to the batches', function (): void {
+it('explains Shipments left off for in-progress pick batches and links to the batches', function (): void {
     app(SettingsService::class)->set('picking_enabled', true, 'boolean');
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
 
@@ -173,7 +173,7 @@ it('explains Shipments left off for in-progress pick batches and links managers 
         ->assertSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
 });
 
-it('names the batches without links for a Shipper, who cannot open pick batches', function (): void {
+it('links a Packer to the batches too, since Packers can open pick batches', function (): void {
     app(SettingsService::class)->set('picking_enabled', true, 'boolean');
     $batch = PickBatch::factory()->create();
     PickBatchShipment::factory()->create(['pick_batch_id' => $batch->id]);
@@ -181,7 +181,7 @@ it('names the batches without links for a Shipper, who cannot open pick batches'
     Livewire::test(PrintPackSlips::class)
         ->assertSee('1 Shipment left off')
         ->assertSee("batch #{$batch->id}")
-        ->assertDontSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
+        ->assertSee(route('filament.app.resources.pick-batches.view', $batch), escape: false);
 });
 
 it('shows that pack slips print from pick batches when picking is required', function (): void {

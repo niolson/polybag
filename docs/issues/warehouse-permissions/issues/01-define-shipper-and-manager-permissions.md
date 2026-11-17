@@ -34,6 +34,9 @@ and access to commercial information may vary between companies.
   Manager-only; the shipper who bought a Label may still void it with the Pack page's
   "void last label" command, for a box that fell off the scale. **Done**: `printLabel`,
   `voidLabel`, and `voidOwnLabel` on `PackagePolicy`.
+- Shippers may create pick batches, print them, and mark them picked; cancelling a batch
+  is Manager-only. **Done** 2026-11-17 (`release-polish/53`): with picking required, a
+  shipper who could not make a batch could not move an unpicked Shipment forward.
 - Address validation is a billed API request per Shipment, so there is no bulk Validate
   Addresses action for any role. **Done**: removed from the Shipments table.
 - Most current management-oriented dashboard widgets should be hidden from shippers.
@@ -66,8 +69,8 @@ Only Manual Ship's Manager-or-Admin restriction above is settled for these actio
 | Choose service or override selection | Limit to approved choices | Service allowance, spending limits, and explicit override authority |
 | Reprint an existing Label | Allow | Duplicate-shipment prevention and reprint audit requirements |
 | Void a Label | Manager by default | Whether shippers may void their own recent purchases; reason and time limits |
-| Create pick batches | Undecided | Self-directed picking versus supervisor allocation |
-| Print an existing pick batch | Allow within work scope | Whether batches belong to a person, team, or Location |
+| Create pick batches | Allow (decided 2026-11-17) | Cancelling a batch stays Manager-only |
+| Print an existing pick batch | Allow (done 2026-11-17) | Whether batches belong to a person, team, or Location |
 | Print pack slips | Allow | Whether documents expose prices or commercial information |
 | Print invoices or other priced documents | Separate permission | Distinguish customer invoices, customs commercial invoices, and 3PL billing |
 | Report missing, damaged, or short items | Allow reporting | Reporting a discrepancy is separate from changing the order or approving shipment |
@@ -100,7 +103,7 @@ follow that lifecycle rather than treating a void as deleting a Shipment.
 1. Approve a complete action-by-role matrix, distinguishing read, create, edit, purchase,
    void, print, and override capabilities. Audit the existing policies against it.
 2. Decide which exceptions deserve company-wide shipper settings initially. Candidates
-   are address correction, pick-batch creation, Label voids, partial fulfillment,
+   are address correction, Label voids, partial fulfillment,
    priced documents, and service selection. Do not introduce all of them by default.
 3. Define visibility scope independently of role: own work, assigned Location(s), and
    permitted Client(s). Manager status should not implicitly mean every 3PL Client.

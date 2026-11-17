@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\PickBatches;
 
 use App\Enums\PickBatchStatus;
-use App\Enums\Role;
 use App\Filament\Pages\GeneratePickBatch;
 use App\Filament\Resources\PickBatches\Pages\ListPickBatches;
 use App\Filament\Resources\PickBatches\Pages\ViewPickBatch;
@@ -35,7 +34,7 @@ class PickBatchResource extends Resource
 
     public static function canAccess(): bool
     {
-        return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
+        return auth()->check()
             && app(SettingsService::class)->get('picking_enabled', false);
     }
 

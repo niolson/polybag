@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PickBatches\Pages;
 
 use App\Enums\PickBatchStatus;
+use App\Enums\Role;
 use App\Filament\Actions\ToggleAction;
 use App\Filament\Resources\PickBatches\PickBatchResource;
 use App\Models\PickBatch;
@@ -131,6 +132,7 @@ class ViewPickBatch extends ViewRecord
                 ->icon('heroicon-o-x-mark')
                 ->color('danger')
                 ->visible(fn (): bool => $this->record->status === PickBatchStatus::InProgress)
+                ->authorize(fn (): bool => auth()->user()?->role->isAtLeast(Role::Manager) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Cancel Pick Batch')
                 ->modalDescription('This will cancel the batch and return all shipments to pending picking status.')
