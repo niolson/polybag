@@ -5236,16 +5236,16 @@
         },
         {
             "name": "picqer/php-barcode-generator",
-            "version": "v3.3.0",
+            "version": "v3.3.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/picqer/php-barcode-generator.git",
-                "reference": "6beada2a30623832ff41b8c7d307c169736b8552"
+                "reference": "3e257d79a49308a88e394cf8ea88d867d6d17a72"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/picqer/php-barcode-generator/zipball/6beada2a30623832ff41b8c7d307c169736b8552",
-                "reference": "6beada2a30623832ff41b8c7d307c169736b8552",
+                "url": "https://api.github.com/repos/picqer/php-barcode-generator/zipball/3e257d79a49308a88e394cf8ea88d867d6d17a72",
+                "reference": "3e257d79a49308a88e394cf8ea88d867d6d17a72",
                 "shasum": ""
             },
             "require": {
@@ -5310,9 +5310,9 @@
             ],
             "support": {
                 "issues": "https://github.com/picqer/php-barcode-generator/issues",
-                "source": "https://github.com/picqer/php-barcode-generator/tree/v3.3.0"
+                "source": "https://github.com/picqer/php-barcode-generator/tree/v3.3.1"
             },
-            "time": "2026-08-22T09:50:32+00:00"
+            "time": "2026-11-10T08:27:22+00:00"
         },
         {
             "name": "pragmarx/google2fa",
