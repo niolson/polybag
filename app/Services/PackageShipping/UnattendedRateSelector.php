@@ -247,9 +247,19 @@ class UnattendedRateSelector
         }
 
         if (! $selection->attendedAlternativeAvailable) {
-            return $selection->deactivatedAnything()
-                ? $this->onlyInactiveServices($package, $selection)
-                : PackageShippingResult::failed('Shipping Error', 'No shipping rates available for this package.');
+            if ($selection->deactivatedAnything()) {
+                return $this->onlyInactiveServices($package, $selection);
+            }
+
+            // A carrier left out before it was rated says why: an address
+            // line it cannot take (`release-polish/44`), or a required
+            // service it lacks. Otherwise a batch row would only say "no rates".
+            $reasons = array_values(array_unique(array_column($this->shippingRateService->getExclusions(), 'reason')));
+
+            return PackageShippingResult::failed(
+                'Shipping Error',
+                $reasons === [] ? 'No shipping rates available for this package.' : implode(' ', $reasons),
+            );
         }
 
         if ($selection->contentRestrictedAnything()) {

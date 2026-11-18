@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
@@ -10,6 +11,7 @@ use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -50,6 +52,7 @@ use App\Services\Carriers\Concerns\ResolvesCarrierAccount;
 use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
 use App\Support\LabelText;
+use App\Support\NameLimit;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
@@ -60,7 +63,7 @@ use Saloon\Exceptions\Request\ServerException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
+class UpsAdapter implements DirectCarrierAdapter, LimitsAddressFieldLengths, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -91,6 +94,9 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
     /** The longest Name or AttentionName UPS's CreateShipment schema allows. */
     private const NAME_LENGTH = 35;
+
+    /** The longest AddressLine UPS's CreateShipment schema allows. */
+    private const STREET_LINE_LENGTH = 35;
 
     /** The longest City UPS's CreateShipment schema allows. */
     private const CITY_LENGTH = 30;
@@ -717,20 +723,20 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             $shipment = [
                 'Description' => 'Shipment',
                 'Shipper' => [
-                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
-                    'AttentionName' => $this->buildAttentionName($request->fromAddress),
+                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName, 'Shipper.Name'),
+                    'AttentionName' => $this->buildAttentionName($request->fromAddress, 'Shipper.AttentionName'),
                     'ShipperNumber' => $this->resolveAccountNumber($account),
                     ...$this->buildPhone($request->fromAddress),
                     'Address' => $this->buildAddress($request->fromAddress),
                 ],
                 'ShipTo' => [
-                    'Name' => $this->partyName($request->toAddress->firstName.' '.$request->toAddress->lastName),
-                    'AttentionName' => $this->buildAttentionName($request->toAddress),
+                    'Name' => $this->partyName($request->toAddress->firstName.' '.$request->toAddress->lastName, 'ShipTo.Name'),
+                    'AttentionName' => $this->buildAttentionName($request->toAddress, 'ShipTo.AttentionName'),
                     ...$this->buildPhone($request->toAddress),
                     'Address' => $this->buildAddress($request->toAddress, includeResidentialClassification: true),
                 ],
                 'ShipFrom' => [
-                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
+                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName, 'ShipFrom.Name'),
                     'Address' => $this->buildAddress($request->fromAddress),
                     ...$this->buildVendorInfo($request),
                     ...$this->buildExporterTaxId($request),
@@ -1553,19 +1559,30 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
      * international shipment; the company name stands in when the address names
      * no individual.
      */
-    private function buildAttentionName(AddressData $address): string
+    private function buildAttentionName(AddressData $address, string $field): string
     {
-        return $this->partyName(trim($address->firstName.' '.$address->lastName) ?: (string) $address->company);
+        return $this->partyName(trim($address->firstName.' '.$address->lastName) ?: (string) $address->company, $field);
     }
 
     /**
-     * A name cut to the 35 characters UPS's schema allows. UPS refuses a
-     * longer one, and the label is better with a shortened name than none
-     * (`release-polish/43`).
+     * A name cut to the 35 characters UPS's schema allows, with the cut
+     * logged. UPS refuses a longer one, and a shortened name does not
+     * misdirect the parcel (`release-polish/43`, `44`).
      */
-    private function partyName(string $name): string
+    private function partyName(string $name, string $field): string
     {
-        return mb_substr(trim($name), 0, self::NAME_LENGTH);
+        return NameLimit::cut($name, self::NAME_LENGTH, 'ups-validation', 'UPS', $field);
+    }
+
+    /**
+     * Street lines and city are sent as written, never cut: an address over
+     * UPS's limits is refused before it is rated or bought
+     * (`release-polish/44`).
+     */
+    public function addressFieldTooLong(AddressData $from, AddressData $to): ?AddressFieldTooLong
+    {
+        return AddressFieldTooLong::first('UPS', $from, true, self::STREET_LINE_LENGTH, self::CITY_LENGTH)
+            ?? AddressFieldTooLong::first('UPS', $to, false, self::STREET_LINE_LENGTH, self::CITY_LENGTH);
     }
 
     private function buildAddress(AddressData $address, bool $includeResidentialClassification = false): array
@@ -1575,7 +1592,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         return [
             ...array_filter([
                 'AddressLine' => $addressLines,
-                'City' => mb_substr(LabelText::asciiDigits($address->city), 0, self::CITY_LENGTH),
+                'City' => LabelText::asciiDigits($address->city),
                 'StateProvinceCode' => $address->stateOrProvince,
                 'PostalCode' => $address->postalCode,
                 'CountryCode' => $address->country,
@@ -1691,8 +1708,8 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             // its own schema leaves Contacts optional.
             'Contacts' => [
                 'SoldTo' => [
-                    'Name' => $this->buildAttentionName($request->toAddress),
-                    'AttentionName' => $this->buildAttentionName($request->toAddress),
+                    'Name' => $this->buildAttentionName($request->toAddress, 'SoldTo.Name'),
+                    'AttentionName' => $this->buildAttentionName($request->toAddress, 'SoldTo.AttentionName'),
                     ...$this->buildPhone($request->toAddress),
                     'Address' => $this->buildAddress($request->toAddress),
                 ],
@@ -2012,7 +2029,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         $address = $this->buildAddress($request->toAddress);
 
         return [
-            'CompanyName' => mb_substr($isCompany ? (string) $request->toAddress->company : $this->buildAttentionName($request->toAddress), 0, 35),
+            'CompanyName' => mb_substr($isCompany ? (string) $request->toAddress->company : $this->buildAttentionName($request->toAddress, 'UltimateConsignee.CompanyName'), 0, 35),
             'Address' => $address,
             // A company may be buying for its own use or to resell, and the
             // order does not say; only an individual is known to be a direct

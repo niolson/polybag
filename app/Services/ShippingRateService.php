@@ -6,12 +6,14 @@ use App\Contracts\AsyncRateQuoting;
 use App\Contracts\BlindPurchaseSource;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DeclaresSellableServices;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\PostageOfferSource;
 use App\DataTransferObjects\Customs\ResolvedCustomsTerms;
 use App\DataTransferObjects\PostageSources\OfferDraft;
 use App\DataTransferObjects\PostageSources\PostageSourceCandidate;
 use App\DataTransferObjects\PostageSources\PostageSourceResolution;
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\BlindPurchaseOffer;
 use App\DataTransferObjects\Shipping\DroppedRate;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -677,6 +679,7 @@ class ShippingRateService
         ]);
 
         $sources = app(PostageSourceResolver::class)->resolve($package, $shippingMethod);
+        $origin = $package->location ? AddressData::fromLocation($package->location) : null;
         $tasks = [];
 
         foreach ($this->assignServices($sources, $shippingMethod, $methodServices) as $assignment) {
@@ -692,12 +695,36 @@ class ShippingRateService
                 $rateRequest,
             );
 
+            if ($task && ($tooLong = $this->addressFieldTooLong($assignment['source'], $origin, $destination)) !== null) {
+                $this->exclude($task, $tooLong->message());
+
+                continue;
+            }
+
             if ($task) {
                 $tasks[] = $task;
             }
         }
 
         return $tasks;
+    }
+
+    /**
+     * An address field longer than the carrier takes. The carrier is left
+     * out with the reason rather than quoted for a label it would refuse, or
+     * that would carry a cut address (`release-polish/44`). The purchase
+     * checks again, for an offer quoted before the address changed.
+     */
+    private function addressFieldTooLong(string $sourceName, ?AddressData $origin, AddressData $destination): ?AddressFieldTooLong
+    {
+        $registry = app(CarrierRegistry::class);
+        $adapter = $registry->has($sourceName) ? $registry->get($sourceName) : null;
+
+        if (! $adapter instanceof LimitsAddressFieldLengths || $origin === null) {
+            return null;
+        }
+
+        return $adapter->addressFieldTooLong($origin, $destination);
     }
 
     /**

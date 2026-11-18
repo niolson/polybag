@@ -3,6 +3,7 @@
 namespace App\Services\Carriers;
 
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
 use App\DataTransferObjects\Customs\CustomsDeclaration;
@@ -10,6 +11,7 @@ use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\SellerTaxRegistration;
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackageData;
@@ -61,7 +63,7 @@ use Saloon\Exceptions\Request\Statuses\GatewayTimeoutException;
 use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 
-class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarrierAccount
+class FedexAdapter implements DirectCarrierAdapter, LimitsAddressFieldLengths, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -71,6 +73,12 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
     use IdentifiesCatalogServices;
     use ResolvesCarrierAccount;
     use ResolvesDeliveredAt;
+
+    /** The longest street line FedEx's Ship API allows. */
+    private const STREET_LINE_LENGTH = 35;
+
+    /** The longest city FedEx's Ship API allows. */
+    private const CITY_LENGTH = 35;
 
     /**
      * What the packer reads when FedEx never answered the label request.
@@ -1671,14 +1679,28 @@ class FedexAdapter implements DirectCarrierAdapter, SendsCustomsTerms, UsesCarri
     }
 
     /**
+     * Sent as written, never cut: an address over FedEx's limits is refused
+     * before it is rated or bought ({@see AddressFieldTooLong()}).
+     *
      * @return list<string>
      */
     private function buildStreetLines(?string $streetAddress, ?string $streetAddress2): array
     {
         return array_values(array_filter(array_map(
-            fn (?string $line): ?string => filled($line) ? mb_substr($this->labelText($line, 'streetLines'), 0, 35) : null,
+            fn (?string $line): ?string => filled($line) ? $this->labelText($line, 'streetLines') : null,
             [$streetAddress, $streetAddress2],
         )));
+    }
+
+    /**
+     * FedEx's Ship API caps each street line and the city at 35 characters.
+     * It accepts a third street line, but a sandbox label could not show it
+     * printed, so PolyBag sends two (`release-polish/44`).
+     */
+    public function addressFieldTooLong(AddressData $from, AddressData $to): ?AddressFieldTooLong
+    {
+        return AddressFieldTooLong::first('FedEx', $from, true, self::STREET_LINE_LENGTH, self::CITY_LENGTH)
+            ?? AddressFieldTooLong::first('FedEx', $to, false, self::STREET_LINE_LENGTH, self::CITY_LENGTH);
     }
 
     /**

@@ -1265,14 +1265,14 @@ it('builds an international label request that conforms to the UPS Shipping sche
     });
 });
 
-it('cuts long names and cities to the lengths the UPS Shipping schema allows', function (): void {
+it('cuts long names to the length the UPS Shipping schema allows', function (): void {
     fakeUpsShipEndpoints();
 
     $longName = new AddressData(
         firstName: 'Maria Fernanda de los Angeles',
         lastName: 'Gutierrez-Montenegro',
         streetAddress: '4500 Shore Blvd',
-        city: 'Rancho Santa Margarita Heights North',
+        city: 'Rancho Santa Margarita Heights',
         stateOrProvince: 'CA',
         postalCode: '92688',
         company: 'Pacific Northwest Outdoor Supply Company',
@@ -1295,6 +1295,42 @@ it('cuts long names and cities to the lengths the UPS Shipping schema allows', f
             ->and($shipment['Shipper']['Name'])->toBe('Pacific Northwest Outdoor Supply Co')
             ->and($shipment['ShipTo']['AttentionName'])->toBe('Maria Fernanda de los Angeles Gutie')
             ->and($shipment['ShipTo']['Address']['City'])->toBe('Rancho Santa Margarita Heights');
+
+        return true;
+    });
+});
+
+it('logs each UPS name it cuts, with lengths but not the name', function (): void {
+    fakeUpsShipEndpoints();
+    $channel = Mockery::spy();
+    Log::shouldReceive('channel')->andReturnUsing(fn (string $name): object => $name === 'ups-validation' ? $channel : Mockery::spy());
+
+    $longName = new AddressData('Maria Fernanda de los Angeles', 'Gutierrez-Montenegro', '4500 Shore Blvd', 'Rancho Santa Margarita', 'CA', '92688');
+
+    $this->adapter->createShipment(upsShipRequestTo($longName));
+
+    $channel->shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'UPS name cut to its 35-character limit'
+        && $context === ['field' => 'ShipTo.Name', 'length' => 50, 'limit' => 35]);
+});
+
+it('names the first UPS street line or city over its limit, and sends neither cut', function (): void {
+    $from = new AddressData('Shipping', 'Center', '123 Warehouse St', 'Seattle', 'WA', '98072');
+    $longCity = new AddressData('Jane', 'Doe', '456 Main St', 'Rancho Santa Margarita Heights North', 'CA', '92688');
+    $longStreet = new AddressData('Jane', 'Doe', '12345 North Saint Clair Shores Boulevard', 'Seattle', 'WA', '98101');
+
+    expect($this->adapter->addressFieldTooLong($from, $longCity)?->limit)->toBe(30)
+        ->and($this->adapter->addressFieldTooLong($from, $longStreet)?->field)->toBe('address line 1')
+        ->and($this->adapter->addressFieldTooLong($from, $from))->toBeNull();
+
+    fakeUpsShipEndpoints();
+    $this->adapter->createShipment(upsShipRequestTo($longCity));
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        expect($request->body()->all()['ShipmentRequest']['Shipment']['ShipTo']['Address']['City'])->toBe('Rancho Santa Margarita Heights North');
 
         return true;
     });

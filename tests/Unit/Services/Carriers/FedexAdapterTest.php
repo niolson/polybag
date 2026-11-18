@@ -467,8 +467,8 @@ it('sends the full destination and explicit residential boolean on rate requests
         destinationStateOrProvince: 'CA',
         residential: $residential,
         packages: [new PackageData(weight: 2.0, length: 10, width: 8, height: 4)],
-        destinationStreetAddress: '1234567890123456789012345678901234567890',
-        destinationStreetAddress2: 'Suite 4567890123456789012345678901234567890',
+        destinationStreetAddress: '12345678901234567890123456789012345',
+        destinationStreetAddress2: 'Suite 45678901234567890123456789012',
     ), ['FEDEX_GROUND']);
 
     Saloon::assertSent(function ($request) use ($residential): bool {
@@ -1049,7 +1049,7 @@ it('creates shipment and sends the resolved residential classification', functio
     $toAddress = new AddressData(
         firstName: 'John',
         lastName: 'Doe',
-        streetAddress: '1234567890123456789012345678901234567890',
+        streetAddress: '12345678901234567890123456789012345',
         city: 'Los Angeles',
         stateOrProvince: 'CA',
         postalCode: '90210',
@@ -2840,13 +2840,30 @@ it('sends names, address lines, cities and commodity text to FedEx as ASCII', fu
         ->and($commodity['description'])->toBe('Cafe creme');
 });
 
-it('cuts a FedEx street line to 35 characters after transliterating it', function (): void {
+it('sends a FedEx street line transliterated and whole, never cut', function (): void {
     fakeFedexShipEndpoints();
 
-    $this->adapter->createShipment(fedexShipRequestToPoland(recipientStreet: 'ul. Księcia Józefa Poniatowskiego 1234'));
+    $this->adapter->createShipment(fedexShipRequestToPoland(recipientStreet: 'ul. Księcia Józefa Poniatowskiego 1'));
 
     expect(sentFedexRequestedShipment()['recipients'][0]['address']['streetLines'][0])
         ->toBe('ul. Ksiecia Jozefa Poniatowskiego 1');
+});
+
+it('names the first FedEx street line or city over 35 characters', function (): void {
+    $from = new AddressData('Shipping', 'Center', '123 Warehouse St', 'Seattle', 'WA', '98072');
+    $fits = new AddressData('Jane', 'Doe', '12345678901234567890123456789012345', 'Los Angeles', 'CA', '90210');
+    $longLine2 = new AddressData('Jane', 'Doe', '456 Main St', 'Los Angeles', 'CA', '90210', streetAddress2: 'Building C, Suite 400, Attn Receiving');
+    $longCity = new AddressData('Jane', 'Doe', '456 Main St', 'Rancho Santa Margarita Heights North', 'CA', '92688');
+
+    $tooLong = $this->adapter->addressFieldTooLong($from, $longLine2);
+
+    expect($this->adapter->addressFieldTooLong($from, $fits))->toBeNull()
+        ->and($tooLong?->field)->toBe('address line 2')
+        ->and($tooLong?->length)->toBe(37)
+        ->and($tooLong?->limit)->toBe(35)
+        ->and($tooLong?->message())->toBe('Address line 2 is 37 characters, and FedEx takes 35. Ask a manager to shorten it on the Shipment; common abbreviations such as ST, AVE and APT usually do it.')
+        ->and($this->adapter->addressFieldTooLong($from, $longCity)?->field)->toBe('city')
+        ->and($this->adapter->addressFieldTooLong($longCity, $fits)?->message())->toStartWith('The ship-from city is 36 characters');
 });
 
 it('keeps a FedEx house number written in non-ASCII digits', function (): void {

@@ -2907,3 +2907,18 @@ describe('the order\'s currency on a military customs form (order-currency/02)',
         expect($this->adapter->declaredCustomsTerms($request)->isEmpty())->toBeTrue();
     });
 });
+
+it('names the first USPS street line or city over its limit, the city by the address type', function (): void {
+    $from = new AddressData('Shipping', 'Center', '123 Warehouse St', 'Seattle', 'WA', '98072');
+    $domesticCity29 = new AddressData('Jane', 'Doe', '456 Main St', 'Rancho Santa Margarita Height', 'CA', '92688');
+    $internationalCity29 = new AddressData('Jan', 'Kowalski', 'ul. Prosta 1', 'Wodzislaw Slaski Kokoszycekk1', null, '44-300', country: 'PL');
+    $longStreet = new AddressData('Jane', 'Doe', '12345 North Saint Clair Shores Boulevard Apartment 1207', 'Seattle', 'WA', '98101');
+
+    expect($this->adapter->addressFieldTooLong($from, $domesticCity29)?->limit)->toBe(28)
+        ->and(mb_strlen('Rancho Santa Margarita Height'))->toBe(29)
+        ->and(mb_strlen('Wodzislaw Slaski Kokoszycekk1'))->toBe(29)
+        ->and($this->adapter->addressFieldTooLong($from, $internationalCity29))->toBeNull()
+        ->and($this->adapter->addressFieldTooLong($from, $longStreet)?->field)->toBe('address line 1')
+        ->and($this->adapter->addressFieldTooLong($from, $longStreet)?->limit)->toBe(50)
+        ->and($this->adapter->addressFieldTooLong($domesticCity29, $from)?->isShipFrom)->toBeTrue();
+});
