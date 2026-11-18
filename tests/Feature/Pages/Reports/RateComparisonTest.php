@@ -187,12 +187,11 @@ it('compares the active Label with its own quote session after a void and re-buy
     // The voided Label's quote is still selected; only the active Label's counts.
     expect(RateQuote::query()->where('package_id', $package->id)->where('selected', true)->count())->toBe(2);
 
-    $component = Livewire::actingAs($user)->test(RateComparison::class)
+    Livewire::actingAs($user)->test(RateComparison::class)
         ->assertCanSeeTableRecords([$package])
         ->assertSeeInOrder(['MockCarrier — $11.00', 'MockCarrier — $9.00', '$2.00'])
         ->assertDontSee('CheapCarrier')
         ->assertDontSee('$7.25')
-        ->assertDontSee('$6.00');
-
-    expect($component->instance()->getSavingsSummary())->toBe(['savings' => 2.0, 'spend' => 11.0, 'packages' => 1]);
+        ->assertDontSee('$6.00')
+        ->assertSee('18.2% of the $11.00 spent on postage for 1 compared packages');
 })->group('mysql');
