@@ -223,7 +223,7 @@ class PickBatchService
             'pickBatch' => $batch,
             'rows' => $this->summaryRows($batch),
             'columns' => [
-                'bin' => (bool) $this->settings->get('pick_summary_show_bin', true),
+                'bin' => (bool) $this->settings->get('pick_summary_show_bin', false),
                 'sku' => (bool) $this->settings->get('pick_summary_show_sku', true),
                 'barcode' => (bool) $this->settings->get('pick_summary_show_barcode', false),
                 'totes' => $batch->pickBatchShipments()->whereNotNull('tote_code')->exists(),

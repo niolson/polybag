@@ -97,7 +97,7 @@ class Settings extends Page
             'pack_slips_enabled' => $settings->packSlipsEnabled(),
             'picking_enabled' => $settings->get('picking_enabled', false),
             'pick_to_tote_enabled' => $settings->get('pick_to_tote_enabled', true),
-            'pick_summary_show_bin' => $settings->get('pick_summary_show_bin', true),
+            'pick_summary_show_bin' => $settings->get('pick_summary_show_bin', false),
             'pick_summary_show_sku' => $settings->get('pick_summary_show_sku', true),
             'pick_summary_show_barcode' => $settings->get('pick_summary_show_barcode', false),
             'label_reference_source' => $settings->get('label_reference_source', LabelReferenceResolver::DEFAULT_SOURCE->value),
@@ -245,7 +245,7 @@ class Settings extends Page
                                                 ->live(),
                                             Toggle::make('picking_enabled')
                                                 ->label('PolyBag Prints Pick Batches')
-                                                ->helperText('When enabled, pickers can create pick batches and print picking summaries before packing.')
+                                                ->helperText('When enabled, anyone can create pick batches and print picking summaries before packing.')
                                                 ->default(false)
                                                 ->live(),
                                             Toggle::make('amazon_features_enabled')
@@ -499,7 +499,7 @@ class Settings extends Page
                                             Toggle::make('pick_summary_show_bin')
                                                 ->label('Bin Column')
                                                 ->helperText('The product\'s bin location. Rows are sorted by bin either way.')
-                                                ->default(true),
+                                                ->default(false),
                                             Toggle::make('pick_summary_show_sku')
                                                 ->label('SKU Column')
                                                 ->default(true),
@@ -727,7 +727,7 @@ class Settings extends Page
             'pack_slips_enabled' => (bool) ($data['pack_slips_enabled'] ?? true),
             'picking_enabled' => (bool) ($data['picking_enabled'] ?? false),
             'pick_to_tote_enabled' => (bool) ($data['pick_to_tote_enabled'] ?? true),
-            'pick_summary_show_bin' => (bool) ($data['pick_summary_show_bin'] ?? true),
+            'pick_summary_show_bin' => (bool) ($data['pick_summary_show_bin'] ?? false),
             'pick_summary_show_sku' => (bool) ($data['pick_summary_show_sku'] ?? true),
             'pick_summary_show_barcode' => (bool) ($data['pick_summary_show_barcode'] ?? false),
             'label_reference_source' => ($labelReferenceSource ?? LabelReferenceResolver::DEFAULT_SOURCE)->value,
