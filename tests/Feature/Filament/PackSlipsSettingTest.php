@@ -67,7 +67,9 @@ describe('the setting', function (): void {
         Livewire::test(Settings::class)
             ->fillForm(['picking_enabled' => true])
             ->assertSee('PolyBag Prints Pack Slips')
-            ->assertSee('PolyBag Prints Pick Batches');
+            ->assertSee('PolyBag Prints Pick Batches')
+            ->assertSee('When enabled, anyone can create pick batches')
+            ->assertDontSee('pickers can create');
     });
 });
 

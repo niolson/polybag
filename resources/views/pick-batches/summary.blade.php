@@ -34,9 +34,9 @@
 
     <h1>Picking Summary — Batch #{{ $pickBatch->id }}</h1>
     <div class="meta">
-        {{ $pickBatch->created_at->format('M j, Y g:i A') }} &middot;
+        {{ $pickBatch->created_at->timezone(\App\Models\Location::timezone())->format('M j, Y g:i A') }} &middot;
         {{ $pickBatch->total_shipments }} {{ Str::plural('order', $pickBatch->total_shipments) }} &middot;
-        {{ count($rows) }} {{ Str::plural('SKU', count($rows)) }}
+        {{ count($rows) }} {{ count($rows) === 1 ? 'SKU' : 'SKUs' }}
     </div>
 
     <table>

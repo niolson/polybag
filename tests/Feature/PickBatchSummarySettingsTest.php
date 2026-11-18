@@ -5,6 +5,7 @@ use App\Filament\Pages\Settings;
 use App\Filament\Resources\PickBatches\Pages\ViewPickBatch;
 use App\Filament\Resources\PickBatches\RelationManagers\PickBatchShipmentsRelationManager;
 use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
+use App\Models\Location;
 use App\Models\PickBatch;
 use App\Models\Product;
 use App\Models\Shipment;
@@ -12,7 +13,9 @@ use App\Models\ShipmentItem;
 use App\Models\User;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
+use Carbon\Carbon;
 use Filament\Actions\Action;
+use Illuminate\Support\Facades\Cache;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -46,22 +49,24 @@ function summaryBatch(User $user): PickBatch
     return app(PickBatchService::class)->createFromShipments(collect([$first, $second]), $user);
 }
 
-it('prints bin, SKU and totes but no barcode by default', function (): void {
+it('prints SKU and totes but no bin or barcode by default', function (): void {
     $batch = summaryBatch($this->user);
 
     $this->get(route('pick-batches.summary', $batch))
         ->assertOk()
-        ->assertSeeInOrder(['<th>Bin</th>', '<th>SKU</th>', '<th>Product</th>', '<th>Qty</th>', '<th>Totes</th>'], escape: false)
+        ->assertSeeInOrder(['<th>SKU</th>', '<th>Product</th>', '<th>Qty</th>', '<th>Totes</th>'], escape: false)
+        ->assertDontSee('<th>Bin</th>', escape: false)
+        ->assertDontSee('A-01-03')
         ->assertDontSee('<th>Barcode</th>', escape: false)
         ->assertDontSee('012345678905')
-        ->assertSee('A-01-03')
+        ->assertSee('SKU-WIDGET')
         ->assertSee('T01')
         ->assertDontSee('ORD-1001');
 });
 
 it('drops and adds the optional columns from settings', function (): void {
     $settings = app(SettingsService::class);
-    $settings->set('pick_summary_show_bin', false, 'boolean');
+    $settings->set('pick_summary_show_bin', true, 'boolean');
     $settings->set('pick_summary_show_sku', false, 'boolean');
     $settings->set('pick_summary_show_barcode', true, 'boolean');
 
@@ -69,12 +74,33 @@ it('drops and adds the optional columns from settings', function (): void {
 
     $this->get(route('pick-batches.summary', $batch))
         ->assertOk()
-        ->assertDontSee('<th>Bin</th>', escape: false)
+        ->assertSeeInOrder(['<th>Bin</th>', '<th>Product</th>', '<th>Barcode</th>'], escape: false)
+        ->assertSee('A-01-03')
         ->assertDontSee('<th>SKU</th>', escape: false)
-        ->assertDontSee('A-01-03')
         ->assertDontSee('SKU-WIDGET')
-        ->assertSee('<th>Barcode</th>', escape: false)
         ->assertSee('012345678905');
+});
+
+it('dates the header in the location\'s timezone and counts SKUs', function (): void {
+    Location::factory()->create(['is_default' => true, 'timezone' => 'America/Chicago']);
+    Cache::forget('location_default_timezone');
+
+    $batch = summaryBatch($this->user);
+    $batch->forceFill(['created_at' => Carbon::parse('2026-11-17 18:56:00', 'UTC')])->save();
+
+    $this->get(route('pick-batches.summary', $batch))
+        ->assertOk()
+        ->assertSee('Nov 17, 2026 12:56 PM')
+        ->assertDontSee('6:56 PM')
+        ->assertSee('1 SKU')
+        ->assertDontSee('SKUS');
+
+    $other = Product::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $batch->pickBatchShipments()->first()->shipment_id, 'product_id' => $other->id]);
+
+    $this->get(route('pick-batches.summary', $batch))
+        ->assertSee('2 SKUs')
+        ->assertDontSee('SKUS');
 });
 
 describe('with pick to totes off', function (): void {
@@ -144,12 +170,12 @@ describe('the settings', function (): void {
     it('saves from the Pick Batches section', function (): void {
         Livewire::test(Settings::class)
             ->assertSet('data.pick_to_tote_enabled', true)
-            ->assertSet('data.pick_summary_show_bin', true)
+            ->assertSet('data.pick_summary_show_bin', false)
             ->assertSet('data.pick_summary_show_sku', true)
             ->assertSet('data.pick_summary_show_barcode', false)
             ->fillForm([
                 'pick_to_tote_enabled' => false,
-                'pick_summary_show_bin' => false,
+                'pick_summary_show_bin' => true,
                 'pick_summary_show_barcode' => true,
             ])
             ->call('save')
@@ -158,7 +184,7 @@ describe('the settings', function (): void {
         $settings = app(SettingsService::class);
 
         expect($settings->get('pick_to_tote_enabled'))->toBeFalse()
-            ->and($settings->get('pick_summary_show_bin'))->toBeFalse()
+            ->and($settings->get('pick_summary_show_bin'))->toBeTrue()
             ->and($settings->get('pick_summary_show_sku'))->toBeTrue()
             ->and($settings->get('pick_summary_show_barcode'))->toBeTrue();
     });
