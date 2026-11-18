@@ -130,6 +130,12 @@ class ValidateShipmentsCommand extends Command
                         $this->newLine();
                         $this->warn("  Skipped {$shipment->shipment_reference}: validators unavailable");
                         break;
+
+                    case AddressValidationOutcome::Incomplete:
+                        $results['skipped']++;
+                        $this->newLine();
+                        $this->warn("  Unfinished {$shipment->shipment_reference}: a validator was unavailable; the next run asks only the ones still to answer");
+                        break;
                 }
             } catch (\Exception $e) {
                 $results['errors']++;
