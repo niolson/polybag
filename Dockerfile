@@ -1,6 +1,6 @@
 # Stage 1: Install Composer dependencies
 # Pin digests to prevent supply chain attacks — update with `docker manifest inspect <image>`
-FROM php:8.4.27-cli-alpine@sha256:d8784155c4d37986be9ddd7a8950df7e78998cc48e35472cd69e2b9371424a65 AS vendor
+FROM php:8.4.27-cli-alpine@sha256:b9014f1cc1983827459faed83b315a40ead9860bdadefc042b31f1540ef8c746 AS vendor
 
 COPY --from=composer:latest /usr/bin/composer /usr/bin/composer
 
@@ -23,7 +23,7 @@ COPY --from=vendor /app/vendor vendor
 RUN npm run build
 
 # Stage 3: PHP application
-FROM php:8.4.27-fpm@sha256:64aff665308e23ba8804a6c43f75837e9bcdcc31735fc0f74af8899fe5304b07 AS app
+FROM php:8.4.27-fpm@sha256:212c3c9fc09d58f6b1a12b0b4a6a90fd44a209299a67633c2bccbc1dd53c55e0 AS app
 
 # Changing this on every build forces apt-get to re-fetch the package index
 # instead of reusing a stale cached layer, so OS security patches (e.g. Debian
