@@ -15,7 +15,9 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
 
@@ -43,28 +45,21 @@ class RateComparison extends Page implements HasTable
 
     public function table(Table $table): Table
     {
-        // JOIN rate_quotes directly (not as a derived table) so the date
-        // filter on packages.shipped_at applies BEFORE the aggregation.
-        // MySQL uses the (status, shipped_at) composite index to narrow
-        // packages first, then aggregates only their rate_quotes.
         return $table
             ->query(
-                Package::query()
-                    ->where('packages.status', PackageStatus::Shipped->value)
-                    ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
+                $this->comparedPackages()
                     ->select([
                         'packages.id',
                         'packages.shipment_id',
                         'packages.shipped_at',
                         'packages.carrier',
-                        DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),
-                        DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.carrier END) as selected_carrier'),
-                        DB::raw('MIN(rq_all.quoted_price) as cheapest_price'),
-                        DB::raw('COUNT(rq_all.id) as rate_quotes_count'),
-                        DB::raw('(SELECT rq.carrier FROM rate_quotes rq WHERE rq.package_id = packages.id ORDER BY rq.quoted_price ASC LIMIT 1) as cheapest_carrier'),
+                        'rq_bought.quoted_price as selected_price',
+                        'rq_bought.carrier as selected_carrier',
+                        DB::raw('MIN(rq_session.quoted_price) as cheapest_price'),
+                        DB::raw('COUNT(rq_session.id) as rate_quotes_count'),
+                        DB::raw('(SELECT rq.carrier FROM rate_quotes rq WHERE rq.package_id = rq_bought.package_id AND rq.created_at = rq_bought.created_at ORDER BY rq.quoted_price ASC, rq.id ASC LIMIT 1) as cheapest_carrier'),
                     ])
-                    ->groupBy('packages.id', 'packages.shipment_id', 'packages.shipped_at', 'packages.carrier')
-                    ->havingRaw('COUNT(rq_all.id) >= 2 AND MAX(CASE WHEN rq_all.selected = 1 THEN 1 END) = 1')
+                    ->groupBy('packages.id', 'packages.shipment_id', 'packages.shipped_at', 'packages.carrier', 'rq_bought.id', 'rq_bought.package_id', 'rq_bought.created_at', 'rq_bought.quoted_price', 'rq_bought.carrier')
                     ->with('shipment')
             )
             ->defaultSort('shipped_at', 'desc')
@@ -79,12 +74,12 @@ class RateComparison extends Page implements HasTable
                 Tables\Columns\TextColumn::make('selected_rate')
                     ->label('Selected Rate')
                     ->state(fn (Package $record): string => $record->selected_carrier
-                        ? Carrier::labelForName($record->selected_carrier)." — \${$record->selected_price}"
+                        ? Carrier::labelForName($record->selected_carrier).' — $'.number_format((float) $record->selected_price, 2)
                         : '—'),
                 Tables\Columns\TextColumn::make('cheapest_rate')
                     ->label('Cheapest Rate')
                     ->state(fn (Package $record): string => $record->cheapest_carrier
-                        ? Carrier::labelForName($record->cheapest_carrier)." — \${$record->cheapest_price}"
+                        ? Carrier::labelForName($record->cheapest_carrier).' — $'.number_format((float) $record->cheapest_price, 2)
                         : '—'),
                 Tables\Columns\TextColumn::make('savings')
                     ->label('Potential Savings')
@@ -121,6 +116,38 @@ class RateComparison extends Page implements HasTable
             ->filtersFormColumns(3);
     }
 
+    /**
+     * Shipped Packages joined to the quote their active Label was bought from
+     * and to every quote of that same quote session, ungrouped.
+     *
+     * Read through the active Label, not the `selected` flag: after a void and
+     * re-buy the voided Label's quote is selected too, and its session priced
+     * rates the packer could no longer buy (`release-polish/03`). A quote
+     * session is one rate shopping call, whose rows share `created_at`. A
+     * Label with no quote — a blind purchase, or a quote since purged — is
+     * left out, and so is a session that offered only the rate bought.
+     *
+     * Joined directly rather than through a derived table, so the date filter
+     * on `packages.shipped_at` narrows Packages before the aggregation.
+     *
+     * @return Builder<Package>
+     */
+    private function comparedPackages(): Builder
+    {
+        return Package::query()
+            ->where('packages.status', PackageStatus::Shipped->value)
+            ->join('package_labels as active_label', function (JoinClause $join): void {
+                $join->on('active_label.package_id', '=', 'packages.id')
+                    ->whereNull('active_label.voided_at');
+            })
+            ->join('rate_quotes as rq_bought', 'rq_bought.id', '=', 'active_label.rate_quote_id')
+            ->join('rate_quotes as rq_session', function (JoinClause $join): void {
+                $join->on('rq_session.package_id', '=', 'rq_bought.package_id')
+                    ->on('rq_session.created_at', '=', 'rq_bought.created_at');
+            })
+            ->havingRaw('COUNT(rq_session.id) >= 2');
+    }
+
     public function resolveTableRecord(?string $key): ?Model
     {
         return Package::find($key);
@@ -139,15 +166,12 @@ class RateComparison extends Page implements HasTable
      */
     public function getSavingsSummary(): array
     {
-        $baseQuery = Package::query()
-            ->where('packages.status', PackageStatus::Shipped->value)
-            ->join('rate_quotes as rq_all', 'rq_all.package_id', '=', 'packages.id')
+        $baseQuery = $this->comparedPackages()
             ->select([
-                DB::raw('MAX(CASE WHEN rq_all.selected = 1 THEN rq_all.quoted_price END) as selected_price'),
-                DB::raw('MIN(rq_all.quoted_price) as cheapest_price'),
+                'rq_bought.quoted_price as selected_price',
+                DB::raw('MIN(rq_session.quoted_price) as cheapest_price'),
             ])
-            ->groupBy('packages.id')
-            ->havingRaw('COUNT(rq_all.id) >= 2 AND MAX(CASE WHEN rq_all.selected = 1 THEN 1 END) = 1');
+            ->groupBy('packages.id', 'rq_bought.id', 'rq_bought.quoted_price');
 
         // Apply active table filters (date range, carrier)
         $baseQuery = $this->applyFiltersToTableQuery($baseQuery)->reorder();

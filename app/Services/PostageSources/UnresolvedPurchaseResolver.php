@@ -246,7 +246,7 @@ class UnresolvedPurchaseResolver
                 metadata: $locked->postageDataSource?->source_type === AmazonSource::class
                     ? AmazonBuyShippingAdapter::labelMetadata($locked, $sourceReference)
                     : [],
-            ), $locked->postage_source, $user->id, $locked->carrier_service_id, $announce, $locked->declared_customs_terms);
+            ), $locked->postage_source, $user->id, $locked->carrier_service_id, $announce, $locked->declared_customs_terms, $locked->rate_quote_id);
 
             // A recorded purchase marks its quote selected, as the purchase
             // path's own recording does (`release-polish/03`).

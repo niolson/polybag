@@ -723,8 +723,15 @@ class DemoReset extends Command
             'updated_at' => $shippedAt->format('Y-m-d H:i:s'),
         ]);
 
+        // The bought rate first, so the Label can point at the quote it was
+        // bought from, as Rate Comparison reads it.
+        [$boughtQuote, $otherQuotes] = $this->fabricateRateQuotes($packageId, $carrier, $service, (float) $projected['cost'], $shippedAt);
+        $rateQuoteId = DB::table('rate_quotes')->insertGetId($boughtQuote);
+        DB::table('rate_quotes')->insert($otherQuotes);
+
         DB::table('package_labels')->insert(PackageLabel::projectionFrom($projected) + [
             'package_id' => $packageId,
+            'rate_quote_id' => $rateQuoteId,
             'created_at' => $shippedAt->format('Y-m-d H:i:s'),
             'updated_at' => $shippedAt->format('Y-m-d H:i:s'),
         ]);
@@ -742,17 +749,16 @@ class DemoReset extends Command
             DB::table('package_items')->insert($packageItemRows);
         }
 
-        DB::table('rate_quotes')->insert($this->fabricateRateQuotes($packageId, $carrier, $service, (float) $projected['cost'], $shippedAt));
-
         return $shippedAt;
     }
 
     /**
      * The quotes the packer chose from: the bought rate, selected, and one to
-     * three other services, so Rate Comparison has history to show.
+     * three other services, so Rate Comparison has history to show. One quote
+     * session: every row shares its `created_at`.
      *
      * @param  array{code: string, name: string, weight: int, costMin: float, costMax: float}  $bought
-     * @return array<int, array<string, mixed>>
+     * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>} The bought quote, then the others
      */
     private function fabricateRateQuotes(int $packageId, string $carrier, array $bought, float $cost, CarbonInterface $shippedAt): array
     {
@@ -767,7 +773,7 @@ class DemoReset extends Command
             ->shuffle()
             ->take(mt_rand(1, 3));
 
-        return $alternatives
+        $others = $alternatives
             ->map(fn (array $service): array => [
                 'package_id' => $packageId,
                 'carrier' => $service['carrier'],
@@ -777,17 +783,18 @@ class DemoReset extends Command
                 'selected' => false,
                 'created_at' => $quotedAt,
             ])
-            ->prepend([
-                'package_id' => $packageId,
-                'carrier' => $carrier,
-                'service_code' => $bought['code'],
-                'service_name' => $bought['name'],
-                'quoted_price' => $cost,
-                'selected' => true,
-                'created_at' => $quotedAt,
-            ])
             ->values()
             ->all();
+
+        return [[
+            'package_id' => $packageId,
+            'carrier' => $carrier,
+            'service_code' => $bought['code'],
+            'service_name' => $bought['name'],
+            'quoted_price' => $cost,
+            'selected' => true,
+            'created_at' => $quotedAt,
+        ], $others];
     }
 
     /**
