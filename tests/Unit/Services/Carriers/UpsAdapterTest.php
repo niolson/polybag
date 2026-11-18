@@ -1303,14 +1303,12 @@ it('cuts long names to the length the UPS Shipping schema allows', function (): 
 it('logs each UPS name it cuts, with lengths but not the name', function (): void {
     fakeUpsShipEndpoints();
     $channel = Mockery::spy();
-    Log::spy();
-    Log::shouldReceive('channel')->andReturn($channel);
+    Log::shouldReceive('channel')->andReturnUsing(fn (string $name): object => $name === 'ups-validation' ? $channel : Mockery::spy());
 
     $longName = new AddressData('Maria Fernanda de los Angeles', 'Gutierrez-Montenegro', '4500 Shore Blvd', 'Rancho Santa Margarita', 'CA', '92688');
 
     $this->adapter->createShipment(upsShipRequestTo($longName));
 
-    Log::shouldHaveReceived('channel')->with('ups-validation');
     $channel->shouldHaveReceived('info')->withArgs(fn (string $message, array $context): bool => $message === 'UPS name cut to its 35-character limit'
         && $context === ['field' => 'ShipTo.Name', 'length' => 50, 'limit' => 35]);
 });

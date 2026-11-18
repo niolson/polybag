@@ -12,8 +12,6 @@ use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
-use App\DataTransferObjects\Shipping\ShipRequest;
-use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Enums\ServiceCapability;
 use App\Models\BoxSize;
@@ -25,6 +23,7 @@ use App\Models\CarrierServiceSpecialService;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
 use App\Models\ShippingMethodPostageSource;
@@ -393,19 +392,10 @@ function uspsLimitingStreetLinesTo35(): FakeCarrierAdapter
 {
     $adapter = new class('USPS') extends FakeCarrierAdapter implements LimitsAddressFieldLengths
     {
-        public int $labelsBought = 0;
-
         public function addressFieldTooLong(AddressData $from, AddressData $to): ?AddressFieldTooLong
         {
             return AddressFieldTooLong::first('USPS', $from, true, 35, 30)
                 ?? AddressFieldTooLong::first('USPS', $to, false, 35, 30);
-        }
-
-        public function createShipment(ShipRequest $request): ShipResponse
-        {
-            $this->labelsBought++;
-
-            return parent::createShipment($request);
         }
     };
 
@@ -433,7 +423,7 @@ it('leaves out a carrier whose street line limit the address exceeds, and says w
 it('refuses an offer quoted before the ship-from street grew past the carrier limit, buying nothing', function (): void {
     $this->actingAs($user = User::factory()->create());
     globalUspsAccount($this->usps);
-    $adapter = uspsLimitingStreetLinesTo35();
+    uspsLimitingStreetLinesTo35();
     $package = sourceFirstPackage($this->method);
 
     $rates = app(ShippingRateService::class)->getShippingRates($package->id);
@@ -452,7 +442,7 @@ it('refuses an offer quoted before the ship-from street grew past the carrier li
         ->and($result->title)->toBe('Address Too Long')
         ->and($result->message)->toBe('The ship-from address line 1 is 40 characters, and USPS takes 35. Ask an administrator to shorten it on the Location.')
         ->and($result->leavePackageIntact)->toBeTrue()
-        ->and($adapter->labelsBought)->toBe(0)
+        ->and(PackageLabel::query()->where('package_id', $package->id)->exists())->toBeFalse()
         ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
 });
 
