@@ -4,6 +4,7 @@ namespace App\Services\Carriers;
 
 use App\Contracts\DeclaresSellableServices;
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\RecoversUnresolvedPurchase;
 use App\Contracts\SendsCustomsTerms;
 use App\Contracts\UsesCarrierAccount;
@@ -12,6 +13,7 @@ use App\DataTransferObjects\Customs\DeclaredCustomsTerms;
 use App\DataTransferObjects\Customs\RecipientTaxId;
 use App\DataTransferObjects\Customs\SellerTaxRegistration;
 use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\CancelResponse;
 use App\DataTransferObjects\Shipping\CustomsItem;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
@@ -59,6 +61,7 @@ use App\Services\Carriers\Concerns\ResolvesDeliveredAt;
 use App\Services\SettingsService;
 use App\Services\Shipping\ContentsFilter;
 use App\Support\LabelText;
+use App\Support\NameLimit;
 use App\Support\UspsProductIdentifier;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -73,7 +76,7 @@ use Saloon\Exceptions\Request\Statuses\RequestTimeOutException;
 use Saloon\Http\Response;
 use voku\helper\ASCII;
 
-class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
+class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, LimitsAddressFieldLengths, RecoversUnresolvedPurchase, SendsCustomsTerms, UsesCarrierAccount
 {
     use BuildsCustomerReferences;
     use ConsultsCarrierPolicyForOffers;
@@ -144,6 +147,15 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
      * or registration is a wrong one.
      */
     private const MAX_CUSTOMS_REFERENCE_LENGTH = 28;
+
+    /** The longest streetAddress or secondaryAddress the Labels API allows. */
+    private const STREET_LINE_LENGTH = 50;
+
+    /** The longest city on a domestic address, the sender's included. */
+    private const DOMESTIC_CITY_LENGTH = 28;
+
+    /** The longest city on an international recipient's address. */
+    private const INTERNATIONAL_CITY_LENGTH = 30;
 
     /**
      * The 400 USPS answers a `prepayDutiesTaxesFees` label with when it cannot
@@ -2294,8 +2306,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     private function buildDomesticAddress(AddressData $address, ShipRequest $request): array
     {
         $result = [
-            'streetAddress' => mb_substr($this->labelText($address->streetAddress, $request), 0, 50),
-            'city' => mb_substr($this->labelText($address->city, $request), 0, 28),
+            'streetAddress' => $this->labelText($address->streetAddress, $request),
+            'city' => $this->labelText($address->city, $request),
             'state' => $address->stateOrProvince,
             'ZIPCode' => substr($address->postalCode, 0, 5),
         ];
@@ -2303,7 +2315,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         $this->addNameFields($result, $address, $request);
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = mb_substr($this->labelText($address->streetAddress2, $request), 0, 50);
+            $result['secondaryAddress'] = $this->labelText($address->streetAddress2, $request);
         }
 
         return $result;
@@ -2342,8 +2354,8 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
     private function buildInternationalAddress(AddressData $address, ShipRequest $request): array
     {
         $result = [
-            'streetAddress' => mb_substr($this->labelText($address->streetAddress, $request), 0, 50),
-            'city' => mb_substr($this->labelText($address->city, $request), 0, 30),
+            'streetAddress' => $this->labelText($address->streetAddress, $request),
+            'city' => $this->labelText($address->city, $request),
             'country' => $address->country,
             'countryISOAlpha2Code' => $address->country,
         ];
@@ -2359,7 +2371,7 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         }
 
         if ($address->streetAddress2) {
-            $result['secondaryAddress'] = mb_substr($this->labelText($address->streetAddress2, $request), 0, 50);
+            $result['secondaryAddress'] = $this->labelText($address->streetAddress2, $request);
         }
 
         return $result;
@@ -2465,16 +2477,33 @@ class UspsAdapter implements DeclaresSellableServices, DirectCarrierAdapter, Rec
         $hasLast = (bool) $address->lastName;
 
         if ($hasFirst && $hasLast) {
-            $result['firstName'] = mb_substr($this->labelText($address->firstName, $request), 0, 30);
-            $result['lastName'] = mb_substr($this->labelText($address->lastName, $request), 0, 30);
+            $result['firstName'] = NameLimit::cut($this->labelText($address->firstName, $request), 30, 'usps-validation', 'USPS', 'firstName');
+            $result['lastName'] = NameLimit::cut($this->labelText($address->lastName, $request), 30, 'usps-validation', 'USPS', 'lastName');
         } elseif ($hasFirst || $hasLast) {
             // Only one name — use firm field so USPS doesn't reject it
             $name = $hasFirst ? $address->firstName : $address->lastName;
-            $result['firm'] = mb_substr($this->labelText($name, $request), 0, 38);
+            $result['firm'] = NameLimit::cut($this->labelText($name, $request), 38, 'usps-validation', 'USPS', 'firm');
         }
 
         if ($address->company) {
-            $result['firm'] = mb_substr($this->labelText($address->company, $request), 0, 38);
+            $result['firm'] = NameLimit::cut($this->labelText($address->company, $request), 38, 'usps-validation', 'USPS', 'firm');
         }
+    }
+
+    /**
+     * USPS's Labels API caps both street lines at 50 characters, and the city
+     * at 28 on a domestic address (the sender's always) and 30 on an
+     * international one. Sent as written, never cut (`release-polish/44`).
+     */
+    public function addressFieldTooLong(AddressData $from, AddressData $to): ?AddressFieldTooLong
+    {
+        return AddressFieldTooLong::first('USPS', $from, true, self::STREET_LINE_LENGTH, self::DOMESTIC_CITY_LENGTH)
+            ?? AddressFieldTooLong::first(
+                'USPS',
+                $to,
+                false,
+                self::STREET_LINE_LENGTH,
+                $to->country === 'US' ? self::DOMESTIC_CITY_LENGTH : self::INTERNATIONAL_CITY_LENGTH,
+            );
     }
 }

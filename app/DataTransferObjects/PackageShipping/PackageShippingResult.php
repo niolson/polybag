@@ -91,6 +91,22 @@ readonly class PackageShippingResult
     }
 
     /**
+     * A street line or city is longer than the carrier takes, and PolyBag
+     * does not cut it (`release-polish/44`). Leaves the package intact: the
+     * fix is on the Shipment or the Location, and the package is bought once
+     * it is made.
+     */
+    public static function addressTooLong(string $message): self
+    {
+        return new self(
+            success: false,
+            title: 'Address Too Long',
+            message: $message,
+            leavePackageIntact: true,
+        );
+    }
+
+    /**
      * The order was marked shipped after a batch chose it: by its source on
      * import, by a manager, or by a packer on another Package
      * (`release-polish/23`). Buying for it again is a manager's reship.

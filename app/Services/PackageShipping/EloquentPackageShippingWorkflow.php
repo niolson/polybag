@@ -3,6 +3,7 @@
 namespace App\Services\PackageShipping;
 
 use App\Contracts\CarrierAdapterInterface;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PackageShippingWorkflow;
 use App\Contracts\PostageOfferSource;
@@ -543,6 +544,23 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             // outright, before any question about the data is asked.
             if (($refused = $this->reportPrinterRefused($adapter, $shipRequest, $request)) !== null) {
                 return $refused;
+            }
+
+            // Rating left out a carrier that cannot take the address as
+            // written; this catches an offer quoted before the address
+            // changed. Nothing is cut to fit (`release-polish/44`).
+            if ($adapter instanceof LimitsAddressFieldLengths
+                && ($tooLong = $adapter->addressFieldTooLong($shipRequest->fromAddress, $shipRequest->toAddress)) !== null) {
+                logger()->info('Refused a purchase whose address field is longer than the carrier takes', [
+                    'package_id' => $package->id,
+                    'carrier' => $tooLong->carrier,
+                    'field' => $tooLong->field,
+                    'ship_from' => $tooLong->isShipFrom,
+                    'length' => $tooLong->length,
+                    'limit' => $tooLong->limit,
+                ]);
+
+                return PackageShippingResult::addressTooLong($tooLong->message());
             }
 
             // The customs readiness check, for every path alike: the Ship

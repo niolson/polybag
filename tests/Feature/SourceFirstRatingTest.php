@@ -3,11 +3,17 @@
 use App\Contracts\AsyncRateQuoting;
 use App\Contracts\CarrierAdapterInterface;
 use App\Contracts\DirectCarrierAdapter;
+use App\Contracts\LimitsAddressFieldLengths;
 use App\Contracts\PackageShippingWorkflow;
+use App\DataTransferObjects\PackageShipping\PackageAutoShippingRequest;
 use App\DataTransferObjects\PackageShipping\PackageShippingRequest;
+use App\DataTransferObjects\Shipping\AddressData;
+use App\DataTransferObjects\Shipping\AddressFieldTooLong;
 use App\DataTransferObjects\Shipping\PackagingRequirement;
 use App\DataTransferObjects\Shipping\RateRequest;
 use App\DataTransferObjects\Shipping\RateResponse;
+use App\DataTransferObjects\Shipping\ShipRequest;
+use App\DataTransferObjects\Shipping\ShipResponse;
 use App\Enums\PackageStatus;
 use App\Enums\ServiceCapability;
 use App\Models\BoxSize;
@@ -376,4 +382,87 @@ it('names a carrier in an exclusion by its display name', function (): void {
         'source' => 'USPS',
         'reason' => 'US Postal Service does not support Signature Required.',
     ]]);
+});
+
+/**
+ * Fake USPS that takes street lines of at most 35 characters, as FedEx and UPS
+ * do, so rating and purchase can be seen to refuse a longer one
+ * (`release-polish/44`).
+ */
+function uspsLimitingStreetLinesTo35(): FakeCarrierAdapter
+{
+    $adapter = new class('USPS') extends FakeCarrierAdapter implements LimitsAddressFieldLengths
+    {
+        public int $labelsBought = 0;
+
+        public function addressFieldTooLong(AddressData $from, AddressData $to): ?AddressFieldTooLong
+        {
+            return AddressFieldTooLong::first('USPS', $from, true, 35, 30)
+                ?? AddressFieldTooLong::first('USPS', $to, false, 35, 30);
+        }
+
+        public function createShipment(ShipRequest $request): ShipResponse
+        {
+            $this->labelsBought++;
+
+            return parent::createShipment($request);
+        }
+    };
+
+    app(CarrierRegistry::class)->registerInstance('USPS', $adapter);
+
+    return $adapter;
+}
+
+it('leaves out a carrier whose street line limit the address exceeds, and says why', function (): void {
+    globalUspsAccount($this->usps);
+    uspsLimitingStreetLinesTo35();
+    $package = sourceFirstPackage($this->method, ['address1' => '12345 North Saint Clair Shores Boulevard']);
+
+    $service = app(ShippingRateService::class);
+    $rates = $service->getShippingRates($package->id);
+
+    expect($rates)->toBeEmpty()
+        ->and($service->getExclusions())->toBe([[
+            'carrier' => 'USPS',
+            'source' => 'USPS',
+            'reason' => 'Address line 1 is 40 characters, and USPS takes 35. Ask a manager to shorten it on the Shipment; common abbreviations such as ST, AVE and APT usually do it.',
+        ]]);
+});
+
+it('refuses an offer quoted before the ship-from street grew past the carrier limit, buying nothing', function (): void {
+    $this->actingAs($user = User::factory()->create());
+    globalUspsAccount($this->usps);
+    $adapter = uspsLimitingStreetLinesTo35();
+    $package = sourceFirstPackage($this->method);
+
+    $rates = app(ShippingRateService::class)->getShippingRates($package->id);
+    expect($rates)->toHaveCount(1);
+
+    // The offer is bound to the origin's postal code and city, not its street,
+    // so it stays spendable; the purchase checks the address it would send.
+    $package->location->update(['address1' => '15100 Woodinville-Redmond Road Northeast']);
+
+    $result = app(PackageShippingWorkflow::class)->ship(
+        $package->fresh(),
+        new PackageShippingRequest(selectedRate: $rates->first(), userId: $user->id),
+    );
+
+    expect($result->success)->toBeFalse()
+        ->and($result->title)->toBe('Address Too Long')
+        ->and($result->message)->toBe('The ship-from address line 1 is 40 characters, and USPS takes 35. Ask an administrator to shorten it on the Location.')
+        ->and($result->leavePackageIntact)->toBeTrue()
+        ->and($adapter->labelsBought)->toBe(0)
+        ->and($package->fresh()->status)->toBe(PackageStatus::Unshipped);
+});
+
+it('tells batch ship why a carrier was left out for a long address', function (): void {
+    globalUspsAccount($this->usps);
+    uspsLimitingStreetLinesTo35();
+    $package = sourceFirstPackage($this->method, ['address1' => '12345 North Saint Clair Shores Boulevard']);
+
+    $result = app(PackageShippingWorkflow::class)->autoShip($package, new PackageAutoShippingRequest(cleanupOnFailure: false, fromBatch: true));
+
+    expect($result->success)->toBeFalse()
+        ->and($result->message)->toBe('Address line 1 is 40 characters, and USPS takes 35. Ask a manager to shorten it on the Shipment; common abbreviations such as ST, AVE and APT usually do it.');
 });
