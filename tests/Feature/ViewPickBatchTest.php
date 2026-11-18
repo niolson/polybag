@@ -195,7 +195,6 @@ it('prints the summary and then the slips with Print Both, recording only the sl
         ->and($jobs)->toHaveCount(1)
         ->and($jobs[0]['count'])->toBe(2)
         ->and($slips)->toContain('T001')->toContain('T002')
-        ->and($batch->fresh()->summary_printed_at)->not->toBeNull()
         ->and(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(0);
 
     $this->postJson(route('pack-slips.printed'), ['receipt' => $jobs[0]['receipt']])->assertOk();
@@ -235,8 +234,7 @@ it('prints the picking summary alone, without touching pack slip state', functio
         ->assertDispatched('print-report', data: base64_encode('%PDF-summary'))
         ->assertNotDispatched('print-pack-slips');
 
-    expect($batch->fresh()->summary_printed_at)->not->toBeNull()
-        ->and(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(0);
+    expect(Shipment::query()->whereNotNull('pack_slip_printed_at')->count())->toBe(0);
 });
 
 it('sends nothing from Print Both when the PDF renderer is unavailable', function (): void {
@@ -248,8 +246,6 @@ it('sends nothing from Print Both when the PDF renderer is unavailable', functio
         ->callAction('printBoth')
         ->assertNotDispatched('print-pick-batch')
         ->assertNotified('PDF Not Created');
-
-    expect($batch->fresh()->summary_printed_at)->toBeNull();
 });
 
 it('shows the Shipment\'s printed state in the batch Shipments table, including a print from its page', function (): void {

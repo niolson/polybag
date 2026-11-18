@@ -67,7 +67,6 @@ class ViewPickBatch extends ViewRecord
                     }
 
                     $this->dispatch('print-report', data: $summary);
-                    $this->record->update(['summary_printed_at' => now()]);
                 }),
 
             // View mode — open HTML in a new tab
@@ -107,7 +106,6 @@ class ViewPickBatch extends ViewRecord
                     }
 
                     $this->dispatch('print-pick-batch', summary: $summary, jobs: $this->packSlipJobs());
-                    $this->record->update(['summary_printed_at' => now()]);
                 }),
 
             Action::make('complete')
