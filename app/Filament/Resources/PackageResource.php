@@ -419,7 +419,7 @@ class PackageResource extends Resource
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
                     ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
-                    ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
+                    ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Draft' : null),
                 Tables\Columns\TextColumn::make('tracking_status')
                     ->badge()
                     ->placeholder('—')

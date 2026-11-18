@@ -378,7 +378,7 @@ class ViewPackage extends ViewRecord
                         TextEntry::make('status')
                             ->badge()
                             ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
-                            ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Unshipped' : null),
+                            ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Draft' : null),
                         TextEntry::make('tracking_status')
                             ->badge()
                             ->placeholder('—'),

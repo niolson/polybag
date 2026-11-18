@@ -8,6 +8,8 @@ use App\Enums\PickingStatus;
 use App\Enums\Role;
 use App\Exceptions\PackageDraftIncompleteException;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
+use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
+use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationManager;
 use App\Models\BoxSize;
 use App\Models\Package;
 use App\Models\PackageItem;
@@ -147,6 +149,25 @@ it('shows and filters packages by draft state in the Packages list', function ()
         ->filterTable('draft_state', PackageDraftState::Ready->value)
         ->assertCanSeeTableRecords([$ready])
         ->assertCanNotSeeTableRecords([$empty, $packing, $shipped]);
+});
+
+it('shows the same draft state in a Shipment\'s Packages table', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $shipment = Shipment::factory()->create();
+    $ready = draftStatePackage($shipment, draftStateMeasured());
+    $shipped = Package::factory()->shipped()->for($shipment)->create();
+
+    Livewire::test(PackagesRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => ViewShipment::class])
+        ->assertTableColumnStateSet('status', PackageDraftState::Ready, $ready)
+        ->assertTableColumnStateSet('status', PackageStatus::Shipped, $shipped);
+});
+
+it('names the unshipped tab and status after Package Drafts', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+
+    expect(PackageStatus::Unshipped->getLabel())->toBe('Draft');
+
+    Livewire::test(ListPackages::class)->assertSee('Drafts')->assertDontSee('Unshipped');
 });
 
 it('batch ships an empty draft\'s zero-packed lines away rather than beside its own', function (): void {

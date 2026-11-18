@@ -297,13 +297,13 @@ it('renders print mode as a switch that swaps the view actions for print actions
         ->assertSee('Print Without Preview')
         ->assertActionVisible('viewSummary')
         ->assertActionHidden('printSummary')
-        ->assertActionVisible('printBoth')
-        ->assertActionDisabled('printBoth')
+        ->assertActionHidden('printBoth')
         ->set('printMode', true)
         ->assertSeeHtml('aria-checked="true"')
         ->assertActionHidden('viewSummary')
         ->assertActionVisible('printSummary')
-        ->assertActionEnabled('printBoth');
+        ->assertActionHasLabel('printSummary', 'Print Picking Summary')
+        ->assertActionVisible('printBoth');
 });
 
 it('shows Picked and Slip Printed as visible icon columns beside their hidden timestamps', function (): void {
