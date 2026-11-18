@@ -63,6 +63,7 @@ class PackageLabel extends Model
         'carrier',
         'normalized_carrier_id',
         'carrier_service_id',
+        'rate_quote_id',
         'service',
         'requested_service',
         'cost',

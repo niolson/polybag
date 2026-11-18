@@ -94,5 +94,6 @@ it('marks the quote selected once the label is recorded', function (): void {
     );
 
     expect($result->success)->toBeTrue()
-        ->and(RateQuote::find($quoteId)->selected)->toBeTrue();
+        ->and(RateQuote::find($quoteId)->selected)->toBeTrue()
+        ->and($package->fresh()->activeLabel->rate_quote_id)->toBe($quoteId);
 });

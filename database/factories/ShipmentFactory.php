@@ -28,9 +28,11 @@ class ShipmentFactory extends Factory
             'first_name' => fake()->firstName(),
             'last_name' => fake()->lastName(),
             'company' => fake()->optional()->company(),
-            'address1' => fake()->streetAddress(),
+            // Within every carrier's limits (FedEx street 35, USPS city 28), which a
+            // label is refused over rather than cut: a test wanting a long line sets one.
+            'address1' => rtrim(mb_substr(fake()->streetAddress(), 0, 35)),
             'address2' => fake()->optional()->secondaryAddress(),
-            'city' => fake()->city(),
+            'city' => rtrim(mb_substr(fake()->city(), 0, 28)),
             'state_or_province' => fake()->stateAbbr(),
             'postal_code' => fake()->postcode(),
             'country' => 'US',

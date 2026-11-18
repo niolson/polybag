@@ -1215,7 +1215,7 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
         try {
             DB::transaction(function () use ($package, $offer, $response, $request, $carrierServiceId, $customsTerms): void {
                 $this->recordPurchaseAgainstOffer($offer, $response->trackingNumber);
-                $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId, customsTerms: $customsTerms);
+                $package->markShipped($response, $response->postageSource, $request->userId, $carrierServiceId, customsTerms: $customsTerms, rateQuoteId: $offer?->rate_quote_id);
 
                 // Only a recorded purchase marks its quote selected; a refusal,
                 // decline or lost claim leaves it as one of the rates offered.

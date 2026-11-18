@@ -127,7 +127,8 @@ it('marks the offer\'s quote selected once the label is recorded', function (): 
 
     resolver()->recordLabel($offer, '9200190380793700250067', User::factory()->manager()->create());
 
-    expect($quote->fresh()->selected)->toBeTrue();
+    expect($quote->fresh()->selected)->toBeTrue()
+        ->and($package->fresh()->activeLabel->rate_quote_id)->toBe($quote->id);
 });
 
 it('ships a sale the source confirmed, keeping its reference as the label\'s', function (): void {
