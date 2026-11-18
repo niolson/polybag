@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ShipmentResource\Pages;
 
 use App\DataTransferObjects\PackSlips\PackSlipPrintJob;
 use App\DataTransferObjects\PackSlips\PackSlipRun;
+use App\Enums\AddressValidationOutcome;
 use App\Enums\Deliverability;
 use App\Enums\ShipmentStatus;
 use App\Enums\ValidationTrigger;
@@ -44,12 +45,18 @@ class ViewShipment extends ViewRecord
                 ->rateLimit(5)
                 ->action(function (): void {
                     $shipment = $this->shipment();
-                    $shipment->validateAddress(ValidationTrigger::Manual);
+                    $outcome = $shipment->validateAddress(ValidationTrigger::Manual);
                     $shipment->refresh();
 
                     $deliverability = $shipment->deliverability;
 
-                    if ($deliverability === Deliverability::NotChecked) {
+                    if (in_array($outcome, [AddressValidationOutcome::Unavailable, AddressValidationOutcome::Incomplete], true)) {
+                        Notification::make()
+                            ->title('Address Not Checked')
+                            ->body('An address validator could not be reached. Try again in a few minutes.')
+                            ->warning()
+                            ->send();
+                    } elseif ($deliverability === Deliverability::NotChecked) {
                         Notification::make()
                             ->title('Address Not Checked')
                             ->body('No address validator covers this country, so this address was not checked.')

@@ -17,6 +17,14 @@ enum AddressValidationOutcome: string
     case Unavailable = 'unavailable';
 
     /**
+     * A whole chain's outcome, never one validator's: some validators
+     * answered for the first time without settling the address, and another
+     * could not be reached. The chain is not exhausted, so no attempt is
+     * recorded and the schedule resumes it with the validators still to answer.
+     */
+    case Incomplete = 'incomplete';
+
+    /**
      * Whether the validator judged the address at all. An attempt is recorded
      * only for an answer, so an unavailable run is retried on the schedule.
      */

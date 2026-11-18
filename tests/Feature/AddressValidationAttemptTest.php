@@ -1,10 +1,14 @@
 <?php
 
 use App\Console\Commands\ValidateShipmentsCommand;
+use App\Contracts\AddressValidationPlan;
 use App\DataTransferObjects\Shipping\AddressData;
 use App\Enums\AddressValidationOutcome;
+use App\Enums\AddressValidator;
 use App\Enums\Deliverability;
 use App\Enums\Role;
+use App\Enums\ValidationTrigger;
+use App\Events\AddressValidationFailed;
 use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
 use App\Http\Integrations\Google\Requests\ValidateAddress as GoogleValidateAddress;
@@ -15,6 +19,7 @@ use App\Models\User;
 use App\Services\AddressValidationService;
 use App\Services\Validation\GoogleAddressValidator;
 use App\Services\Validation\UspsAddressValidator;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 use Saloon\Http\Faking\MockResponse;
@@ -332,6 +337,154 @@ it('retries a Shipment on the next run when the validators were unavailable', fu
 
     expect($shipment->fresh()->validation_attempted_at)->not->toBeNull()
         ->and($shipment->fresh()->validation_message)->toBe('There is no match for the address requested.');
+});
+
+// A validator down partway through the chain (`release-polish/34`)
+
+/**
+ * The scheduled run asks USPS, then Google.
+ */
+function scheduleUspsThenGoogle(): void
+{
+    app()->instance(AddressValidationPlan::class, new FixedValidationPlan([new UspsAddressValidator, new GoogleAddressValidator]));
+}
+
+function uspsNotFoundGoogleDown(): void
+{
+    Saloon::fake([
+        '*oauth*' => uspsToken(),
+        Address::class => uspsNotFound('There is no match for the address requested.'),
+        GoogleValidateAddress::class => MockResponse::make(['error' => 'unavailable'], 503),
+    ]);
+}
+
+it('leaves a Shipment not checked and due again when a later validator in its chain was down', function (): void {
+    Event::fake([AddressValidationFailed::class]);
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->validated()->create(['country' => 'US']);
+
+    expect(uspsAndGoogle()->validate($shipment, ValidationTrigger::Scheduled))->toBe(AddressValidationOutcome::Incomplete);
+
+    $shipment->refresh();
+    expect($shipment->deliverability)->toBe(Deliverability::NotChecked)
+        ->and($shipment->checked)->toBeFalse()
+        ->and($shipment->validation_source)->toBeNull()
+        ->and($shipment->validated_address1)->toBeNull()
+        ->and($shipment->validation_message)->toBeNull()
+        ->and($shipment->validation_attempted_at)->toBeNull()
+        ->and($shipment->validationAnswers()->pluck('validator')->all())->toBe([AddressValidator::Usps]);
+
+    Event::assertNotDispatched(AddressValidationFailed::class);
+});
+
+it('resumes the chain on the next run without asking a validator that already answered', function (): void {
+    scheduleUspsThenGoogle();
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    $this->artisan('shipments:validate')
+        ->assertFailed()
+        ->expectsOutputToContain('a validator was unavailable');
+
+    expect($shipment->fresh()->validation_attempts)->toBe(1);
+
+    Saloon::fake([
+        '*oauth*' => uspsToken(),
+        GoogleValidateAddress::class => MockResponse::make(googleSettledResponse()),
+    ]);
+
+    $this->artisan('shipments:validate')->assertSuccessful();
+
+    Saloon::mockClient()->assertSentCount(1, Address::class);
+    $shipment->refresh();
+    expect($shipment->checked)->toBeTrue()
+        ->and($shipment->deliverability)->toBe(Deliverability::Yes)
+        ->and($shipment->validation_source)->toBe(AddressValidator::Google)
+        ->and($shipment->validation_attempts)->toBe(2);
+});
+
+it('does not count a resumed run whose remaining validator is still down', function (): void {
+    scheduleUspsThenGoogle();
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    $this->artisan('shipments:validate')->assertFailed();
+
+    uspsNotFoundGoogleDown();
+
+    $this->artisan('shipments:validate')
+        ->assertFailed()
+        ->expectsOutputToContain('validators unavailable');
+
+    Saloon::mockClient()->assertSentCount(1, Address::class);
+    expect($shipment->fresh()->validation_attempts)->toBe(1)
+        ->and($shipment->fresh()->validation_attempted_at)->toBeNull();
+});
+
+it('marks a Shipment unverified once the resumed chain has every answer and none settled it', function (): void {
+    scheduleUspsThenGoogle();
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    $this->artisan('shipments:validate')->assertFailed();
+
+    Saloon::fake([
+        '*oauth*' => uspsToken(),
+        GoogleValidateAddress::class => MockResponse::make(['result' => ['verdict' => ['addressComplete' => false]]]),
+    ]);
+
+    $this->artisan('shipments:validate')->assertSuccessful();
+
+    Saloon::mockClient()->assertSentCount(1, Address::class);
+    $shipment->refresh();
+    expect($shipment->deliverability)->toBe(Deliverability::Unverified)
+        ->and($shipment->validation_attempted_at)->not->toBeNull();
+});
+
+it('asks every validator again when the address has changed since they answered', function (): void {
+    scheduleUspsThenGoogle();
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    $this->artisan('shipments:validate')->assertFailed();
+
+    $shipment->update(['address1' => '1600 Amphitheatre Pkwy']);
+    uspsNotFoundGoogleDown();
+
+    $this->artisan('shipments:validate')->assertFailed();
+
+    Saloon::mockClient()->assertSentCount(2, Address::class);
+});
+
+it('asks every validator again when validating by hand', function (): void {
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+    uspsAndGoogle()->validate($shipment, ValidationTrigger::Scheduled);
+
+    uspsNotFoundGoogleDown();
+    uspsAndGoogle()->validate($shipment->fresh(), ValidationTrigger::Manual);
+
+    Saloon::mockClient()->assertSentCount(2, Address::class);
+});
+
+it('tells the person validating by hand that a validator could not be reached', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    app()->instance(AddressValidationService::class, uspsAndGoogle());
+    uspsNotFoundGoogleDown();
+
+    $shipment = Shipment::factory()->create(['country' => 'US']);
+
+    Livewire::test(ViewShipment::class, ['record' => $shipment->id])
+        ->callAction('validateAddress')
+        ->assertNotified('Address Not Checked');
+
+    expect($shipment->fresh()->validation_attempted_at)->toBeNull();
 });
 
 // Manual validation
