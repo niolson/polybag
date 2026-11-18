@@ -15,6 +15,8 @@ use App\Services\PackSlips\PackSlipReceipts;
 use App\Services\PackSlips\PackSlipRenderer;
 use App\Services\SettingsService;
 use Filament\Actions\Testing\TestAction;
+use Filament\Tables\Columns\Column;
+use Filament\Tables\Columns\IconColumn;
 use Illuminate\Database\Eloquent\Collection;
 use Livewire\Livewire;
 
@@ -302,4 +304,39 @@ it('renders print mode as a switch that swaps the view actions for print actions
         ->assertActionHidden('viewSummary')
         ->assertActionVisible('printSummary')
         ->assertActionEnabled('printBoth');
+});
+
+it('shows Picked and Slip Printed as visible icon columns beside their hidden timestamps', function (): void {
+    Setting::create(['key' => 'pack_slips_enabled', 'value' => '1', 'type' => 'boolean', 'group' => 'general']);
+    app(SettingsService::class)->clearCache();
+    [$batch] = batchOfShipments(1);
+
+    $visibleIcon = fn (Column $column): bool => $column instanceof IconColumn && ! $column->isToggledHiddenByDefault();
+    $hiddenByDefault = fn (Column $column): bool => $column->isToggledHiddenByDefault();
+
+    // Columns are keyed by name, so a timestamp column sharing its icon's name replaced it.
+    Livewire::test(PickBatchShipmentsRelationManager::class, [
+        'ownerRecord' => $batch,
+        'pageClass' => ViewPickBatch::class,
+    ])
+        ->assertTableColumnExists('picked_at', $visibleIcon)
+        ->assertTableColumnExists('shipment.pack_slip_printed_at', $visibleIcon)
+        ->assertTableColumnExists('picked_at_time', $hiddenByDefault)
+        ->assertTableColumnExists('pack_slip_printed_at_time', $hiddenByDefault);
+});
+
+it('confirms Mark Picked with a notification naming the tote, and shows the row as picked', function (): void {
+    [$batch, $shipments] = batchOfShipments(2);
+    $first = PickBatchShipment::query()->where('shipment_id', $shipments->first()->id)->sole();
+
+    Livewire::test(PickBatchShipmentsRelationManager::class, [
+        'ownerRecord' => $batch,
+        'pageClass' => ViewPickBatch::class,
+    ])
+        ->callAction(TestAction::make('markPicked')->table($first))
+        ->assertNotified('T001 marked picked.')
+        ->assertTableColumnStateNotSet('picked_at', null, $first)
+        ->assertActionHidden(TestAction::make('markPicked')->table($first));
+
+    expect($batch->fresh()->status)->not->toBe(PickBatchStatus::Completed);
 });
