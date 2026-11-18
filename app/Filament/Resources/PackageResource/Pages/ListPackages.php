@@ -57,7 +57,7 @@ class ListPackages extends ListRecords
                 'property' => 'activeStatusTab',
                 'tabs' => [
                     'all' => 'All',
-                    PackageStatus::Unshipped->value => 'Unshipped',
+                    PackageStatus::Unshipped->value => 'Drafts',
                     PackageStatus::Shipped->value => 'Shipped',
                 ],
             ],

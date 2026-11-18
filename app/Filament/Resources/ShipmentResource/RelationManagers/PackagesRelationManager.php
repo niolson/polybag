@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ShipmentResource\RelationManagers;
 
+use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Filament\Resources\PackageResource;
 use App\Models\Package;
@@ -13,6 +14,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 
 class PackagesRelationManager extends RelationManager
@@ -43,6 +45,7 @@ class PackagesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('tracking_number')
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->scopes('withDraftState'))
             ->columns([
                 Tables\Columns\TextColumn::make('tracking_number'),
                 Tables\Columns\TextColumn::make('tracking_status')
@@ -54,8 +57,12 @@ class PackagesRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('weight'),
                 Tables\Columns\TextColumn::make('cost')
                     ->money('USD'),
+                // As on the Packages list and Package page: an unshipped
+                // package shows how far its draft has got (`release-polish/51`).
                 Tables\Columns\TextColumn::make('status')
-                    ->badge(),
+                    ->badge()
+                    ->state(fn (Package $record): PackageStatus|PackageDraftState => $record->draftState() ?? $record->status)
+                    ->tooltip(fn (Package $record): ?string => $record->status === PackageStatus::Unshipped ? 'Draft' : null),
                 Tables\Columns\IconColumn::make('exported')
                     ->boolean(),
             ])

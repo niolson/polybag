@@ -54,7 +54,7 @@ class ViewPickBatch extends ViewRecord
 
             // Print mode — render PDF via Gotenberg and send to report printer
             Action::make('printSummary')
-                ->label('Picking Summary')
+                ->label('Print Picking Summary')
                 ->icon('heroicon-o-list-bullet')
                 ->visible(fn (): bool => $this->printMode)
                 ->action(function (): void {
@@ -79,7 +79,7 @@ class ViewPickBatch extends ViewRecord
 
             // Print mode — render PDF via Gotenberg and send to report printer
             Action::make('printPackSlips')
-                ->label('Pack Slips')
+                ->label('Print Pack Slips')
                 ->icon('heroicon-o-document-text')
                 ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
                 ->action(function (): void {
@@ -91,11 +91,12 @@ class ViewPickBatch extends ViewRecord
 
             // Print mode — the summary to the document printer, then the slips to the
             // label printer, as one browser event so the slips wait on the summary.
+            // Hidden, not disabled, in view mode: a greyed-out button gave no reason
+            // (`release-polish/55`).
             Action::make('printBoth')
                 ->label('Print Both')
                 ->icon('heroicon-o-printer')
-                ->visible(fn (): bool => self::printsPackSlips())
-                ->disabled(fn (): bool => ! $this->printMode)
+                ->visible(fn (): bool => $this->printMode && self::printsPackSlips())
                 ->action(function (): void {
                     try {
                         $summary = $this->summaryPdf();

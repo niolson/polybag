@@ -91,6 +91,21 @@ readonly class PackageShippingResult
     }
 
     /**
+     * The order was marked shipped after a batch chose it: by its source on
+     * import, by a manager, or by a packer on another Package
+     * (`release-polish/23`). Buying for it again is a manager's reship.
+     */
+    public static function shipmentShippedSinceBatch(): self
+    {
+        return new self(
+            success: false,
+            title: 'Shipment Already Shipped',
+            message: 'This shipment was marked shipped after the batch began, so no label was bought for it.',
+            leavePackageIntact: true,
+        );
+    }
+
+    /**
      * The order was cancelled, so nothing may be bought for it
      * (`order-reconciliation/02`). Leaves the package intact, to be unpacked.
      */

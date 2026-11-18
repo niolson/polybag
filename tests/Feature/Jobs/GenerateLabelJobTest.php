@@ -13,6 +13,8 @@ use App\Enums\CustomsDocumentDelivery;
 use App\Enums\LabelBatchItemStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ServiceCapability;
+use App\Enums\ShipmentStatus;
+use App\Enums\ShipmentStatusOrigin;
 use App\Enums\ShippingRuleAction;
 use App\Exceptions\Carriers\UnreadablePurchaseResponseException;
 use App\Jobs\GenerateLabelJob;
@@ -388,4 +390,24 @@ it('never settles an item without its batch count', function (): void {
         ->toThrow(RuntimeException::class, 'The batch count could not be written');
 
     expect($ctx['item']->refresh()->status)->toBe(LabelBatchItemStatus::Processing);
+});
+
+it('buys nothing for an order shipped after the batch chose it', function (): void {
+    $ctx = createBatchContext();
+
+    $adapter = batchQuotingAdapter();
+    $adapter->shouldNotReceive('createShipment');
+    app(CarrierRegistry::class)->registerInstance('MockCarrier', $adapter);
+
+    // The import closes it between batch selection and the job.
+    Shipment::whereKey($ctx['shipment']->id)->update([
+        'status' => ShipmentStatus::Shipped,
+        'status_origin' => ShipmentStatusOrigin::Source,
+    ]);
+
+    (new GenerateLabelJob($ctx['item']->id, 'pdf', null))->handle();
+
+    expect($ctx['item']->fresh()->status)->toBe(LabelBatchItemStatus::Failed)
+        ->and($ctx['item']->fresh()->error_message)->toBe('This shipment was marked shipped after the batch began, so no label was bought for it.')
+        ->and($ctx['batch']->fresh()->failed_shipments)->toBe(1);
 });

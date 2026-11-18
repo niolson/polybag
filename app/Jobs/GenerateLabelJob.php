@@ -67,6 +67,7 @@ class GenerateLabelJob implements ShouldQueue
                     userId: $item->labelBatch->user_id,
                     cleanupOnFailure: false,
                     hasReportPrinter: $this->hasReportPrinter,
+                    fromBatch: true,
                 ),
             );
 

@@ -10,7 +10,6 @@ use App\Enums\ShipmentStatusOrigin;
 use App\Models\AuditLog;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
-use App\Services\PickBatchService;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -24,16 +23,12 @@ use Illuminate\Support\Facades\DB;
  */
 class SourceClosureApplier
 {
-    public function __construct(
-        private readonly PickBatchService $pickBatches,
-    ) {}
-
     /**
      * @return bool whether the Shipment was closed
      */
     public function apply(Shipment $shipment, SourceOrderReport $report): bool
     {
-        $closed = DB::transaction(function () use ($shipment, $report): bool {
+        return DB::transaction(function () use ($shipment, $report): bool {
             $current = Shipment::query()->lockForUpdate()->find($shipment->id);
 
             // Closed meanwhile, or reopened by a manager, whose change wins
@@ -84,13 +79,6 @@ class SourceClosureApplier
 
             return true;
         });
-
-        if ($closed) {
-            // Pickers should not pull goods for an order that is no longer ours to ship.
-            $this->pickBatches->removeFromActiveBatches($shipment);
-        }
-
-        return $closed;
     }
 
     /**

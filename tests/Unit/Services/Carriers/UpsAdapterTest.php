@@ -1265,6 +1265,41 @@ it('builds an international label request that conforms to the UPS Shipping sche
     });
 });
 
+it('cuts long names and cities to the lengths the UPS Shipping schema allows', function (): void {
+    fakeUpsShipEndpoints();
+
+    $longName = new AddressData(
+        firstName: 'Maria Fernanda de los Angeles',
+        lastName: 'Gutierrez-Montenegro',
+        streetAddress: '4500 Shore Blvd',
+        city: 'Rancho Santa Margarita Heights North',
+        stateOrProvince: 'CA',
+        postalCode: '92688',
+        company: 'Pacific Northwest Outdoor Supply Company',
+    );
+
+    $request = upsShipRequestTo($longName, fromAddress: $longName);
+
+    expect($this->adapter->createShipment($request)->success)->toBeTrue();
+
+    Saloon::assertSent(function ($request): bool {
+        if (! $request instanceof CreateShipment) {
+            return false;
+        }
+
+        $body = $request->body()->all();
+        assertMatchesUpsSchema($body, 'SHIPRequestWrapper', 'upsShipping');
+
+        $shipment = $body['ShipmentRequest']['Shipment'];
+        expect($shipment['ShipTo']['Name'])->toBe('Maria Fernanda de los Angeles Gutie')
+            ->and($shipment['Shipper']['Name'])->toBe('Pacific Northwest Outdoor Supply Co')
+            ->and($shipment['ShipTo']['AttentionName'])->toBe('Maria Fernanda de los Angeles Gutie')
+            ->and($shipment['ShipTo']['Address']['City'])->toBe('Rancho Santa Margarita Heights');
+
+        return true;
+    });
+});
+
 /*
 | Schema conformance cannot catch this on its own. UPS's OpenAPI leaves
 | additionalProperties unset on ShipmentRequest_Shipment, so InternationalForms

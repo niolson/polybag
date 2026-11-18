@@ -151,6 +151,48 @@ describe('a cancelled order', function (): void {
     })->with([Role::Packer, Role::Manager]);
 });
 
+describe('an order shipped after a batch chose it', function (): void {
+    it('is refused by the batch purchase, keeping the package', function (ShipmentStatusOrigin $origin): void {
+        $shipment = Shipment::factory()->create();
+        $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+        $package->load('shipment');
+
+        // An import, a manager or a packer ships it between selection and the job.
+        Shipment::whereKey($shipment->id)->update([
+            'status' => ShipmentStatus::Shipped,
+            'status_origin' => $origin,
+        ]);
+
+        $result = app(PackageShippingWorkflow::class)->autoShip(
+            $package,
+            new PackageAutoShippingRequest(cleanupOnFailure: false, fromBatch: true),
+        );
+
+        expect($result->success)->toBeFalse()
+            ->and($result->title)->toBe('Shipment Already Shipped')
+            ->and($result->leavePackageIntact)->toBeTrue()
+            ->and(Package::find($package->id))->not->toBeNull();
+    })->with([ShipmentStatusOrigin::Source, ShipmentStatusOrigin::Manager, ShipmentStatusOrigin::PolyBag]);
+
+    it('is not refused for being shipped when a person buys, since a manager may reship', function (): void {
+        $shipment = Shipment::factory()->create();
+        $package = Package::factory()->for($shipment)->create(['status' => PackageStatus::Unshipped]);
+        $package->load('shipment');
+
+        Shipment::whereKey($shipment->id)->update([
+            'status' => ShipmentStatus::Shipped,
+            'status_origin' => ShipmentStatusOrigin::Source,
+        ]);
+
+        $result = app(PackageShippingWorkflow::class)->autoShip(
+            $package,
+            new PackageAutoShippingRequest(cleanupOnFailure: false),
+        );
+
+        expect($result->title)->not->toBe('Shipment Already Shipped');
+    });
+});
+
 describe('a manager changing the status', function (): void {
     it('records the change as a manager\'s, with an audit row', function (): void {
         $manager = User::factory()->create(['role' => Role::Manager]);

@@ -3,16 +3,20 @@
 use App\Enums\PickBatchStatus;
 use App\Enums\PickingStatus;
 use App\Enums\ShipmentStatus;
+use App\Filament\Resources\ShipmentResource\Pages\EditShipment;
 use App\Models\Channel;
 use App\Models\Client;
 use App\Models\Package;
 use App\Models\PickBatch;
 use App\Models\PickBatchShipment;
+use App\Models\Product;
 use App\Models\Shipment;
+use App\Models\ShipmentItem;
 use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\PickBatchService;
 use App\Services\SettingsService;
+use Livewire\Livewire;
 
 use function Pest\Laravel\assertDatabaseCount;
 
@@ -375,4 +379,37 @@ it('removes a batched shipment from its batch when it ships', function (): void 
         ->and($shipped->fresh()->picking_status)->toBe(PickingStatus::Pending)
         ->and($batch->fresh()->total_shipments)->toBe(1)
         ->and($batch->pickBatchShipments()->where('shipment_id', $shipped->id)->exists())->toBeFalse();
+});
+
+it('drops a Shipment a manager cancels from its in-progress pick batch', function (): void {
+    $manager = User::factory()->manager()->create();
+    $this->actingAs($manager);
+    app(SettingsService::class)->set('picking_enabled', true, 'boolean');
+
+    $product = Product::factory()->create(['name' => 'Widget']);
+    $kept = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
+    $cancelled = Shipment::factory()->create(['picking_status' => PickingStatus::Pending]);
+    ShipmentItem::factory()->create(['shipment_id' => $kept->id, 'product_id' => $product->id, 'quantity' => 1]);
+    ShipmentItem::factory()->create(['shipment_id' => $cancelled->id, 'product_id' => $product->id, 'quantity' => 5]);
+
+    $batch = $this->service->createFromShipments(collect([$kept, $cancelled]), $manager);
+
+    Livewire::test(EditShipment::class, ['record' => $cancelled->id])
+        ->fillForm(['status' => ShipmentStatus::Cancelled->value])
+        ->call('save')
+        ->assertHasNoFormErrors();
+
+    expect($cancelled->fresh()->status)->toBe(ShipmentStatus::Cancelled)
+        ->and($this->service->summaryRows($batch->fresh())[0]['quantity'])->toBe(1)
+        ->and($this->service->packSlipRun($batch->fresh())->shipmentIds)->toBe([$kept->id])
+        ->and($batch->fresh()->total_shipments)->toBe(1);
+});
+
+it('keeps a Shipment in its batch when an edit leaves it open', function (): void {
+    $shipments = Shipment::factory()->count(2)->create();
+    $batch = $this->service->createFromShipments($shipments, $this->user);
+
+    $shipments->first()->update(['first_name' => 'Ada']);
+
+    expect($batch->fresh()->total_shipments)->toBe(2);
 });

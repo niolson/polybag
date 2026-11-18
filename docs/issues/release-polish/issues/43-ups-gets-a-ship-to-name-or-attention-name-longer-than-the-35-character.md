@@ -99,3 +99,9 @@ see the next finding before choosing to cut rather than wrap. Add the same limit
 FedEx `personName`/`companyName`/`city` once checked against FedEx's documentation.
 
 ## Comments
+
+- 2026-11-18 — Names and cities done: `UpsAdapter::partyName()` cuts Name and
+  AttentionName to 35 on Shipper, ShipTo, ShipFrom and SoldTo, and `buildAddress()` cuts
+  City to 30. Test: `UpsAdapterTest` "cuts long names and cities…", which validates against
+  the vendored schema. Not done: AddressLine, which waits on the wrap-or-refuse decision in
+  `44`, and the FedEx limits, still unchecked against FedEx's documentation.

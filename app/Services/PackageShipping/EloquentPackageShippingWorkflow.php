@@ -726,6 +726,13 @@ class EloquentPackageShippingWorkflow implements PackageShippingWorkflow
             return $refusal;
         }
 
+        // Read from the database: the batch saw the order open, but an import
+        // or a person may have shipped it since.
+        if ($request->fromBatch
+            && Shipment::query()->whereKey($package->shipment_id)->where('status', ShipmentStatus::Shipped)->exists()) {
+            return PackageShippingResult::shipmentShippedSinceBatch();
+        }
+
         // Before any quote: a shipment with no method is not rated, and the
         // remedy is a person choosing one on the Ship page.
         if ($package->shipment()->value('shipping_method_id') === null) {

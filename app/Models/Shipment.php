@@ -290,6 +290,15 @@ class Shipment extends Model
                 $shipment->validation_attempted_at = null;
             }
         });
+
+        // Every way an order closes passes through here: PolyBag shipping it,
+        // its source closing it on import, and a manager's edit. Pickers
+        // should not pull goods for an order that is no longer ours to ship.
+        static::updated(function (Shipment $shipment): void {
+            if ($shipment->wasChanged('status') && $shipment->status !== ShipmentStatus::Open) {
+                app(PickBatchService::class)->removeFromActiveBatches($shipment);
+            }
+        });
     }
 
     /**
@@ -375,8 +384,6 @@ class Shipment extends Model
     private function markShipped(): void
     {
         $this->update(['status' => ShipmentStatus::Shipped, 'status_origin' => ShipmentStatusOrigin::PolyBag]);
-
-        app(PickBatchService::class)->removeFromActiveBatches($this);
     }
 
     /**

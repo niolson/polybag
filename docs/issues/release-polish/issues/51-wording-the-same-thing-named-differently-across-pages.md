@@ -261,3 +261,8 @@ This replaces the sentence-case recommendation for notification titles in issues
   on the Packages list's tab (`PackageStatus`), and **Ready to ship** on the Package page and
   in the Packages list's own badges (`PackageDraftState`). One screen, the Packages list,
   shows both. Pick one vocabulary for an unshipped Package across every page.
+
+- 2026-11-18 — SH3 done: one vocabulary, the Package Draft's. `PackageStatus::Unshipped`
+  is labeled "Draft", the Packages list tab "Drafts", and a Shipment's Packages table now
+  shows the draft state (Empty draft / Packing / Ready to ship) as the Packages list and
+  Package page already did, with "Draft" as the tooltip. Tests in `PackageDraftStateTest`.

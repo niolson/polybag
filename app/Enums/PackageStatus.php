@@ -15,7 +15,7 @@ enum PackageStatus: string implements HasColor, HasLabel
     public function getLabel(): string|Htmlable|null
     {
         return match ($this) {
-            self::Unshipped => 'Unshipped',
+            self::Unshipped => 'Draft',
             self::Shipped => 'Shipped',
             self::Void => 'Void',
         };
