@@ -31,6 +31,10 @@ class PickBatchShipmentsRelationManager extends RelationManager
     #[On('pack-slips-printed')]
     public function refreshShipments(): void {}
 
+    /**
+     * Columns are keyed by name, so each timestamp column needs a name of its own: sharing
+     * `picked_at` with the Picked icon once replaced that icon with a hidden-by-default column.
+     */
     public function table(Table $table): Table
     {
         return $table
@@ -62,8 +66,9 @@ class PickBatchShipmentsRelationManager extends RelationManager
                     ->trueColor('success')
                     ->falseIcon('heroicon-o-clock')
                     ->falseColor('gray'),
-                Tables\Columns\TextColumn::make('picked_at')
+                Tables\Columns\TextColumn::make('picked_at_time')
                     ->label('Picked At')
+                    ->state(fn (PickBatchShipment $record): mixed => $record->picked_at)
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true),
@@ -75,8 +80,9 @@ class PickBatchShipmentsRelationManager extends RelationManager
                     ->falseIcon('heroicon-o-minus-circle')
                     ->falseColor('gray')
                     ->visible(fn (): bool => app(SettingsService::class)->packSlipsEnabled()),
-                Tables\Columns\TextColumn::make('shipment.pack_slip_printed_at')
+                Tables\Columns\TextColumn::make('pack_slip_printed_at_time')
                     ->label('Slip Printed At')
+                    ->state(fn (PickBatchShipment $record): mixed => $record->shipment?->pack_slip_printed_at)
                     ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->placeholder('—')
                     ->toggleable(isToggledHiddenByDefault: true)
@@ -98,7 +104,7 @@ class PickBatchShipmentsRelationManager extends RelationManager
                             app(PickBatchService::class)->complete($batch);
                             Notification::make()->success()->title('All items picked — batch completed.')->send();
                         } else {
-                            Notification::make()->success()->title('Marked as picked.')->send();
+                            Notification::make()->success()->title(($record->tote_code ?? $record->shipment->shipment_reference ?? 'Shipment').' marked picked.')->send();
                         }
 
                         $this->dispatch('pick-batch-updated');
