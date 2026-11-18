@@ -89,6 +89,12 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
 
     private const PRODUCT_ID_MAX_LENGTH = 100;
 
+    /** The longest Name or AttentionName UPS's CreateShipment schema allows. */
+    private const NAME_LENGTH = 35;
+
+    /** The longest City UPS's CreateShipment schema allows. */
+    private const CITY_LENGTH = 30;
+
     /**
      * `ShipmentCharge.Type`: transportation, and duties and taxes.
      */
@@ -711,20 +717,20 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
             $shipment = [
                 'Description' => 'Shipment',
                 'Shipper' => [
-                    'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
+                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
                     'AttentionName' => $this->buildAttentionName($request->fromAddress),
                     'ShipperNumber' => $this->resolveAccountNumber($account),
                     ...$this->buildPhone($request->fromAddress),
                     'Address' => $this->buildAddress($request->fromAddress),
                 ],
                 'ShipTo' => [
-                    'Name' => trim($request->toAddress->firstName.' '.$request->toAddress->lastName),
+                    'Name' => $this->partyName($request->toAddress->firstName.' '.$request->toAddress->lastName),
                     'AttentionName' => $this->buildAttentionName($request->toAddress),
                     ...$this->buildPhone($request->toAddress),
                     'Address' => $this->buildAddress($request->toAddress, includeResidentialClassification: true),
                 ],
                 'ShipFrom' => [
-                    'Name' => trim($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
+                    'Name' => $this->partyName($request->fromAddress->company ?: $request->fromAddress->firstName.' '.$request->fromAddress->lastName),
                     'Address' => $this->buildAddress($request->fromAddress),
                     ...$this->buildVendorInfo($request),
                     ...$this->buildExporterTaxId($request),
@@ -1549,7 +1555,17 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
      */
     private function buildAttentionName(AddressData $address): string
     {
-        return trim($address->firstName.' '.$address->lastName) ?: (string) $address->company;
+        return $this->partyName(trim($address->firstName.' '.$address->lastName) ?: (string) $address->company);
+    }
+
+    /**
+     * A name cut to the 35 characters UPS's schema allows. UPS refuses a
+     * longer one, and the label is better with a shortened name than none
+     * (`release-polish/43`).
+     */
+    private function partyName(string $name): string
+    {
+        return mb_substr(trim($name), 0, self::NAME_LENGTH);
     }
 
     private function buildAddress(AddressData $address, bool $includeResidentialClassification = false): array
@@ -1559,7 +1575,7 @@ class UpsAdapter implements DirectCarrierAdapter, RecoversUnresolvedPurchase, Se
         return [
             ...array_filter([
                 'AddressLine' => $addressLines,
-                'City' => LabelText::asciiDigits($address->city),
+                'City' => mb_substr(LabelText::asciiDigits($address->city), 0, self::CITY_LENGTH),
                 'StateProvinceCode' => $address->stateOrProvince,
                 'PostalCode' => $address->postalCode,
                 'CountryCode' => $address->country,
