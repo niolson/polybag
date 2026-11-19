@@ -221,7 +221,25 @@ describe('PolyBag codes', function (): void {
             '%CZERO' => 'ZERO',
             '%CCLEAR' => 'CLEAR',
             '%COK' => 'OK',
+            '%CNEXT' => 'NEXT',
         ]);
+    });
+
+    it('never knows the demo Pack Next Item command in production', function (): void {
+        $this->app['env'] = 'production';
+
+        expect((new Pack)->scanCommandCodes())->not->toHaveKey('%CNEXT');
+
+        Livewire::test(Pack::class)
+            ->assertDontSeeHtml('%CNEXT')
+            ->call('openScanCode', '%CNEXT')
+            ->assertNotified('Unknown Command');
+    });
+
+    it('gives the browser the demo Pack Next Item command on a demo install', function (): void {
+        $this->app['env'] = 'demo';
+
+        expect((new Pack)->scanCommandCodes())->toHaveKey('%CNEXT', 'NEXT');
     });
 });
 

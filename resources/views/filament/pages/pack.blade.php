@@ -162,6 +162,7 @@
                     VOID: () => $wire.cancelLastLabel(),
                     ZERO: () => this.zeroScale(),
                     CLEAR: () => this.clearShipment(),
+                    NEXT: () => this.packNextItem(),
                     OK: () => new FilamentNotification()
                         .title('Nothing to Confirm')
                         .body('OK acknowledges an alert on screen, and none is open.')
@@ -248,7 +249,36 @@
                     return;
                 }
 
-                if (this.transparencyEnabled && item.transparency) {
+                this.packItem(idx);
+            },
+
+            // Demo installs only (the server sends NEXT nowhere else): pack the
+            // first line still short, exactly as scanning its barcode would.
+            packNextItem() {
+                if (!this.hasShipment) {
+                    new FilamentNotification()
+                        .title('No Shipment Loaded')
+                        .body('Scan a pack slip before packing items.')
+                        .warning()
+                        .send();
+                    return;
+                }
+
+                const idx = this.packingItems.findIndex(item => item.packed < item.quantity);
+                if (idx === -1) {
+                    new FilamentNotification()
+                        .title('Nothing Left to Pack')
+                        .body('Every item on this order is packed.')
+                        .warning()
+                        .send();
+                    return;
+                }
+
+                this.packItem(idx);
+            },
+
+            packItem(idx) {
+                if (this.transparencyEnabled && this.packingItems[idx].transparency) {
                     this.pendingTransparencyKey = idx;
                     this.showTransparencyModal = true;
                     this.$nextTick(() => {

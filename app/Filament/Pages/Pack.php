@@ -661,7 +661,7 @@ class Pack extends Page
      */
     public function scanCommandCodes(): array
     {
-        return collect(ScanCommand::cases())
+        return collect(ScanCommand::available())
             ->mapWithKeys(fn (ScanCommand $command): array => [ScanCode::forCommand($command) => $command->value])
             ->all();
     }
