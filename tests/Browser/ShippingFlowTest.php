@@ -14,11 +14,9 @@ use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 
 /**
- * Open the Ship page for a packed Package with fake carrier rates, logged in as an admin.
- *
- * @return array{0: mixed, 1: Package}
+ * A packed Package ready for the Ship page, with fake carrier rates to choose from.
  */
-function visitShipPageWithFakeRates(): array
+function packageWithFakeRates(): Package
 {
     // suppress_printing forces a server-side Livewire redirect instead of QZ Tray print + JS redirect
     Setting::updateOrCreate(
@@ -31,8 +29,6 @@ function visitShipPageWithFakeRates(): array
     app(CarrierRegistry::class)->registerInstance('USPS', new FakeCarrierAdapter('USPS'));
     app(CarrierRegistry::class)->registerInstance('FedEx', new FakeCarrierAdapter('FedEx'));
     app(CarrierRegistry::class)->registerInstance('UPS', new FakeCarrierAdapter('UPS'));
-
-    $user = User::factory()->create(['role' => Role::Admin]);
 
     $carrier = Carrier::factory()->usps()->create();
     $carrierService = CarrierService::factory()->uspsGroundAdvantage()->create(['carrier_id' => $carrier->id]);
@@ -59,18 +55,24 @@ function visitShipPageWithFakeRates(): array
         'height' => $boxSize->height,
     ]);
 
-    test()->actingAs($user);
+    return $package;
+}
 
+/** Open the Ship page for a Package as an admin. */
+function visitShipPage(Package $package): mixed
+{
     $page = visit('/ship/'.$package->id);
 
     $page->assertSee('Select Shipping Rate')
         ->assertSee('Ground Advantage');
 
-    return [$page, $package];
+    return $page;
 }
 
 it('displays fake rates and completes shipment', function (): void {
-    [$page, $package] = visitShipPageWithFakeRates();
+    $package = packageWithFakeRates();
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $page = visitShipPage($package);
 
     $page->click('.fi-ac-btn-action:has-text("Buy & Print Label")')
         ->waitForEvent('load');
@@ -81,7 +83,9 @@ it('displays fake rates and completes shipment', function (): void {
 });
 
 it('buys through the Buy button when the SHIP barcode is scanned', function (): void {
-    [$page, $package] = visitShipPageWithFakeRates();
+    $package = packageWithFakeRates();
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $page = visitShipPage($package);
 
     // Count presses of the button, which is what shows its spinner and disables it.
     $page->script("
