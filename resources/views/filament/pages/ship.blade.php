@@ -15,6 +15,24 @@
                     window.QzPrinterStatus.bindLabelPrinter($wire);
                 },
 
+                // Press the Buy button, as F12 does, so a scan shows its
+                // spinner and cannot buy twice while the first is working.
+                clickShipButton() {
+                    const button = document.querySelector('[data-scan-command=ship]');
+                    if (!button || button.getAttribute('aria-disabled') === 'true') return;
+
+                    if (button.disabled) {
+                        new FilamentNotification()
+                            .title('No Rate Selected')
+                            .body('Choose a rate, then scan Ship again.')
+                            .warning()
+                            .send();
+                        return;
+                    }
+
+                    button.click();
+                },
+
                 handleGlobalKey(e) {
                     const el = document.activeElement;
                     const tag = el?.tagName ?? '';
@@ -29,7 +47,7 @@
                         clearTimeout(this._scanTimeout);
                         // The one command sheet barcode that applies here (ADR-0007).
                         if (trimmed.toUpperCase() === @js(\App\Services\Scanning\ScanCode::forCommand(\App\Enums\ScanCommand::Ship))) {
-                            $wire.ship();
+                            this.clickShipButton();
                         }
                         return;
                     }

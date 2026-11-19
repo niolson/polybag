@@ -13,7 +13,13 @@ use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 
-it('displays fake rates and completes shipment', function (): void {
+/**
+ * Open the Ship page for a packed Package with fake carrier rates, logged in as an admin.
+ *
+ * @return array{0: mixed, 1: Package}
+ */
+function visitShipPageWithFakeRates(): array
+{
     // suppress_printing forces a server-side Livewire redirect instead of QZ Tray print + JS redirect
     Setting::updateOrCreate(
         ['key' => 'suppress_printing'],
@@ -53,16 +59,47 @@ it('displays fake rates and completes shipment', function (): void {
         'height' => $boxSize->height,
     ]);
 
-    $this->actingAs($user);
+    test()->actingAs($user);
 
     $page = visit('/ship/'.$package->id);
 
     $page->assertSee('Select Shipping Rate')
         ->assertSee('Ground Advantage');
 
+    return [$page, $package];
+}
+
+it('displays fake rates and completes shipment', function (): void {
+    [$page, $package] = visitShipPageWithFakeRates();
+
     $page->click('.fi-ac-btn-action:has-text("Buy & Print Label")')
         ->waitForEvent('load');
 
+    $page->assertPathIs('/pack');
+
+    expect($package->fresh()->status)->toBe(PackageStatus::Shipped);
+});
+
+it('buys through the Buy button when the SHIP barcode is scanned', function (): void {
+    [$page, $package] = visitShipPageWithFakeRates();
+
+    // Count presses of the button, which is what shows its spinner and disables it.
+    $page->script("
+        window.shipClicks = 0;
+        document.querySelector('[data-scan-command=ship]').addEventListener('click', () => window.shipClicks++);
+        true;
+    ");
+
+    // A scanner types into the page, not into a field, and ends with Enter.
+    $page->script("
+        for (const key of [...'%cship', 'Enter']) {
+            window.dispatchEvent(new KeyboardEvent('keydown', { key }));
+        }
+        true;
+    ");
+    expect($page->script('window.shipClicks'))->toBe(1);
+
+    $page->waitForEvent('load');
     $page->assertPathIs('/pack');
 
     expect($package->fresh()->status)->toBe(PackageStatus::Shipped);

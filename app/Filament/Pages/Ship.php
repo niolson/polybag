@@ -444,6 +444,8 @@ class Ship extends Page
                 ->action(fn () => $this->ship())
                 ->icon('heroicon-o-printer')
                 ->keybindings(['f12'])
+                // The SHIP scan clicks this button, as F12 does, so a scan shows the same progress.
+                ->extraAttributes(['data-scan-command' => 'ship'])
                 ->hidden(fn (): bool => $this->isShipped())
                 ->disabled(fn (): bool => $this->selectedRateIndex === null && $this->selectedBlindOfferId === null),
             // Settles an earlier purchase without a rate: none may come back
