@@ -44,6 +44,11 @@ afterEach(function (): void {
     @unlink($this->workerDatabase);
 });
 
+/**
+ * The limit leaves the worker room to boot: an idle `queue:work` already peaks
+ * near 63 MB, so a 64M limit failed whenever a dependency grew the framework's
+ * footprint, before the job was even reserved.
+ */
 function runWorkerOnce(string $databasePath, string $queue): ProcessResult
 {
     return Process::path(base_path())
@@ -56,9 +61,9 @@ function runWorkerOnce(string $databasePath, string $queue): ProcessResult
             'CACHE_STORE' => 'database',
             'QUEUE_CONNECTION' => 'database',
             'SENTRY_LARAVEL_DSN' => '',
-            'SHIPMENT_IMPORT_MEMORY_LIMIT' => '64M',
+            'SHIPMENT_IMPORT_MEMORY_LIMIT' => '128M',
         ])
-        ->run([PHP_BINARY, '-d', 'memory_limit=64M', 'artisan', 'queue:work', 'database', "--queue={$queue}", '--once', '--tries=3']);
+        ->run([PHP_BINARY, '-d', 'memory_limit=128M', 'artisan', 'queue:work', 'database', "--queue={$queue}", '--once', '--tries=3']);
 }
 
 it('fails a queued job that runs out of memory instead of leaving it to be retried', function (): void {
