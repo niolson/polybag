@@ -5,6 +5,7 @@ namespace App\Filament\Pages\Reports;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\HasMultiClientFilter;
+use App\Filament\Support\LocalDateRange;
 use App\Models\Package;
 use App\Models\User;
 use BackedEnum;
@@ -103,15 +104,13 @@ class UserShipmentsReport extends Page implements HasTable
             Tables\Filters\Filter::make('date_range')
                 ->form([
                     DatePicker::make('from')
-                        ->default(now()->subDays(30)->format('Y-m-d')),
+                        ->default(LocalDateRange::now()->subDays(30)->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)
                 ->default()
                 ->query(function ($query, array $data) {
-                    return $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('packages.shipped_at', '<=', $date.' 23:59:59'));
+                    return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
 
@@ -160,15 +159,13 @@ class UserShipmentsReport extends Page implements HasTable
             Tables\Filters\Filter::make('date_range')
                 ->form([
                     DatePicker::make('from')
-                        ->default(now()->subDays(30)->format('Y-m-d')),
+                        ->default(LocalDateRange::now()->subDays(30)->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)
                 ->default()
                 ->query(function ($query, array $data) {
-                    return $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('packages.shipped_at', '<=', $date.' 23:59:59'));
+                    return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
 

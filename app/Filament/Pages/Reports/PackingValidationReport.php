@@ -8,7 +8,9 @@ use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\HasMultiClientFilter;
 use App\Filament\Support\CarrierLogoColumn;
+use App\Filament\Support\LocalDateRange;
 use App\Models\LabelBatchItem;
+use App\Models\Location;
 use App\Models\Package;
 use BackedEnum;
 use Filament\Forms\Components\DatePicker;
@@ -73,15 +75,13 @@ class PackingValidationReport extends Page implements HasTable
             Tables\Filters\Filter::make('date_range')
                 ->form([
                     DatePicker::make('from')
-                        ->default(now()->subDays(7)->format('Y-m-d')),
+                        ->default(LocalDateRange::now()->subDays(7)->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)
                 ->default()
                 ->query(function ($query, array $data) {
-                    return $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('packages.shipped_at', '<=', $date));
+                    return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
 
@@ -98,7 +98,7 @@ class PackingValidationReport extends Page implements HasTable
                     ->label('Reference'),
                 Tables\Columns\TextColumn::make('shipped_at')
                     ->label('Date')
-                    ->dateTime('M j, Y')
+                    ->dateTime('M j, Y', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('weight')
                     ->label('Actual Weight')
@@ -140,15 +140,13 @@ class PackingValidationReport extends Page implements HasTable
             Tables\Filters\Filter::make('date_range')
                 ->form([
                     DatePicker::make('from')
-                        ->default(now()->subDays(7)->format('Y-m-d')),
+                        ->default(LocalDateRange::now()->subDays(7)->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)
                 ->default()
                 ->query(function ($query, array $data) {
-                    return $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('label_batch_items.created_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('label_batch_items.created_at', '<=', $date));
+                    return LocalDateRange::apply($query, 'label_batch_items.created_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
 
@@ -166,7 +164,7 @@ class PackingValidationReport extends Page implements HasTable
                     ->searchable(),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Date')
-                    ->dateTime('M j, Y g:i A')
+                    ->dateTime('M j, Y g:i A', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('labelBatch.id')
                     ->label('Batch #'),
@@ -202,15 +200,13 @@ class PackingValidationReport extends Page implements HasTable
             Tables\Filters\Filter::make('date_range')
                 ->form([
                     DatePicker::make('from')
-                        ->default(now()->subDays(7)->format('Y-m-d')),
+                        ->default(LocalDateRange::now()->subDays(7)->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)
                 ->default()
                 ->query(function ($query, array $data) {
-                    return $query
-                        ->when($data['from'], fn ($q, $date) => $q->where('packages.shipped_at', '>=', $date))
-                        ->when($data['until'], fn ($q, $date) => $q->where('packages.shipped_at', '<=', $date));
+                    return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
 
@@ -228,7 +224,7 @@ class PackingValidationReport extends Page implements HasTable
                     ->searchable(),
                 Tables\Columns\TextColumn::make('shipped_at')
                     ->label('Date')
-                    ->dateTime('M j, Y')
+                    ->dateTime('M j, Y', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('deliverability')
                     ->badge(),

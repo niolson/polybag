@@ -3,6 +3,7 @@
 use App\Enums\Role;
 use App\Filament\Pages\Reports\ClientBillingReport;
 use App\Models\Client;
+use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
@@ -167,7 +168,7 @@ it('only includes shipped packages in billing totals', function (): void {
         ->and((float) $row->label_fees)->toBe(1.00);
 });
 
-it('excludes inactive clients from the summary', function (): void {
+it('excludes an inactive client with nothing to bill from the summary', function (): void {
     $client = Client::factory()->create(['is_default' => false, 'active' => false]);
 
     $page = Livewire::test(ClientBillingReport::class)
@@ -184,12 +185,55 @@ it('resets clientId to null when set to a nonexistent client id', function (): v
         ->assertSet('clientId', null);
 });
 
-it('resets clientId to null when set to an inactive client id', function (): void {
+it('keeps an inactive client chosen for the Billable Event Log', function (): void {
     $inactive = Client::factory()->create(['is_default' => false, 'active' => false]);
 
     Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
         ->set('clientId', $inactive->id)
-        ->assertSet('clientId', null);
+        ->assertSet('clientId', $inactive->id);
+});
+
+/** release-polish/29: a client deactivated after its last month still gets that month's bill. */
+function clientDeactivatedAfterShippingOnOctober10(): Client
+{
+    $client = Client::factory()->create(['is_default' => false, 'active' => true]);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '8.00', 'shipped_at' => '2026-10-10 15:00:00']);
+    $client->update(['active' => false]);
+
+    return $client;
+}
+
+it('bills a period for a client deactivated since', function (): void {
+    $client = clientDeactivatedAfterShippingOnOctober10();
+
+    expect((float) billingFor($client, '2026-10-01', '2026-10-31')->total_postage)->toBe(8.00);
+});
+
+it('lists a deactivated client with billable activity when the period is open', function (): void {
+    $client = clientDeactivatedAfterShippingOnOctober10();
+
+    $records = reportOf(Livewire::test(ClientBillingReport::class)
+        ->filterTable('date_range', ['from' => null, 'until' => null]))
+        ->getTableRecords();
+
+    expect((float) $records->firstWhere('id', $client->id)?->total_postage)->toBe(8.00);
+});
+
+it('shows a deactivated client its Billable Event Log and exports it', function (): void {
+    $client = clientDeactivatedAfterShippingOnOctober10();
+
+    $page = Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31'])
+        ->assertSee(Shipment::where('client_id', $client->id)->sole()->shipment_reference);
+
+    ob_start();
+    reportOf($page)->exportCsv()->sendContent();
+
+    expect(ob_get_clean())->toContain('8.00');
 });
 
 it('exports summary CSV with correct headers', function (): void {
@@ -510,7 +554,7 @@ it('exports the later package on its own detail line, without the shipment fees'
     expect($lines)->toHaveCount(2)
         ->and(str_getcsv($lines[1]))->toBe([
             Shipment::where('client_id', $client->id)->sole()->shipment_reference,
-            '2026-10-02 15:00:00', '1', '9.00', '0', '1.00', '0.00', '0.00', '0.00', '0.00', '', '10.00',
+            '2026-10-02 11:00:00', '1', '9.00', '0', '1.00', '0.00', '0.00', '0.00', '0.00', '', '10.00',
         ]);
 });
 
@@ -530,4 +574,56 @@ it('treats a date cleared to an empty string as no bound, in the table and the e
 
     expect($content)->toContain($client->name)
         ->and($content)->toContain('9.00');
+});
+
+/**
+ * release-polish/32: `shipped_at` is UTC, and the period is the default
+ * Location's calendar days. 18:00 on September 30 in Los Angeles is 01:00 on
+ * October 1 in UTC.
+ */
+function packageShippedOnSeptember30InLosAngeles(): Client
+{
+    Location::factory()->default()->create(['timezone' => 'America/Los_Angeles']);
+    Location::clearDefaultCache();
+
+    $client = Client::factory()->create(['is_default' => false, 'label_fee_per_package' => '1.00']);
+    $shipment = Shipment::factory()->create(['client_id' => $client->id]);
+    Package::factory()->shipped()->create(['shipment_id' => $shipment->id, 'cost' => '8.00', 'shipped_at' => '2026-10-01 01:00:00']);
+
+    return $client;
+}
+
+it('bills a Label bought on a local month-end evening in that month', function (): void {
+    $client = packageShippedOnSeptember30InLosAngeles();
+
+    expect((int) billingFor($client, '2026-09-01', '2026-09-30')->package_count)->toBe(1)
+        ->and(billingFor($client, '2026-10-01', '2026-10-31'))->toBeNull();
+});
+
+it('dates a detail line on the local day, in the table and the export', function (): void {
+    $client = packageShippedOnSeptember30InLosAngeles();
+
+    $page = Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->filterTable('date_range', ['from' => '2026-09-01', 'until' => '2026-09-30'])
+        ->assertSee('Sep 30, 2026')
+        ->assertDontSee('Oct 1, 2026');
+
+    ob_start();
+    reportOf($page)->exportCsv()->sendContent();
+    $lines = explode("\n", trim(ob_get_clean()));
+
+    expect(str_getcsv($lines[1])[1])->toBe('2026-09-30 18:00:00');
+});
+
+it('defaults to last month by the local calendar, not the UTC one', function (): void {
+    Location::factory()->default()->create(['timezone' => 'America/Los_Angeles']);
+    Location::clearDefaultCache();
+
+    // 23:00 on October 31 in Los Angeles; already November 1 in UTC.
+    $this->travelTo(Carbon::parse('2026-11-01 06:00:00', 'UTC'));
+
+    expect(ClientBillingReport::defaultFrom())->toBe('2026-09-01')
+        ->and(ClientBillingReport::defaultUntil())->toBe('2026-09-30');
 });
