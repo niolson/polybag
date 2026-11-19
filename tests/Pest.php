@@ -25,6 +25,7 @@ use Filament\Notifications\Notification;
 use Filament\Notifications\NotificationMailbox;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Vite;
 use JsonSchema\Validator;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\AssertionFailedError;
@@ -48,6 +49,15 @@ pest()->extend(TestCase::class)
     ->in('Feature', 'Unit', 'External', 'Browser');
 
 pest()->browser()->timeout(15000);
+
+/*
+ * Browser tests load the built assets, as CI does. A local `npm run dev`
+ * leaves `public/hot` pointing at a Vite server whose certificate the test
+ * browser does not trust, and the pages then render without CSS or JS.
+ */
+uses()->beforeEach(function (): void {
+    Vite::useHotFile(storage_path('framework/testing/browser-tests-use-the-build'));
+})->in('Browser');
 
 /*
 |--------------------------------------------------------------------------
