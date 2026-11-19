@@ -4,10 +4,13 @@ namespace App\Filament\Pages\Reports;
 
 use App\Enums\PackageStatus;
 use App\Enums\Role;
+use App\Filament\Support\LocalDateRange;
 use App\Models\Client;
+use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\SettingsService;
 use BackedEnum;
+use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
 use Filament\Pages\Page;
@@ -63,7 +66,8 @@ class ClientBillingReport extends Page implements HasTable
 
     public function updatedClientId(): void
     {
-        if ($this->clientId !== null && ! Client::where('id', $this->clientId)->where('active', true)->exists()) {
+        // An inactive client can still be billed for the periods it was active.
+        if ($this->clientId !== null && ! Client::whereKey($this->clientId)->exists()) {
             $this->clientId = null;
         }
 
@@ -111,12 +115,12 @@ class ClientBillingReport extends Page implements HasTable
      */
     public static function defaultFrom(): string
     {
-        return now()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d');
+        return LocalDateRange::now()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d');
     }
 
     public static function defaultUntil(): string
     {
-        return now()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d');
+        return LocalDateRange::now()->subMonthNoOverflow()->endOfMonth()->format('Y-m-d');
     }
 
     public function exportCsv(): StreamedResponse
@@ -227,7 +231,7 @@ class ClientBillingReport extends Page implements HasTable
                     ->searchable(),
                 Tables\Columns\TextColumn::make('shipped_at')
                     ->label('Date')
-                    ->dateTime('M j, Y')
+                    ->dateTime('M j, Y', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('package_count')
                     ->label('Pkgs'),
@@ -305,9 +309,14 @@ class ClientBillingReport extends Page implements HasTable
                 DB::raw('COALESCE(SUM(billing.product_surcharges), 0) as product_surcharges'),
                 DB::raw('COALESCE(SUM(billing.line_total), 0) as total_billable'),
             ])
-            ->where('clients.active', true)
-            // A bounded period lists only the clients that shipped in it.
-            ->when($from !== null || $until !== null, fn (Builder $query): Builder => $query->whereNotNull('billing.shipment_id'))
+            // A bounded period lists only the clients that shipped in it. An
+            // inactive client is listed whenever it has something to bill, so
+            // a departing client's last invoice is not lost (`release-polish/29`).
+            ->when(
+                $from !== null || $until !== null,
+                fn (Builder $query): Builder => $query->whereNotNull('billing.shipment_id'),
+                fn (Builder $query): Builder => $query->where(fn (Builder $query): Builder => $query->where('clients.active', true)->orWhereNotNull('billing.shipment_id')),
+            )
             ->groupBy('clients.id', 'clients.name');
     }
 
@@ -379,23 +388,25 @@ class ClientBillingReport extends Page implements HasTable
 
     /**
      * A SQL condition placing `$column` inside the period, with its bindings.
-     * An open bound is no condition.
+     * An open bound is no condition. The dates are the default Location's
+     * calendar days; `shipped_at` is UTC (`release-polish/32`).
      *
      * @return array{sql: string, bindings: array<int, string>}
      */
     private function periodCondition(string $column, ?string $from, ?string $until): array
     {
+        $bounds = LocalDateRange::utcBounds($from, $until);
         $conditions = [];
         $bindings = [];
 
-        if ($from !== null) {
+        if ($bounds['from'] !== null) {
             $conditions[] = "{$column} >= ?";
-            $bindings[] = $from;
+            $bindings[] = $bounds['from'];
         }
 
-        if ($until !== null) {
-            $conditions[] = "{$column} <= ?";
-            $bindings[] = $until.' 23:59:59';
+        if ($bounds['until'] !== null) {
+            $conditions[] = "{$column} < ?";
+            $bindings[] = $bounds['until'];
         }
 
         return ['sql' => $conditions === [] ? '1 = 1' : '('.implode(' AND ', $conditions).')', 'bindings' => $bindings];
@@ -512,7 +523,7 @@ class ClientBillingReport extends Page implements HasTable
             foreach ($rows as $row) {
                 fputcsv($out, [
                     $row->shipment_reference,
-                    $row->shipped_at,
+                    $row->shipped_at === null ? null : Carbon::parse($row->shipped_at)->setTimezone(Location::timezone())->format('Y-m-d H:i:s'),
                     $row->package_count,
                     number_format((float) $row->postage, 2),
                     (int) $row->uncosted_package_count,

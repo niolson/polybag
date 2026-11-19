@@ -4,6 +4,7 @@ namespace App\Filament\Pages\Reports;
 
 use App\Enums\Role;
 use App\Filament\Concerns\HasMultiClientFilter;
+use App\Filament\Support\LocalDateRange;
 use App\Models\PackageLabel;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -84,7 +85,7 @@ class PrepaidDutiesReport extends Page implements HasTable
         $filters = [
             Tables\Filters\Filter::make('date_range')
                 ->form([
-                    DatePicker::make('from')->default(now()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d')),
+                    DatePicker::make('from')->default(LocalDateRange::now()->subMonthNoOverflow()->startOfMonth()->format('Y-m-d')),
                     DatePicker::make('until'),
                 ])
                 ->columns(2)

@@ -5,7 +5,9 @@ namespace App\Filament\Pages\Reports;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\DescribesReportRange;
+use App\Filament\Support\LocalDateRange;
 use App\Models\Carrier;
+use App\Models\Location;
 use App\Models\Package;
 use BackedEnum;
 use Filament\Forms\Components\DatePicker;
@@ -69,7 +71,7 @@ class RateComparison extends Page implements HasTable
                     ->searchable(),
                 Tables\Columns\TextColumn::make('shipped_at')
                     ->label('Date')
-                    ->dateTime('M j, Y')
+                    ->dateTime('M j, Y', timezone: Location::timezone())
                     ->sortable(),
                 Tables\Columns\TextColumn::make('selected_rate')
                     ->label('Selected Rate')
@@ -97,16 +99,14 @@ class RateComparison extends Page implements HasTable
                 Tables\Filters\Filter::make('date_range')
                     ->form([
                         DatePicker::make('from')
-                            ->default(now()->subDays(30)->format('Y-m-d')),
+                            ->default(LocalDateRange::now()->subDays(30)->format('Y-m-d')),
                         DatePicker::make('until'),
                     ])
                     ->columns(2)
                     ->columnSpan(2)
                     ->default()
-                    ->query(function ($query, array $data) {
-                        return $query
-                            ->when($data['from'], fn ($q, $date) => $q->where('shipped_at', '>=', $date))
-                            ->when($data['until'], fn ($q, $date) => $q->where('shipped_at', '<=', $date));
+                    ->query(function ($query, array $data): \Illuminate\Contracts\Database\Query\Builder {
+                        return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                     }),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->options(fn () => Package::query()->where('status', PackageStatus::Shipped)->where('shipped_at', '>=', now()->subDays(90))->whereNotNull('carrier')->distinct()->pluck('carrier')->mapWithKeys(fn (string $carrier): array => [$carrier => Carrier::labelForName($carrier)])->toArray())

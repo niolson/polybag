@@ -3,6 +3,7 @@
 use App\Console\Commands\ValidateShipmentsCommand;
 use App\Contracts\AddressValidationPlan;
 use App\Enums\Deliverability;
+use App\Enums\ShipmentStatus;
 use App\Http\Integrations\Google\Requests\ValidateAddress as GoogleValidateAddress;
 use App\Http\Integrations\USPS\Requests\Address;
 use App\Models\Shipment;
@@ -213,4 +214,33 @@ it('stops reading candidates once the limit is filled', function (): void {
     $this->artisan('shipments:validate', ['--limit' => 1])->assertSuccessful();
 
     expect($plan->asked)->toHaveCount(1);
+});
+
+// release-polish/35: only an open order still needs its address checked.
+
+it('sends no shipped, cancelled or purged Shipment to a validator', function (array $attributes): void {
+    Saloon::fake([]);
+    Shipment::factory()->create(['country' => 'US', 'checked' => false, ...$attributes]);
+
+    $this->artisan('shipments:validate')
+        ->assertSuccessful()
+        ->expectsOutputToContain('No pending shipments');
+
+    Saloon::assertNothingSent();
+})->with([
+    'shipped' => [['status' => ShipmentStatus::Shipped]],
+    'cancelled' => [['status' => ShipmentStatus::Cancelled]],
+    'purged' => [['status' => ShipmentStatus::Cancelled, 'pii_purged_at' => now(), 'address1' => null, 'city' => null]],
+]);
+
+it('does not warn about a capped Shipment that is no longer open', function (): void {
+    Shipment::factory()->create([
+        'country' => 'US',
+        'checked' => false,
+        'status' => ShipmentStatus::Shipped,
+        'validation_attempts' => ValidateShipmentsCommand::MAX_SCHEDULED_ATTEMPTS,
+    ]);
+
+    $this->artisan('shipments:validate')
+        ->doesntExpectOutputToContain('reached the limit');
 });

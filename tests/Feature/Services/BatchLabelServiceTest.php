@@ -215,7 +215,7 @@ it('creates packages with correct weight calculation', function (): void {
     // Reload with relations for createBatch
     $shipment->load('shipmentItems.product');
 
-    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null);
+    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null)->batch;
 
     expect($batch)->toBeInstanceOf(LabelBatch::class)
         ->and($batch->total_shipments)->toBe(1)
@@ -241,7 +241,7 @@ it('creates package items from shipment items', function (): void {
 
     $shipment->load('shipmentItems.product');
 
-    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null);
+    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null)->batch;
 
     $package = Package::where('shipment_id', $shipment->id)->first();
     $packageItems = PackageItem::where('package_id', $package->id)->get();
@@ -265,7 +265,7 @@ it('creates label batch items for each shipment', function (): void {
         $shipments->push($s);
     }
 
-    $batch = $this->service->createBatch($shipments, $boxSize, $user, 'pdf', null);
+    $batch = $this->service->createBatch($shipments, $boxSize, $user, 'pdf', null)->batch;
 
     $batchItems = LabelBatchItem::where('label_batch_id', $batch->id)->get();
 
@@ -283,7 +283,7 @@ it('dispatches a bus batch with jobs', function (): void {
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
     $shipment->load('shipmentItems.product');
 
-    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'zpl', 203);
+    $batch = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'zpl', 203)->batch;
 
     Bus::assertBatched(function ($batch): bool {
         return $batch->jobs->count() === 1;
@@ -460,7 +460,7 @@ it('finishes a batch on its real counts when its last label job dies', function 
     ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
     $shipment->load('shipmentItems.product');
 
-    $batch = $this->service->createBatch(collect([$shipment]), BoxSize::factory()->create(), $user, 'pdf', null);
+    $batch = $this->service->createBatch(collect([$shipment]), BoxSize::factory()->create(), $user, 'pdf', null)->batch;
     $batch->items()->sole()->update(['status' => LabelBatchItemStatus::Processing]);
 
     /** @var GenerateLabelJob $job */
@@ -504,4 +504,50 @@ it('leaves a batch running while an item has not settled', function (): void {
 
     expect($batch->refresh()->status)->toBe(LabelBatchStatus::Processing)
         ->and($user->notifications()->count())->toBe(0);
+});
+
+// --- an overlapping run (release-polish/06) ---
+
+/** A Shipment ready to batch, as validation leaves it. */
+function batchableShipment(): Shipment
+{
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+
+    return $shipment->load('shipmentItems.product');
+}
+
+it('skips a Shipment an overlapping run drafted after validation, and batches the rest', function (): void {
+    Bus::fake();
+    $user = User::factory()->admin()->create();
+    $boxSize = BoxSize::factory()->create();
+    $overlapping = batchableShipment();
+    $other = batchableShipment();
+
+    // Both runs validated the Shipment before either drafted it.
+    $first = $this->service->createBatch(collect([$overlapping]), $boxSize, $user, 'pdf', null);
+    $second = $this->service->createBatch(collect([$overlapping, $other]), $boxSize, $user, 'pdf', null);
+
+    expect($first->skipped)->toBeEmpty()
+        ->and($second->skipped)->toHaveCount(1)
+        ->and($second->skipped->first()['shipment']->id)->toBe($overlapping->id)
+        ->and($second->skipped->first()['reason'])->toBe('Shipment already has an active package draft.')
+        ->and($second->batch->total_shipments)->toBe(1)
+        ->and($second->batch->items()->sole()->shipment_id)->toBe($other->id)
+        ->and(Package::where('shipment_id', $overlapping->id)->count())->toBe(1);
+});
+
+it('starts no batch when an overlapping run took every Shipment', function (): void {
+    Bus::fake();
+    $user = User::factory()->admin()->create();
+    $boxSize = BoxSize::factory()->create();
+    $shipment = batchableShipment();
+
+    $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null);
+    $second = $this->service->createBatch(collect([$shipment]), $boxSize, $user, 'pdf', null);
+
+    expect($second->batch)->toBeNull()
+        ->and($second->skipped)->toHaveCount(1)
+        ->and(LabelBatch::count())->toBe(1);
+    Bus::assertBatchCount(1);
 });

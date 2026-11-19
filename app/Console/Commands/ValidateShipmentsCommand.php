@@ -4,10 +4,12 @@ namespace App\Console\Commands;
 
 use App\Contracts\AddressValidationPlan;
 use App\Enums\AddressValidationOutcome;
+use App\Enums\ShipmentStatus;
 use App\Enums\ValidationTrigger;
 use App\Models\AddressValidationAnswer;
 use App\Models\Shipment;
 use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Facades\Log;
 
@@ -31,8 +33,7 @@ class ValidateShipmentsCommand extends Command
     {
         // A Shipment every validator has already answered for is left alone
         // until someone validates it by hand or changes its address or method.
-        $due = Shipment::withoutDrafts()->where('checked', false)
-            ->whereNull('validation_attempted_at')
+        $due = $this->unsettled()
             ->where('validation_attempts', '<', self::MAX_SCHEDULED_ATTEMPTS)
             ->with('shippingMethod');
 
@@ -206,13 +207,29 @@ class ValidateShipmentsCommand extends Command
     }
 
     /**
+     * Open Shipments no validator has settled. A shipped or cancelled order
+     * no longer needs its address checked, and a purged one has no address
+     * left to check, so neither is sent to a validator we pay for
+     * (`release-polish/35`).
+     *
+     * @return Builder<Shipment>
+     */
+    private function unsettled(): Builder
+    {
+        return Shipment::query()
+            ->where('status', ShipmentStatus::Open)
+            ->whereNull('pii_purged_at')
+            ->where('checked', false)
+            ->whereNull('validation_attempted_at');
+    }
+
+    /**
      * Shipments that would be due but have used up their scheduled attempts:
      * usually a source changing their address on every import.
      */
     private function warnAboutCappedShipments(): void
     {
-        $capped = Shipment::withoutDrafts()->where('checked', false)
-            ->whereNull('validation_attempted_at')
+        $capped = $this->unsettled()
             ->where('validation_attempts', '>=', self::MAX_SCHEDULED_ATTEMPTS)
             ->count();
 

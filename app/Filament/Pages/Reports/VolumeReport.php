@@ -5,6 +5,7 @@ namespace App\Filament\Pages\Reports;
 use App\Enums\Role;
 use App\Filament\Concerns\DescribesReportRange;
 use App\Filament\Resources\ShipmentResource;
+use App\Filament\Support\LocalDateRange;
 use App\Models\DailyShippingStat;
 use BackedEnum;
 use Carbon\Carbon;
@@ -94,9 +95,9 @@ class VolumeReport extends Page implements HasTable
         };
 
         $defaultFrom = match ($this->groupBy) {
-            'month' => now()->subYear()->format('Y-m-d'),
-            'week' => now()->subDays(90)->format('Y-m-d'),
-            default => now()->subDays(30)->format('Y-m-d'),
+            'month' => LocalDateRange::now()->subYear()->format('Y-m-d'),
+            'week' => LocalDateRange::now()->subDays(90)->format('Y-m-d'),
+            default => LocalDateRange::now()->subDays(30)->format('Y-m-d'),
         };
 
         return $table
@@ -235,10 +236,12 @@ class VolumeReport extends Page implements HasTable
      */
     private function isCurrentPeriod(string $groupName): bool
     {
+        $today = Carbon::parse(LocalDateRange::now()->toDateString());
+
         return match ($this->groupBy) {
-            'day' => $groupName === now()->toDateString(),
-            'week' => Carbon::parse($this->weekDateRange($groupName)['created_until'])->gte(today()) && Carbon::parse($this->weekDateRange($groupName)['created_from'])->lte(today()),
-            'month' => $groupName === now()->format('Y-m'),
+            'day' => $groupName === LocalDateRange::now()->toDateString(),
+            'week' => Carbon::parse($this->weekDateRange($groupName)['created_until'])->gte($today) && Carbon::parse($this->weekDateRange($groupName)['created_from'])->lte($today),
+            'month' => $groupName === LocalDateRange::now()->format('Y-m'),
             default => false,
         };
     }

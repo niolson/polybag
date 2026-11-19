@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Contracts\PackageDraftWorkflow;
 use App\Contracts\PostageOfferSource;
+use App\DataTransferObjects\BatchCreationResult;
 use App\DataTransferObjects\BatchValidationResult;
 use App\DataTransferObjects\PackageDrafts\BatchPackageDraftInput;
 use App\DataTransferObjects\Shipping\AddressData;
@@ -13,6 +14,7 @@ use App\Enums\LabelBatchItemStatus;
 use App\Enums\LabelBatchStatus;
 use App\Enums\PackageStatus;
 use App\Enums\ShipmentStatus;
+use App\Exceptions\PackageDraftInvalidException;
 use App\Jobs\GenerateLabelJob;
 use App\Models\AuditLog;
 use App\Models\BoxSize;
@@ -201,11 +203,13 @@ class BatchLabelService
         string $labelFormat,
         ?int $labelDpi,
         bool $hasReportPrinter = false,
-    ): LabelBatch {
+    ): BatchCreationResult {
+        $skipped = collect();
+
         // The rows commit before any job is queued: a worker that picked a job
         // up first would find no batch item, do nothing, and leave the batch
         // processing for good (the queue connection does not wait for commits).
-        [$batch, $jobs] = DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi, $hasReportPrinter): array {
+        [$batch, $jobs] = DB::transaction(function () use ($shipments, $boxSize, $user, $labelFormat, $labelDpi, $hasReportPrinter, $skipped): array {
             $batch = LabelBatch::create([
                 'user_id' => $user->id,
                 'box_size_id' => $boxSize->id,
@@ -218,10 +222,20 @@ class BatchLabelService
             $jobs = [];
 
             foreach ($shipments as $shipment) {
-                $readyDraft = app(PackageDraftWorkflow::class)->createBatchReadyDraft(
-                    $shipment,
-                    new BatchPackageDraftInput($boxSize),
-                );
+                // Validation ran before the Shipment was locked, so an
+                // overlapping run may have drafted or shipped it since. That
+                // Shipment is skipped, as validation would have skipped it,
+                // and the rest of the batch carries on (`release-polish/06`).
+                try {
+                    $readyDraft = app(PackageDraftWorkflow::class)->createBatchReadyDraft(
+                        $shipment,
+                        new BatchPackageDraftInput($boxSize),
+                    );
+                } catch (PackageDraftInvalidException $exception) {
+                    $skipped->push(['shipment' => $shipment, 'reason' => $exception->getMessage()]);
+
+                    continue;
+                }
 
                 $batchItem = LabelBatchItem::create([
                     'label_batch_id' => $batch->id,
@@ -233,8 +247,20 @@ class BatchLabelService
                 $jobs[] = new GenerateLabelJob($batchItem->id, $labelFormat, $labelDpi, $hasReportPrinter);
             }
 
+            if ($jobs === []) {
+                $batch->delete();
+
+                return [null, []];
+            }
+
+            $batch->update(['total_shipments' => count($jobs)]);
+
             return [$batch, $jobs];
         });
+
+        if ($batch === null) {
+            return new BatchCreationResult(null, $skipped);
+        }
 
         // The batch's own queue, not each job's: a bus batch pushes its jobs in bulk
         // onto the connection's default queue unless the batch names one.
@@ -264,6 +290,6 @@ class BatchLabelService
             ],
         );
 
-        return $batch;
+        return new BatchCreationResult($batch, $skipped);
     }
 }

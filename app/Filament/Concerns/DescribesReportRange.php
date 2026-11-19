@@ -2,6 +2,7 @@
 
 namespace App\Filament\Concerns;
 
+use App\Filament\Support\LocalDateRange;
 use Illuminate\Support\Carbon;
 
 /**
@@ -26,7 +27,7 @@ trait DescribesReportRange
         }
 
         if ($until === null) {
-            $days = (int) $from->diffInDays(today());
+            $days = (int) $from->diffInDays(Carbon::parse(LocalDateRange::now()->toDateString()));
 
             return in_array($days, [7, 30, 90], true)
                 ? "Last {$days} days"
