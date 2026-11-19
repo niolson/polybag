@@ -1,5 +1,6 @@
 <?php
 
+use App\DataTransferObjects\BatchValidationResult;
 use App\Enums\Deliverability;
 use App\Enums\Role;
 use App\Enums\ShipmentStatus;
@@ -9,12 +10,15 @@ use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
 use App\Jobs\GenerateLabelJob;
 use App\Models\BoxSize;
+use App\Models\LabelBatch;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
+use App\Services\BatchLabelService;
 use App\Services\SettingsService;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Bus;
 use Livewire\Livewire;
 
@@ -147,6 +151,64 @@ it('batch ship carries the workstation\'s report printer answer into the batch',
 
     Bus::assertBatched(fn ($batch): bool => $batch->jobs->count() === 1
         && $batch->jobs->every(fn (GenerateLabelJob $job): bool => $job->hasReportPrinter));
+});
+
+/**
+ * A Batch Ship whose Shipments an overlapping run takes between validation
+ * and drafting, as two Managers submitting at the same moment would.
+ *
+ * @param  list<Shipment>  $taken
+ */
+function batchShipRacedBy(array $taken): void
+{
+    app()->instance(BatchLabelService::class, new class($taken) extends BatchLabelService
+    {
+        /** @param  list<Shipment>  $taken */
+        public function __construct(private array $taken) {}
+
+        public function validateShipmentsForBatch(Collection $shipments, bool $hasReportPrinter = false): BatchValidationResult
+        {
+            $result = parent::validateShipmentsForBatch($shipments, $hasReportPrinter);
+
+            foreach ($this->taken as $shipment) {
+                Package::factory()->create(['shipment_id' => $shipment->id, 'status' => 'unshipped', 'weight' => 1.5]);
+            }
+
+            return $result;
+        }
+    });
+}
+
+it('batch ship skips a Shipment an overlapping run took, and batches the rest', function (): void {
+    Bus::fake();
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $boxSize = BoxSize::factory()->create();
+    [$taken, $other] = Shipment::factory()->count(2)->create()->all();
+    ShipmentItem::factory()->create(['shipment_id' => $taken->id]);
+    ShipmentItem::factory()->create(['shipment_id' => $other->id]);
+    batchShipRacedBy([$taken]);
+
+    Livewire::test(ListShipments::class)
+        ->callTableBulkAction('batch-ship', [$taken, $other], data: ['box_size_id' => $boxSize->id, 'label_format' => 'pdf', 'label_dpi' => null])
+        ->assertNotified('1 shipment(s) skipped')
+        ->assertRedirect();
+
+    expect(LabelBatch::sole()->items()->sole()->shipment_id)->toBe($other->id);
+});
+
+it('batch ship starts nothing when an overlapping run took every Shipment', function (): void {
+    Bus::fake();
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $shipment = Shipment::factory()->create();
+    ShipmentItem::factory()->create(['shipment_id' => $shipment->id]);
+    batchShipRacedBy([$shipment]);
+
+    Livewire::test(ListShipments::class)
+        ->callTableBulkAction('batch-ship', [$shipment], data: ['box_size_id' => BoxSize::factory()->create()->id, 'label_format' => 'pdf', 'label_dpi' => null])
+        ->assertNotified('1 shipment(s) skipped')
+        ->assertNoRedirect();
+
+    expect(LabelBatch::count())->toBe(0);
 });
 
 it('offers no bulk address validation, since every check is a billed API request', function (): void {

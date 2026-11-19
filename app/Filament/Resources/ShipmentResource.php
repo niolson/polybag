@@ -603,7 +603,7 @@ class ShipmentResource extends Resource
                             return;
                         }
 
-                        $service = new BatchLabelService;
+                        $service = app(BatchLabelService::class);
 
                         $validation = $service->validateShipmentsForBatch($records, (bool) ($data['has_report_printer'] ?? false));
 
@@ -617,17 +617,7 @@ class ShipmentResource extends Resource
                             return;
                         }
 
-                        if ($validation->hasIneligible()) {
-                            $skippedCount = $validation->ineligible->count();
-                            Notification::make()
-                                ->title("{$skippedCount} shipment(s) skipped")
-                                ->body($validation->ineligible->map(fn ($item): string => "{$item['shipment']->shipment_reference}: {$item['reason']}")->join("\n"))
-                                ->warning()
-                                ->persistent()
-                                ->send();
-                        }
-
-                        $batch = $service->createBatch(
+                        $created = $service->createBatch(
                             $validation->eligible,
                             BoxSize::findOrFail($data['box_size_id']),
                             auth()->user(),
@@ -636,7 +626,25 @@ class ShipmentResource extends Resource
                             (bool) ($data['has_report_printer'] ?? false),
                         );
 
-                        redirect(LabelBatchResource::getUrl('view', ['record' => $batch]));
+                        // A Shipment can also be skipped while its Package is
+                        // drafted, when an overlapping run took it first.
+                        $skipped = $validation->ineligible->concat($created->skipped);
+
+                        if ($skipped->isNotEmpty()) {
+                            $skippedCount = $skipped->count();
+                            Notification::make()
+                                ->title("{$skippedCount} shipment(s) skipped")
+                                ->body($skipped->map(fn ($item): string => "{$item['shipment']->shipment_reference}: {$item['reason']}")->join("\n"))
+                                ->warning()
+                                ->persistent()
+                                ->send();
+                        }
+
+                        if ($created->batch === null) {
+                            return;
+                        }
+
+                        redirect(LabelBatchResource::getUrl('view', ['record' => $created->batch]));
                     })
                     ->deselectRecordsAfterCompletion(),
                 Actions\BulkAction::make('create-picking-batch')
