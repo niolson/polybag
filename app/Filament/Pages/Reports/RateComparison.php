@@ -105,7 +105,7 @@ class RateComparison extends Page implements HasTable
                     ->columns(2)
                     ->columnSpan(2)
                     ->default()
-                    ->query(function ($query, array $data) {
+                    ->query(function ($query, array $data): \Illuminate\Contracts\Database\Query\Builder {
                         return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                     }),
                 Tables\Filters\SelectFilter::make('carrier')

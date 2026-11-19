@@ -16,6 +16,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use UnitEnum;
@@ -109,7 +110,7 @@ class UserShipmentsReport extends Page implements HasTable
                 ])
                 ->columns(2)
                 ->default()
-                ->query(function ($query, array $data) {
+                ->query(function ($query, array $data): Builder {
                     return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
@@ -164,7 +165,7 @@ class UserShipmentsReport extends Page implements HasTable
                 ])
                 ->columns(2)
                 ->default()
-                ->query(function ($query, array $data) {
+                ->query(function ($query, array $data): Builder {
                     return LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null);
                 }),
         ];
