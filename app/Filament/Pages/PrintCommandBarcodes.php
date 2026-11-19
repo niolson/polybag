@@ -23,7 +23,7 @@ class PrintCommandBarcodes extends Page
 
     public function mount(): void
     {
-        $this->commands = collect(ScanCommand::cases())
+        $this->commands = collect(ScanCommand::available())
             ->map(fn (ScanCommand $command): array => [
                 'code' => ScanCode::forCommand($command),
                 'label' => $command->getLabel(),
