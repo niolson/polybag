@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\PhoneParserService;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\DatabaseSource;
 use Database\Seeders\StoreChannelSeeder;
 
 /**
@@ -223,4 +224,79 @@ it('can run again without duplicating anything or changing a password', function
         ->and(ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->count())->toBe($standardGroundServices)
         ->and(DataSource::sole()->settings['channel_name'])->toBe(Channel::where('name', StoreChannelSeeder::AMAZON)->value('id'))
         ->and(User::where('username', 'prospect')->value('password'))->toBe($passwordHash);
+});
+
+function demoImportDatabase(array $overrides = []): void
+{
+    config()->set('demo.import_database', array_merge([
+        'host' => 'shared-mysql',
+        'port' => 3306,
+        'database' => 'polybag_demo_import',
+        'username' => 'demo_import_reader',
+        'password' => 'reader-secret',
+    ], $overrides));
+}
+
+function demoImportConnection(): ?DataSource
+{
+    return DataSource::query()
+        ->where('source_type', DatabaseSource::class)
+        ->get()
+        ->first(fn (DataSource $source): bool => ($source->settings[DemoProvision::IMPORT_DATABASE_SETTING] ?? false) === true);
+}
+
+it('creates a manual-import Database connection to the demo order database when configured', function (): void {
+    demoImportDatabase();
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    $connection = demoImportConnection();
+
+    expect($connection)->not->toBeNull()
+        ->and($connection->active)->toBeTrue()
+        ->and($connection->import_enabled)->toBeTrue()
+        ->and($connection->schedule_interval)->toBeNull()
+        ->and($connection->settings)->toMatchArray([
+            'db_driver' => 'mysql',
+            'db_host' => 'shared-mysql',
+            'db_port' => 3306,
+            'db_database' => 'polybag_demo_import',
+            'db_username' => 'demo_import_reader',
+            'shipments_table' => 'shipments',
+            'shipment_items_table' => 'shipment_items',
+            'on_existing' => 'update_if_changed',
+            'export_enabled' => true,
+            'export_query' => DemoProvision::IMPORT_DATABASE_EXPORT_QUERY,
+        ])
+        ->and($connection->settings)->not->toHaveKey('db_password')
+        ->and($connection->secret_settings)->toBe(['db_password' => 'reader-secret']);
+});
+
+it('creates no Database connection on a demo without a demo order database', function (): void {
+    demoImportDatabase(['host' => null]);
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    expect(DataSource::where('source_type', DatabaseSource::class)->count())->toBe(0);
+});
+
+it('skips the Database connection, naming what is missing, when the config is partial', function (): void {
+    demoImportDatabase(['password' => null]);
+
+    $this->artisan('demo:provision')
+        ->expectsOutputToContain('DEMO_IMPORT_DB_PASSWORD')
+        ->assertSuccessful();
+
+    expect(demoImportConnection())->toBeNull();
+});
+
+it('updates the one Database connection on a second run', function (): void {
+    demoImportDatabase();
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    demoImportDatabase(['password' => 'rotated-secret']);
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    expect(DataSource::where('source_type', DatabaseSource::class)->count())->toBe(1)
+        ->and(demoImportConnection()->secret_settings['db_password'])->toBe('rotated-secret');
 });

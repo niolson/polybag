@@ -59,4 +59,18 @@ return [
         'marketplace_id' => env('DEMO_AMAZON_MARKETPLACE_ID', 'ATVPDKIKX0DER'),
     ],
 
+    /*
+    | The database of synthetic orders a demo can import instead of a
+    | prospect's store. When the host is set, `demo:provision` creates a
+    | Database connection to it, which `demo:reset` then imports from. Unset
+    | on a demo that connects a live store.
+    */
+    'import_database' => [
+        'host' => env('DEMO_IMPORT_DB_HOST'),
+        'port' => env('DEMO_IMPORT_DB_PORT', 3306),
+        'database' => env('DEMO_IMPORT_DB_DATABASE', 'polybag_demo_import'),
+        'username' => env('DEMO_IMPORT_DB_USERNAME'),
+        'password' => env('DEMO_IMPORT_DB_PASSWORD'),
+    ],
+
 ];
