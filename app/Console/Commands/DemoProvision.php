@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Enums\AppMode;
+use App\Enums\ImportExistingBehavior;
 use App\Enums\Role;
 use App\Models\Carrier;
 use App\Models\CarrierAccount;
@@ -16,6 +17,7 @@ use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
+use App\Services\ShipmentImport\Sources\DatabaseSource;
 use Database\Seeders\ClientSeeder;
 use Database\Seeders\LocationSeeder;
 use Database\Seeders\OperationalDefaultsSeeder;
@@ -47,10 +49,24 @@ class DemoProvision extends Command
 
     private const AMAZON_SHIPPING_GROUND_CODE = 'std-us-swa-mfn';
 
+    /**
+     * The `settings` key marking the Database connection to our synthetic
+     * order database, so a second run updates it rather than adding another:
+     * `demo:reset` needs exactly one active Database connection.
+     */
+    public const IMPORT_DATABASE_SETTING = 'demo_import_database';
+
+    /**
+     * Writes tracking back to the synthetic order database's `shipments`
+     * table when a package ships. That schema is the demo data tools', which
+     * fill the database; `demo:reset` reads the same columns.
+     */
+    public const IMPORT_DATABASE_EXPORT_QUERY = "update shipments set exported = 'y', tracking_number = :tracking_number, carrier = :carrier, service = :service, cost = :cost, weight = :weight, height = :height, width = :width, length = :length, exported_at = CURRENT_TIMESTAMP where id = :shipment_reference";
+
     protected $signature = 'demo:provision
         {--client-name= : Name the demo Client after the prospect}';
 
-    protected $description = '[Internal] Set up a demo tenant: sandbox carrier accounts, starter catalog, Amazon Shipping and MFA-required users';
+    protected $description = '[Internal] Set up a demo tenant: sandbox carrier accounts, starter catalog, Amazon Shipping, the demo order database connection when configured, and MFA-required users';
 
     /**
      * Whether this connection is the one made from our own sandbox app,
@@ -73,6 +89,7 @@ class DemoProvision extends Command
         $this->nameClient();
         $this->provisionCarrierAccounts();
         $this->provisionAmazonShipping();
+        $this->provisionImportDatabase();
         $this->provisionUsers();
 
         return self::SUCCESS;
@@ -259,6 +276,63 @@ class DemoProvision extends Command
         $method->carrierServices()->syncWithoutDetaching([$service->id]);
 
         $this->components->twoColumnDetail('Amazon Shipping', 'sandbox connection ready, listed on '.self::AMAZON_SHIPPING_METHOD);
+    }
+
+    /**
+     * A Database connection to the synthetic order database, for a demo that
+     * shows our own orders rather than a prospect's store. Manual import only:
+     * `demo:reset` does the importing, over a window it chooses, and a
+     * schedule would pull every row in the table in as an open shipment.
+     */
+    private function provisionImportDatabase(): void
+    {
+        $values = (array) config('demo.import_database', []);
+
+        if (blank($values['host'] ?? null)) {
+            return;
+        }
+
+        $missing = collect(['port', 'database', 'username', 'password'])
+            ->filter(fn (string $key): bool => blank($values[$key] ?? null));
+
+        if ($missing->isNotEmpty()) {
+            $this->components->warn('Demo import database: skipped, no '.$missing->map(fn (string $key): string => 'DEMO_IMPORT_DB_'.strtoupper($key))->implode(', '));
+
+            return;
+        }
+
+        $connection = DataSource::query()
+            ->where('source_type', DatabaseSource::class)
+            ->get()
+            ->first(fn (DataSource $source): bool => (($source->settings ?? [])[self::IMPORT_DATABASE_SETTING] ?? false) === true)
+            ?? new DataSource(['source_type' => DatabaseSource::class]);
+
+        $connection->fill([
+            'name' => 'Demo orders',
+            'active' => true,
+            'import_enabled' => true,
+            'schedule_interval' => null,
+            'global_export' => false,
+            'settings' => array_merge($connection->settings ?? [], [
+                'db_driver' => 'mysql',
+                'db_host' => (string) $values['host'],
+                'db_port' => (int) $values['port'],
+                'db_database' => (string) $values['database'],
+                'db_username' => (string) $values['username'],
+                'shipments_table' => 'shipments',
+                'shipment_items_table' => 'shipment_items',
+                'on_existing' => ImportExistingBehavior::UpdateIfChanged->value,
+                'mark_exported_enabled' => false,
+                'export_enabled' => true,
+                'export_query' => self::IMPORT_DATABASE_EXPORT_QUERY,
+                self::IMPORT_DATABASE_SETTING => true,
+            ]),
+            'secret_settings' => array_merge($connection->secret_settings ?? [], [
+                'db_password' => (string) $values['password'],
+            ]),
+        ])->save();
+
+        $this->components->twoColumnDetail('Demo import database', "connection ready ({$values['database']} on {$values['host']})");
     }
 
     private function provisionUsers(): void
