@@ -295,12 +295,6 @@ class DemoProvision extends Command
     }
 
     /**
-     * A Database connection to the synthetic order database, for a demo that
-     * shows our own orders rather than a prospect's store. Manual import only:
-     * `demo:reset` does the importing, over a window it chooses, and a
-     * schedule would pull every row in the table in as an open shipment.
-     */
-    /**
      * Map the demo order database's shipping references for the default
      * client. Only these: a presenter can still show mapping with any other.
      */
@@ -323,6 +317,12 @@ class DemoProvision extends Command
         }
     }
 
+    /**
+     * A Database connection to the synthetic order database, for a demo that
+     * shows our own orders rather than a prospect's store. Manual import only:
+     * `demo:reset` does the importing, over a window it chooses, and a
+     * schedule would pull every row in the table in as an open shipment.
+     */
     private function provisionImportDatabase(): void
     {
         $values = (array) config('demo.import_database', []);
