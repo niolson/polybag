@@ -23,6 +23,12 @@ class ImportReferenceResolver
     /** @var array<string, int> */
     private array $productCache = [];
 
+    /** @var array<int, true> */
+    private array $channelIds = [];
+
+    /** @var array<int, true> */
+    private array $shippingMethodIds = [];
+
     private ?int $warmedClientId = null;
 
     public function warm(?Client $client = null): void
@@ -33,21 +39,21 @@ class ImportReferenceResolver
         $this->shippingMethodCache = [];
         $this->productCache = [];
 
+        // A reference resolves through the client's aliases only. The source's
+        // value is its own code, not a PolyBag key: matching it against IDs
+        // would send an ERP's "1" to whichever method PolyBag numbered 1, over
+        // the alias the client set for it, and hide it from the unmapped pages.
         ChannelAlias::where('client_id', $client->id)->get()->each(function (ChannelAlias $alias): void {
             $this->channelCache[$alias->reference] = $alias->channel_id;
         });
 
-        Channel::pluck('id')->each(function (int $id): void {
-            $this->channelCache[(string) $id] = $id;
-        });
+        $this->channelIds = array_fill_keys(Channel::pluck('id')->all(), true);
 
         ShippingMethodAlias::where('client_id', $client->id)->get()->each(function (ShippingMethodAlias $alias): void {
             $this->shippingMethodCache[$alias->reference] = $alias->shipping_method_id;
         });
 
-        ShippingMethod::pluck('id')->each(function (int $id): void {
-            $this->shippingMethodCache[(string) $id] = $id;
-        });
+        $this->shippingMethodIds = array_fill_keys(ShippingMethod::pluck('id')->all(), true);
 
         Product::where('client_id', $client->id)->pluck('id', 'sku')->each(function (int $id, string $sku): void {
             $this->productCache[$sku] = $id;
@@ -67,6 +73,40 @@ class ImportReferenceResolver
         $this->ensureWarm($client);
 
         return $this->shippingMethodCache[(string) $reference] ?? null;
+    }
+
+    /**
+     * A PolyBag shipping method ID taken from the source's own settings (the
+     * Default Shipping Method a Shopify or Amazon connection is configured
+     * with), when that method still exists. Never for an imported reference.
+     */
+    public function existingShippingMethodId(mixed $id, ?Client $client = null): ?int
+    {
+        return $this->existingId($id, $client, fn (): array => $this->shippingMethodIds);
+    }
+
+    /**
+     * A PolyBag channel ID taken from the source's own settings (the Channel a
+     * Shopify or Amazon connection is configured with), when that channel
+     * still exists. Never for an imported reference.
+     */
+    public function existingChannelId(mixed $id, ?Client $client = null): ?int
+    {
+        return $this->existingId($id, $client, fn (): array => $this->channelIds);
+    }
+
+    /**
+     * @param  callable(): array<int, true>  $ids
+     */
+    private function existingId(mixed $id, ?Client $client, callable $ids): ?int
+    {
+        if (! is_numeric($id) || (string) (int) $id !== trim((string) $id)) {
+            return null;
+        }
+
+        $this->ensureWarm($client);
+
+        return isset($ids()[(int) $id]) ? (int) $id : null;
     }
 
     public function channelIdFor(array $data, ?Client $client = null): ?int

@@ -121,7 +121,8 @@ it('prepopulates starter shipping methods when selected', function (): void {
     expect(ShippingMethod::count())->toBeGreaterThan(0)
         ->and($standardGround)->not->toBeNull()
         ->and($standardGround->carrierServices()->count())->toBeGreaterThan(0)
-        ->and(ShippingMethodAlias::where('shipping_method_id', $standardGround->id)->where('reference', '1')->exists())->toBeTrue();
+        // No guessed aliases: the connection's own references get mapped later.
+        ->and(ShippingMethodAlias::count())->toBe(0);
 });
 
 // ── A fresh install ───────────────────────────────────────────────────────────
@@ -166,7 +167,7 @@ it('loads the starter shipping methods on a fresh install', function (): void {
     invokePrivateMethod($component->instance(), 'saveChannelsAndMethods');
 
     expect(ShippingMethod::where('name', 'Standard Ground')->exists())->toBeTrue()
-        ->and(ShippingMethodAlias::where('reference', '1')->exists())->toBeTrue();
+        ->and(ShippingMethodAlias::count())->toBe(0);
 });
 
 it('creates a Shopify connection on a fresh install', function (): void {

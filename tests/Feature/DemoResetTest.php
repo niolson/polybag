@@ -109,7 +109,7 @@ function insertImportShipment(DataSource $source, string $id, string $createdAt,
         'country' => 'US',
         'phone' => '202-456-1111',
         'value' => 49.99,
-        'shipping_method' => '1',
+        'shipping_method' => 'Standard Shipping',
         'channel' => $channel,
         'status' => 'ready',
         'exported' => 'n',
@@ -129,10 +129,14 @@ function insertImportShipment(DataSource $source, string $id, string $createdAt,
 }
 
 beforeEach(function (): void {
-    Client::factory()->default()->create();
+    $client = Client::factory()->default()->create();
     Location::factory()->default()->create();
     User::factory()->create();
-    ShippingMethod::factory()->create();
+    ShippingMethodAlias::create([
+        'client_id' => $client->id,
+        'reference' => 'Standard Shipping',
+        'shipping_method_id' => ShippingMethod::factory()->create()->id,
+    ]);
 
     $this->dataSource = DataSource::factory()->create([
         'settings' => [
@@ -237,6 +241,19 @@ it('refuses before wiping anything when a demo shipment would have no shipping m
     'an unmapped reference' => ['EXPRESS-99', 'EXPRESS-99'],
     'no reference at all' => [null, '(none)'],
 ]);
+
+it('treats a reference that only matches a shipping method ID as unmapped', function (): void {
+    // An ERP's "1" is its own code. It must not land on whichever method
+    // PolyBag happens to have numbered 1.
+    $id = (string) ShippingMethod::query()->value('id');
+
+    insertImportShipment($this->dataSource, 'D00NEW0001', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+    DB::connection(importConnectionFor($this->dataSource))->table('shipments')->update(['shipping_method' => $id]);
+
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])
+        ->expectsOutputToContain("Shipping method references with no match: {$id}.")
+        ->assertFailed();
+});
 
 it('checks each row\'s shipping method against the client its client column names', function (): void {
     $acme = Client::factory()->create(['name' => 'Acme']);

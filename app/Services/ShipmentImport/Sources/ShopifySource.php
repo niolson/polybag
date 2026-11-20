@@ -1275,6 +1275,7 @@ class ShopifySource implements ClosesRecordsClosedAtSource, DataSourceInterface,
             'value' => round($value, 2),
             'currency' => $currency,
             'channel_id' => $this->config['channel_name'] ?? 'Shopify',
+            '_channel_id' => $this->config['channel_name'] ?? null,
             'shipping_method_id' => filled($presentedShippingMethod) ? $presentedShippingMethod : $defaultShippingMethod,
             '_shipping_method_fallback' => $defaultShippingMethod,
             // Copied from the rate the buyer chose: set by carrier-calculated or app rates, null for merchant-defined ones.

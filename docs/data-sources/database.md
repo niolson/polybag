@@ -587,8 +587,9 @@ Then use **Preview Queries** to confirm the mapped columns are what you expect.
 
 `shipping_method_id` and `channel_id` are misleadingly named: after mapping they hold the
 *source's* string, not a PolyBag ID. Each is resolved against the client's aliases
-(Shipping Method Aliases, Channel Aliases), falling back to a literal PolyBag ID if the
-string is one.
+(Shipping Method Aliases, Channel Aliases) and nothing else. A reference that happens to
+equal a PolyBag ID is not matched to it: your ERP's `1` has nothing to do with the method
+PolyBag numbered 1. If your source really does send PolyBag IDs, add an alias for each.
 
 An unresolved reference is not an error. The shipment imports with
 `shipping_method_reference` set and `shipping_method_id` null, which is what surfaces it
