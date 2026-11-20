@@ -477,6 +477,85 @@ it('returns null when neither alias nor direct match exists', function (): void 
         ->and($shipment->shipping_method_reference)->toBe('nonexistent-method');
 });
 
+function referenceRow(string $reference, array $overrides = []): array
+{
+    return [
+        'shipment_reference' => $reference,
+        'first_name' => 'Test',
+        'last_name' => 'User',
+        'address1' => '100 Main St',
+        'city' => 'Chicago',
+        'state_or_province' => 'IL',
+        'postal_code' => '60601',
+        'country' => 'US',
+        ...$overrides,
+    ];
+}
+
+it('does not match a reference against shipping method or channel IDs', function (): void {
+    // The source's "1" is its own code; PolyBag's method and channel numbered
+    // 1 are unrelated. Unaliased, it must import unmapped so it surfaces.
+    $method = ShippingMethod::factory()->create();
+    $channel = Channel::factory()->create();
+
+    $source = fakeSource(collect([referenceRow('ORD-ID-001', [
+        'shipping_method_id' => (string) $method->id,
+        'channel_id' => (string) $channel->id,
+    ])]));
+
+    ShipmentImportService::forSource($source, $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-ID-001')->sole();
+    expect($shipment->shipping_method_id)->toBeNull()
+        ->and($shipment->shipping_method_reference)->toBe((string) $method->id)
+        ->and($shipment->channel_id)->toBeNull()
+        ->and($shipment->channel_reference)->toBe((string) $channel->id);
+});
+
+it('resolves a numeric reference through its alias even when it equals another ID', function (): void {
+    $numberedOne = ShippingMethod::factory()->create();
+    $upsGround = ShippingMethod::factory()->create();
+    ShippingMethodAlias::create([
+        'reference' => (string) $numberedOne->id,
+        'shipping_method_id' => $upsGround->id,
+    ]);
+
+    $channelNumberedOne = Channel::factory()->create();
+    $erpChannel = Channel::factory()->create();
+    ChannelAlias::create(['reference' => (string) $channelNumberedOne->id, 'channel_id' => $erpChannel->id]);
+
+    $source = fakeSource(collect([referenceRow('ORD-ID-002', [
+        'shipping_method_id' => (string) $numberedOne->id,
+        'channel_id' => (string) $channelNumberedOne->id,
+    ])]));
+
+    ShipmentImportService::forSource($source, $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-ID-002')->sole();
+    expect($shipment->shipping_method_id)->toBe($upsGround->id)
+        ->and($shipment->channel_id)->toBe($erpChannel->id);
+});
+
+it('assigns the channel and default shipping method a connection is configured with by ID', function (): void {
+    // Shopify and Amazon store real PolyBag IDs in their settings.
+    $default = ShippingMethod::factory()->create();
+    $channel = Channel::factory()->create();
+
+    $source = fakeSource(collect([referenceRow('ORD-ID-003', [
+        'shipping_method_id' => 'Economy (unaliased)',
+        '_shipping_method_fallback' => (string) $default->id,
+        'channel_id' => (string) $channel->id,
+        '_channel_id' => (string) $channel->id,
+    ])]));
+
+    ShipmentImportService::forSource($source, $this->dataSource)->import();
+
+    $shipment = Shipment::where('shipment_reference', 'ORD-ID-003')->sole();
+    expect($shipment->shipping_method_id)->toBe($default->id)
+        ->and($shipment->shipping_method_reference)->toBe('Economy (unaliased)')
+        ->and($shipment->channel_id)->toBe($channel->id);
+});
+
 it('imports a shipment with no shipping method reference at all', function (): void {
     $channel = tap(Channel::factory()->create(), fn ($c) => ChannelAlias::create(['reference' => 'web', 'channel_id' => $c->id]));
 

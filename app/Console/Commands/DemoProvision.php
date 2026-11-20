@@ -14,6 +14,7 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Setting;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -48,6 +49,20 @@ class DemoProvision extends Command
     public const AMAZON_SHIPPING_METHOD = 'Standard Ground';
 
     private const AMAZON_SHIPPING_GROUND_CODE = 'std-us-swa-mfn';
+
+    /**
+     * The checkout labels the synthetic order database (polybag-demo-data-tools)
+     * writes into `shipments.shipping_method`, and the starter method each one
+     * means. `demo:reset` refuses while any of them is unmapped.
+     *
+     * @var array<string, string>
+     */
+    public const DEMO_SHIPPING_REFERENCES = [
+        'Standard Shipping' => 'Standard Ground',
+        'Expedited Shipping' => '2 Day',
+        'Overnight Shipping' => 'Overnight',
+        'International Shipping' => 'International Economy',
+    ];
 
     /**
      * The `settings` key marking the Database connection to our synthetic
@@ -86,6 +101,7 @@ class DemoProvision extends Command
         }
 
         $this->seedStarterData($settings);
+        $this->provisionShippingMethodAliases();
         $this->nameClient();
         $this->provisionCarrierAccounts();
         $this->provisionAmazonShipping();
@@ -276,6 +292,29 @@ class DemoProvision extends Command
         $method->carrierServices()->syncWithoutDetaching([$service->id]);
 
         $this->components->twoColumnDetail('Amazon Shipping', 'sandbox connection ready, listed on '.self::AMAZON_SHIPPING_METHOD);
+    }
+
+    /**
+     * Map the demo order database's shipping references for the default
+     * client. Only these: a presenter can still show mapping with any other.
+     */
+    private function provisionShippingMethodAliases(): void
+    {
+        $clientId = Client::query()->where('is_default', true)->value('id');
+        $methods = ShippingMethod::query()->whereIn('name', self::DEMO_SHIPPING_REFERENCES)->pluck('id', 'name');
+
+        foreach (self::DEMO_SHIPPING_REFERENCES as $reference => $methodName) {
+            if (! $methods->has($methodName)) {
+                $this->components->warn("Shipping reference '{$reference}': no {$methodName} method to map it to");
+
+                continue;
+            }
+
+            ShippingMethodAlias::query()->firstOrCreate(
+                ['client_id' => $clientId, 'reference' => $reference],
+                ['shipping_method_id' => $methods[$methodName]],
+            );
+        }
     }
 
     /**

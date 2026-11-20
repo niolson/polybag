@@ -77,11 +77,14 @@ class ShipmentRowPreparer
         // a fallback for references that have no alias yet. The unmapped
         // reference is still recorded so it surfaces for mapping.
         if ($shippingMethodId === null && filled($data['_shipping_method_fallback'] ?? null)) {
-            $shippingMethodId = $this->references->shippingMethodIdFor(
-                ['shipping_method_id' => $data['_shipping_method_fallback']],
-                $client,
-            );
+            $shippingMethodId = $this->references->existingShippingMethodId($data['_shipping_method_fallback'], $client);
         }
+
+        // Shopify and Amazon assign the PolyBag channel their connection is
+        // configured with (`_channel_id`), a real ID; everything else is the
+        // source's own reference, resolved through the client's aliases.
+        $channelId = $this->references->existingChannelId($data['_channel_id'] ?? null, $client)
+            ?? $this->references->channelIdFor($data, $client);
 
         return new PreparedShipmentRow(
             attributes: [
@@ -111,7 +114,7 @@ class ShipmentRowPreparer
                 'shipping_method_reference' => $data['shipping_method_id'] ?? null,
                 'shipping_method_id' => $shippingMethodId,
                 'channel_reference' => $data['channel_id'] ?? null,
-                'channel_id' => $this->references->channelIdFor($data, $client),
+                'channel_id' => $channelId,
                 'deliver_by' => $data['deliver_by'] ?? null,
                 'ship_by' => $data['ship_by'] ?? null,
                 ...$customs['attributes'],

@@ -4,29 +4,25 @@ namespace Database\Seeders;
 
 use App\Enums\PostageSourceKind;
 use App\Models\CarrierService;
-use App\Models\Client;
 use App\Models\ShippingMethod;
-use App\Models\ShippingMethodAlias;
 use Illuminate\Database\Seeder;
 
 class ShippingMethodSeeder extends Seeder
 {
     /**
      * Run the database seeds.
+     *
+     * Methods only, no aliases: what an order source calls each method is its
+     * own code, which no starter set can guess. A guessed alias would quietly
+     * map a real ERP's "1" or "standard" to whichever method we picked.
      */
     public function run(): void
     {
-        $defaultClientId = Client::where('is_default', true)->value('id');
-
         // Standard Ground - USPS Ground Advantage, UPS Ground, FedEx Ground and
         // Home Delivery (commercial and residential, so rating picks by destination)
         $standardGround = ShippingMethod::firstOrCreate(
             ['name' => 'Standard Ground'],
             ['commitment_days' => 5, 'active' => true],
-        );
-        ShippingMethodAlias::firstOrCreate(
-            ['client_id' => $defaultClientId, 'reference' => '1'],
-            ['shipping_method_id' => $standardGround->id],
         );
         $standardGround->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
@@ -42,10 +38,6 @@ class ShippingMethodSeeder extends Seeder
             ['name' => '2 Day'],
             ['commitment_days' => 2, 'active' => true],
         );
-        ShippingMethodAlias::firstOrCreate(
-            ['client_id' => $defaultClientId, 'reference' => '2'],
-            ['shipping_method_id' => $twoDay->id],
-        );
         $twoDay->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL',
@@ -59,10 +51,6 @@ class ShippingMethodSeeder extends Seeder
             ['name' => 'International Economy'],
             ['commitment_days' => 5, 'active' => true],
         );
-        ShippingMethodAlias::firstOrCreate(
-            ['client_id' => $defaultClientId, 'reference' => '3'],
-            ['shipping_method_id' => $internationalEconomy->id],
-        );
         $internationalEconomy->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
                 'PRIORITY_MAIL_INTERNATIONAL',
@@ -74,10 +62,6 @@ class ShippingMethodSeeder extends Seeder
         $overnight = ShippingMethod::firstOrCreate(
             ['name' => 'Overnight'],
             ['commitment_days' => 1, 'active' => true],
-        );
-        ShippingMethodAlias::firstOrCreate(
-            ['client_id' => $defaultClientId, 'reference' => '4'],
-            ['shipping_method_id' => $overnight->id],
         );
         $overnight->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [

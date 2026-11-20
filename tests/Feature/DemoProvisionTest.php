@@ -10,6 +10,7 @@ use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Location;
 use App\Models\ShippingMethod;
+use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\PhoneParserService;
 use App\Services\SettingsService;
@@ -157,6 +158,18 @@ it('seeds a channel for each store type, without the test channel', function ():
 
     expect(Channel::query()->orderBy('name')->pluck('name')->all())
         ->toBe([StoreChannelSeeder::AMAZON, 'Manual', StoreChannelSeeder::SHOPIFY]);
+});
+
+it('maps the demo order database\'s shipping references, and nothing numeric', function (): void {
+    $this->artisan('demo:provision')->assertSuccessful();
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    $mapped = ShippingMethodAlias::query()->with('shippingMethod')->get()
+        ->mapWithKeys(fn (ShippingMethodAlias $alias): array => [$alias->reference => $alias->shippingMethod->name])
+        ->sortKeys()->all();
+
+    expect($mapped)->toBe(collect(DemoProvision::DEMO_SHIPPING_REFERENCES)->sortKeys()->all())
+        ->and(ShippingMethodAlias::query()->where('client_id', Client::query()->where('is_default', true)->value('id'))->count())->toBe(4);
 });
 
 it('lists a ground service from every carrier on Standard Ground', function (): void {
