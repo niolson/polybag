@@ -197,13 +197,13 @@ it('skips Amazon Shipping when our sandbox app is not configured', function (): 
     expect(DataSource::count())->toBe(0);
 });
 
-it('creates a presenter and a prospect, both Admins, and requires MFA', function (): void {
+it('creates a presenter and a customer, both Admins, and requires MFA', function (): void {
     $this->artisan('demo:provision', ['--client-name' => 'Acme Outfitters'])
         ->expectsOutputToContain('Shown once')
         ->assertSuccessful();
 
     expect(User::query()->orderBy('username')->pluck('role', 'username')->all())
-        ->toBe(['presenter' => Role::Admin, 'prospect' => Role::Admin])
+        ->toBe(['customer' => Role::Admin, 'presenter' => Role::Admin])
         ->and(app(SettingsService::class)->get('require_mfa'))->toBeTruthy()
         ->and(app(SettingsService::class)->get('setup_complete'))->toBeTruthy()
         ->and(Client::where('is_default', true)->value('name'))->toBe('Acme Outfitters');
@@ -212,7 +212,7 @@ it('creates a presenter and a prospect, both Admins, and requires MFA', function
 it('can run again without duplicating anything or changing a password', function (): void {
     demoSandboxCredentials();
     $this->artisan('demo:provision')->assertSuccessful();
-    $passwordHash = User::where('username', 'prospect')->value('password');
+    $passwordHash = User::where('username', 'customer')->value('password');
     $standardGroundServices = ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->count();
     Location::where('is_default', true)->update(['address1' => '1 Presenter Way']);
 
@@ -230,7 +230,7 @@ it('can run again without duplicating anything or changing a password', function
         ->and(Location::value('address1'))->toBe('1 Presenter Way')
         ->and(ShippingMethod::where('name', 'Standard Ground')->sole()->carrierServices()->count())->toBe($standardGroundServices)
         ->and(DataSource::sole()->settings['channel_name'])->toBe(Channel::where('name', StoreChannelSeeder::AMAZON)->value('id'))
-        ->and(User::where('username', 'prospect')->value('password'))->toBe($passwordHash);
+        ->and(User::where('username', 'customer')->value('password'))->toBe($passwordHash);
 });
 
 function demoImportDatabase(array $overrides = []): void
@@ -306,4 +306,76 @@ it('updates the one Database connection on a second run', function (): void {
 
     expect(DataSource::where('source_type', DatabaseSource::class)->count())->toBe(1)
         ->and(demoImportConnection()->secret_settings['db_password'])->toBe('rotated-secret');
+});
+
+it('signs the customer in with their email, so they can choose email codes', function (): void {
+    $this->artisan('demo:provision', ['--customer-email' => 'buyer@acme.example'])
+        ->expectsOutputToContain('buyer@acme.example')
+        ->expectsOutputToContain('can choose email codes')
+        ->assertSuccessful();
+
+    $customer = User::where('email', 'buyer@acme.example')->sole();
+
+    expect($customer->username)->toBeNull()
+        ->and($customer->name)->toBe('Customer')
+        ->and($customer->role)->toBe(Role::Admin)
+        ->and(User::where('username', 'customer')->exists())->toBeFalse()
+        ->and(app(SettingsService::class)->get('require_mfa'))->toBeTruthy();
+
+    $this->artisan('demo:provision', ['--customer-email' => 'buyer@acme.example'])
+        ->expectsOutputToContain('password unchanged')
+        ->assertSuccessful();
+
+    expect(User::count())->toBe(2);
+});
+
+it('refuses a customer email that is not one, before changing anything', function (): void {
+    $this->artisan('demo:provision', ['--customer-email' => 'not-an-email'])
+        ->expectsOutputToContain('not an email address')
+        ->assertFailed();
+
+    expect(User::count())->toBe(0);
+});
+
+it('turns MFA off and leaves out Amazon Shipping with --no-mfa', function (): void {
+    demoSandboxCredentials();
+
+    $this->artisan('demo:provision', ['--no-mfa' => true])
+        ->expectsOutputToContain('MFA is off')
+        ->assertSuccessful();
+
+    expect(app(SettingsService::class)->get('require_mfa'))->toBeFalsy()
+        ->and(DataSource::where('source_type', AmazonSource::class)->exists())->toBeFalse()
+        ->and(CarrierAccount::count())->toBe(3);
+});
+
+it('switches off its own Amazon Shipping when a later run turns MFA off, and back on with MFA', function (): void {
+    demoSandboxCredentials();
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    $this->artisan('demo:provision', ['--no-mfa' => true])->assertSuccessful();
+
+    expect(DataSource::where('source_type', AmazonSource::class)->sole()->active)->toBeFalse()
+        ->and(app(SettingsService::class)->get('require_mfa'))->toBeFalsy();
+
+    $this->artisan('demo:provision')->assertSuccessful();
+
+    expect(DataSource::where('source_type', AmazonSource::class)->sole()->active)->toBeTrue()
+        ->and(app(SettingsService::class)->get('require_mfa'))->toBeTruthy();
+});
+
+it('refuses --no-mfa while an Amazon connection the prospect made is active', function (): void {
+    $this->artisan('demo:provision')->assertSuccessful();
+    DataSource::create([
+        'name' => 'Prospect Amazon',
+        'source_type' => AmazonSource::class,
+        'active' => true,
+        'settings' => ['auth_mode' => 'authorization_code'],
+    ]);
+
+    $this->artisan('demo:provision', ['--no-mfa' => true])
+        ->expectsOutputToContain('Disconnect it first')
+        ->assertFailed();
+
+    expect(app(SettingsService::class)->get('require_mfa'))->toBeTruthy();
 });

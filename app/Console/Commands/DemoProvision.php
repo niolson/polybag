@@ -24,6 +24,7 @@ use Database\Seeders\OperationalDefaultsSeeder;
 use Database\Seeders\SettingsSeeder;
 use Database\Seeders\StoreChannelSeeder;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 /**
@@ -31,9 +32,11 @@ use Illuminate\Support\Str;
  * (`live-store-demo/04`). Sets up a fresh demo tenant so that the only thing
  * left to do in the call is connect the prospect's store: sandbox carrier
  * accounts from `config/demo.php`, the starter catalog, an Amazon Shipping
- * connection for a prospect with no seller account, and two users who must
- * set up MFA. Safe to run again: what exists is kept, and a password is only
- * ever printed when its user is created.
+ * connection for a prospect with no seller account, and two users: the
+ * presenter and the customer. MFA is required unless `--no-mfa`; a customer
+ * given `--customer-email` signs in with that address and can take email
+ * codes instead of an authenticator app. Safe to run again: what exists is
+ * kept, and a password is only ever printed when its user is created.
  */
 class DemoProvision extends Command
 {
@@ -63,10 +66,15 @@ class DemoProvision extends Command
      */
     public const IMPORT_DATABASE_EXPORT_QUERY = "update shipments set exported = 'y', tracking_number = :tracking_number, carrier = :carrier, service = :service, cost = :cost, weight = :weight, height = :height, width = :width, length = :length, exported_at = CURRENT_TIMESTAMP where id = :shipment_reference";
 
-    protected $signature = 'demo:provision
-        {--client-name= : Name the demo Client after the prospect}';
+    /** The customer's username when no `--customer-email` is given. */
+    public const CUSTOMER_USERNAME = 'customer';
 
-    protected $description = '[Internal] Set up a demo tenant: sandbox carrier accounts, starter catalog, Amazon Shipping, the demo order database connection when configured, and MFA-required users';
+    protected $signature = 'demo:provision
+        {--client-name= : Name the demo Client after the prospect}
+        {--customer-email= : Sign the customer in with this address, so they can use email MFA codes}
+        {--no-mfa : Do not require MFA, and leave out Amazon Shipping, which needs it}';
+
+    protected $description = '[Internal] Set up a demo tenant: sandbox carrier accounts, starter catalog, Amazon Shipping, the demo order database connection when configured, and the presenter and customer users';
 
     /**
      * Whether this connection is the one made from our own sandbox app,
@@ -85,17 +93,36 @@ class DemoProvision extends Command
             return self::FAILURE;
         }
 
-        $this->seedStarterData($settings);
+        $customerEmail = trim((string) $this->option('customer-email'));
+
+        if ($customerEmail !== '' && filter_var($customerEmail, FILTER_VALIDATE_EMAIL) === false) {
+            $this->error("--customer-email: '{$customerEmail}' is not an email address.");
+
+            return self::FAILURE;
+        }
+
+        $requireMfa = ! $this->option('no-mfa');
+
+        // An active Amazon connection gives access to customer PII, and the
+        // app keeps MFA required while one exists. Ours is switched off below;
+        // one the prospect connected is theirs to remove first.
+        if (! $requireMfa && $this->prospectAmazonConnections()->isNotEmpty()) {
+            $this->error('--no-mfa: an Amazon connection the prospect made is active, and it needs MFA. Disconnect it first.');
+
+            return self::FAILURE;
+        }
+
+        $this->seedStarterData($settings, $requireMfa);
         $this->nameClient();
         $this->provisionCarrierAccounts();
-        $this->provisionAmazonShipping();
+        $requireMfa ? $this->provisionAmazonShipping() : $this->withdrawAmazonShipping();
         $this->provisionImportDatabase();
-        $this->provisionUsers();
+        $this->provisionUsers($customerEmail, $requireMfa);
 
         return self::SUCCESS;
     }
 
-    private function seedStarterData(SettingsService $settings): void
+    private function seedStarterData(SettingsService $settings, bool $requireMfa): void
     {
         $this->callSilent('app:sync-reference-data');
 
@@ -110,10 +137,10 @@ class DemoProvision extends Command
         }
 
         $settings->set('setup_complete', true, 'boolean', group: 'system');
-        $settings->set('require_mfa', true, 'boolean', group: 'general');
+        $settings->set('require_mfa', $requireMfa, 'boolean', group: 'general');
 
         $this->components->twoColumnDetail('Starter data', 'reference data, client, location, channels, box sizes, shipping methods');
-        $this->components->twoColumnDetail('MFA', 'required');
+        $this->components->twoColumnDetail('MFA', $requireMfa ? 'required' : 'off');
     }
 
     private function nameClient(): void
@@ -278,6 +305,35 @@ class DemoProvision extends Command
         $this->components->twoColumnDetail('Amazon Shipping', 'sandbox connection ready, listed on '.self::AMAZON_SHIPPING_METHOD);
     }
 
+    /**
+     * `--no-mfa`: switch off our sandbox Amazon Shipping connection, if an
+     * earlier run made one, since no Amazon connection may be active without
+     * MFA. Kept, not deleted, so a later run with MFA turns it back on.
+     */
+    private function withdrawAmazonShipping(): void
+    {
+        DataSource::query()
+            ->where('source_type', AmazonSource::class)
+            ->where('active', true)
+            ->get()
+            ->filter(fn (DataSource $source): bool => self::isDemoConnection($source))
+            ->each(fn (DataSource $source) => $source->update(['active' => false]));
+
+        $this->components->twoColumnDetail('Amazon Shipping', 'left out: it needs MFA');
+    }
+
+    /**
+     * @return Collection<int, DataSource>
+     */
+    private function prospectAmazonConnections(): Collection
+    {
+        return DataSource::query()
+            ->where('source_type', AmazonSource::class)
+            ->where('active', true)
+            ->get()
+            ->reject(fn (DataSource $source): bool => self::isDemoConnection($source));
+    }
+
     private function provisionImportDatabase(): void
     {
         $values = (array) config('demo.import_database', []);
@@ -329,15 +385,25 @@ class DemoProvision extends Command
         $this->components->twoColumnDetail('Demo import database', "connection ready ({$values['database']} on {$values['host']})");
     }
 
-    private function provisionUsers(): void
+    private function provisionUsers(string $customerEmail, bool $requireMfa): void
     {
         $created = [];
 
-        foreach (['presenter' => 'Presenter', 'prospect' => 'Prospect'] as $username => $name) {
-            $user = User::query()->firstOrNew(['username' => $username]);
+        // With an email the customer signs in with it, and it is what lets
+        // them choose email codes over an authenticator app.
+        // [column to find the user by, login, name]
+        $users = [
+            ['username', 'presenter', 'Presenter'],
+            $customerEmail !== ''
+                ? ['email', $customerEmail, 'Customer']
+                : ['username', self::CUSTOMER_USERNAME, 'Customer'],
+        ];
+
+        foreach ($users as [$column, $login, $name]) {
+            $user = User::query()->firstOrNew([$column => $login]);
 
             if ($user->exists) {
-                $this->components->twoColumnDetail("User {$username}", 'exists, password unchanged');
+                $this->components->twoColumnDetail("User {$login}", 'exists, password unchanged');
 
                 continue;
             }
@@ -352,13 +418,17 @@ class DemoProvision extends Command
                 'active' => true,
             ])->save();
 
-            $created[] = [$username, $password];
+            $created[] = [$login, $password];
         }
 
         if ($created !== []) {
             $this->newLine();
-            $this->line('New sign-ins. Shown once; each must set up MFA on first sign-in.');
-            $this->table(['Username', 'Password'], $created);
+            $this->line(match (true) {
+                ! $requireMfa => 'New sign-ins. Shown once; MFA is off.',
+                $customerEmail !== '' => 'New sign-ins. Shown once; each must set up MFA on first sign-in. The customer can choose email codes.',
+                default => 'New sign-ins. Shown once; each must set up MFA (authenticator app) on first sign-in.',
+            });
+            $this->table(['Login', 'Password'], $created);
         }
     }
 
