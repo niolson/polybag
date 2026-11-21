@@ -275,7 +275,7 @@ it('ships the history on its method\'s services and leaves the open orders to ma
         ->and($abroad->shipping_method_id)->toBe($international->id)
         ->and($abroad->packages->sole()->service)->toBeIn(['Priority Mail International', 'FedEx International Economy'])
         // Every quote rating offered is one of the method's own services.
-        ->and(RateQuote::where('package_id', $abroad->packages->sole()->id)->pluck('service_code')->diff(['PRIORITY_MAIL_INTERNATIONAL', 'INTERNATIONAL_ECONOMY'])->all())->toBe([])
+        ->and(RateQuote::where('package_id', $abroad->packages->sole()->id)->whereNotIn('service_code', ['PRIORITY_MAIL_INTERNATIONAL', 'INTERNATIONAL_ECONOMY'])->exists())->toBeFalse()
         ->and($open->status)->toBe(ShipmentStatus::Open)
         ->and($open->shipping_method_id)->toBeNull()
         ->and($open->shipping_method_reference)->toBe('Standard Shipping');
