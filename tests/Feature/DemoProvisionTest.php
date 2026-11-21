@@ -160,16 +160,10 @@ it('seeds a channel for each store type, without the test channel', function ():
         ->toBe([StoreChannelSeeder::AMAZON, 'Manual', StoreChannelSeeder::SHOPIFY]);
 });
 
-it('maps the demo order database\'s shipping references, and nothing numeric', function (): void {
-    $this->artisan('demo:provision')->assertSuccessful();
+it('leaves the demo order database\'s shipping references for the presenter to map', function (): void {
     $this->artisan('demo:provision')->assertSuccessful();
 
-    $mapped = ShippingMethodAlias::query()->with('shippingMethod')->get()
-        ->mapWithKeys(fn (ShippingMethodAlias $alias): array => [$alias->reference => $alias->shippingMethod->name])
-        ->sortKeys()->all();
-
-    expect($mapped)->toBe(collect(DemoProvision::DEMO_SHIPPING_REFERENCES)->sortKeys()->all())
-        ->and(ShippingMethodAlias::query()->where('client_id', Client::query()->where('is_default', true)->value('id'))->count())->toBe(4);
+    expect(ShippingMethodAlias::query()->count())->toBe(0);
 });
 
 it('lists a ground service from every carrier on Standard Ground', function (): void {

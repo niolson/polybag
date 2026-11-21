@@ -129,14 +129,11 @@ function insertImportShipment(DataSource $source, string $id, string $createdAt,
 }
 
 beforeEach(function (): void {
-    $client = Client::factory()->default()->create();
+    Client::factory()->default()->create();
     Location::factory()->default()->create();
     User::factory()->create();
-    ShippingMethodAlias::create([
-        'client_id' => $client->id,
-        'reference' => 'Standard Shipping',
-        'shipping_method_id' => ShippingMethod::factory()->create()->id,
-    ]);
+    // No alias: the demo's own labels name the starter methods.
+    $this->standardGround = ShippingMethod::factory()->create(['name' => 'Standard Ground']);
 
     $this->dataSource = DataSource::factory()->create([
         'settings' => [
@@ -253,6 +250,48 @@ it('treats a reference that only matches a shipping method ID as unmapped', func
     $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])
         ->expectsOutputToContain("Shipping method references with no match: {$id}.")
         ->assertFailed();
+});
+
+it('ships the history on its method\'s services and leaves the open orders to map', function (): void {
+    $international = ShippingMethod::factory()->create(['name' => 'International Economy']);
+    $connection = importConnectionFor($this->dataSource);
+
+    insertImportShipment($this->dataSource, 'D00OLDUS01', now('UTC')->subDays(3)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00OLDCA01', now('UTC')->subDays(3)->format('Y-m-d H:i:s'));
+    insertImportShipment($this->dataSource, 'D00NEWUS01', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+    DB::connection($connection)->table('shipments')->where('id', 'D00OLDCA01')->update([
+        'shipping_method' => 'International Shipping',
+        'address1' => '290 Bremner Blvd', 'city' => 'Toronto', 'state' => 'ON', 'zip' => 'M5V 3L9', 'country' => 'CA',
+    ]);
+
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+    $domestic = Shipment::where('shipment_reference', 'D00OLDUS01')->sole();
+    $abroad = Shipment::where('shipment_reference', 'D00OLDCA01')->sole();
+    $open = Shipment::where('shipment_reference', 'D00NEWUS01')->sole();
+
+    expect($domestic->shipping_method_id)->toBe($this->standardGround->id)
+        ->and($domestic->packages->sole()->service)->toBeIn(['Ground Advantage', 'UPS Ground', 'FedEx Ground Home Delivery', 'FedEx Ground'])
+        ->and($abroad->shipping_method_id)->toBe($international->id)
+        ->and($abroad->packages->sole()->service)->toBeIn(['Priority Mail International', 'FedEx International Economy'])
+        // Every quote rating offered is one of the method's own services.
+        ->and(RateQuote::where('package_id', $abroad->packages->sole()->id)->whereNotIn('service_code', ['PRIORITY_MAIL_INTERNATIONAL', 'INTERNATIONAL_ECONOMY'])->exists())->toBeFalse()
+        ->and($open->status)->toBe(ShipmentStatus::Open)
+        ->and($open->shipping_method_id)->toBeNull()
+        ->and($open->shipping_method_reference)->toBe('Standard Shipping');
+});
+
+it('removes the last demo\'s mapping of the demo labels, and only those', function (): void {
+    $client = Client::query()->where('is_default', true)->sole();
+    ShippingMethodAlias::create(['client_id' => $client->id, 'reference' => 'Standard Shipping', 'shipping_method_id' => $this->standardGround->id]);
+    ShippingMethodAlias::create(['client_id' => $client->id, 'reference' => 'GROUND', 'shipping_method_id' => $this->standardGround->id]);
+
+    insertImportShipment($this->dataSource, 'D00NEWUS01', now('UTC')->subMinutes(30)->format('Y-m-d H:i:s'));
+
+    $this->artisan('demo:reset', ['--days' => 30, '--open-hours' => 8])->assertSuccessful();
+
+    expect(ShippingMethodAlias::pluck('reference')->all())->toBe(['GROUND'])
+        ->and(Shipment::where('shipment_reference', 'D00NEWUS01')->sole()->shipping_method_id)->toBeNull();
 });
 
 it('checks each row\'s shipping method against the client its client column names', function (): void {

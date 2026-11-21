@@ -25,6 +25,8 @@ use App\Models\Manifest;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
+use App\Models\ShippingMethodAlias;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\ClientContext;
@@ -81,31 +83,46 @@ class DemoReset extends Command
     ];
 
     /**
-     * Carrier name => [weight (out of 100), services => [[code, name, weight, costMin, costMax]]].
-     * Mirrors app:generate-test-data so demo charts show a believable carrier mix.
+     * The checkout labels the synthetic order database (polybag-demo-data-tools)
+     * writes into `shipments.shipping_method`, and the starter method each one
+     * means. The fabricated history ships on these directly; the open orders
+     * import unmapped, so the presenter maps them on Map Shipping References.
+     *
+     * @var array<string, string>
      */
-    private const CARRIER_CONFIG = [
-        Carrier::USPS => [
-            'weight' => 60,
-            'services' => [
-                ['code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'weight' => 60, 'costMin' => 4.00, 'costMax' => 12.00],
-                ['code' => 'PRIORITY_MAIL', 'name' => 'Priority Mail', 'weight' => 30, 'costMin' => 8.00, 'costMax' => 22.00],
-                ['code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'weight' => 10, 'costMin' => 22.00, 'costMax' => 45.00],
-            ],
+    public const DEMO_SHIPPING_REFERENCES = [
+        'Standard Shipping' => 'Standard Ground',
+        'Expedited Shipping' => '2 Day',
+        'Overnight Shipping' => 'Overnight',
+        'International Shipping' => 'International Economy',
+    ];
+
+    /**
+     * Starter method name => the services its history ships on, each weighted
+     * out of 100. Every list is drawn from that method's own services in
+     * `ShippingMethodSeeder`, so no package ships on a service its method does
+     * not allow, and the carrier mix still reads as believable on the charts.
+     * A method not listed here ships on any of them.
+     */
+    private const HISTORY_SERVICES = [
+        'Standard Ground' => [
+            ['carrier' => Carrier::USPS, 'code' => 'USPS_GROUND_ADVANTAGE', 'name' => 'Ground Advantage', 'weight' => 55, 'costMin' => 4.00, 'costMax' => 12.00],
+            ['carrier' => Carrier::UPS, 'code' => '03', 'name' => 'UPS Ground', 'weight' => 20, 'costMin' => 8.00, 'costMax' => 20.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'GROUND_HOME_DELIVERY', 'name' => 'FedEx Ground Home Delivery', 'weight' => 15, 'costMin' => 7.00, 'costMax' => 18.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'weight' => 10, 'costMin' => 8.00, 'costMax' => 20.00],
         ],
-        Carrier::FEDEX => [
-            'weight' => 20,
-            'services' => [
-                ['code' => 'GROUND_HOME_DELIVERY', 'name' => 'FedEx Ground Home Delivery', 'weight' => 60, 'costMin' => 7.00, 'costMax' => 18.00],
-                ['code' => 'FEDEX_GROUND', 'name' => 'FedEx Ground', 'weight' => 40, 'costMin' => 8.00, 'costMax' => 20.00],
-            ],
+        '2 Day' => [
+            ['carrier' => Carrier::USPS, 'code' => 'PRIORITY_MAIL', 'name' => 'Priority Mail', 'weight' => 70, 'costMin' => 8.00, 'costMax' => 22.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'FEDEX_2_DAY', 'name' => 'FedEx 2Day', 'weight' => 30, 'costMin' => 16.00, 'costMax' => 32.00],
         ],
-        Carrier::UPS => [
-            'weight' => 20,
-            'services' => [
-                ['code' => '03', 'name' => 'UPS Ground', 'weight' => 70, 'costMin' => 8.00, 'costMax' => 20.00],
-                ['code' => '02', 'name' => 'UPS 2nd Day Air', 'weight' => 30, 'costMin' => 15.00, 'costMax' => 30.00],
-            ],
+        'Overnight' => [
+            ['carrier' => Carrier::USPS, 'code' => 'PRIORITY_MAIL_EXPRESS', 'name' => 'Priority Mail Express', 'weight' => 60, 'costMin' => 22.00, 'costMax' => 45.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'PRIORITY_OVERNIGHT', 'name' => 'FedEx Priority Overnight', 'weight' => 25, 'costMin' => 35.00, 'costMax' => 75.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'STANDARD_OVERNIGHT', 'name' => 'FedEx Standard Overnight', 'weight' => 15, 'costMin' => 30.00, 'costMax' => 65.00],
+        ],
+        'International Economy' => [
+            ['carrier' => Carrier::USPS, 'code' => 'PRIORITY_MAIL_INTERNATIONAL', 'name' => 'Priority Mail International', 'weight' => 65, 'costMin' => 35.00, 'costMax' => 85.00],
+            ['carrier' => Carrier::FEDEX, 'code' => 'INTERNATIONAL_ECONOMY', 'name' => 'FedEx International Economy', 'weight' => 35, 'costMin' => 45.00, 'costMax' => 110.00],
         ],
     ];
 
@@ -142,24 +159,29 @@ class DemoReset extends Command
             return self::FAILURE;
         }
 
-        // Checked before anything is wiped: a shipment imported with no
-        // shipping method cannot have a label bought (`carrier-catalog-reset/16`),
-        // so a demo reset must not leave one behind.
-        $unmapped = $this->unmappedShippingMethods($record, $from, $mapping);
+        // Checked before anything is wiped: the fabricated history is shipped,
+        // and a shipped package needs a shipping method (`carrier-catalog-reset/16`).
+        // Open orders may stay unmapped; mapping them is part of the demo.
+        $unplaceable = $this->unplaceableShippingReferences($record, $from, $mapping);
 
-        if ($unmapped !== []) {
-            $this->error('Shipping method references with no match: '.implode(', ', $unmapped).'. '
-                .'Every demo shipment needs a shipping method. Map them with a Shipping Method alias, or fix the import data, then run this again.');
+        if ($unplaceable !== []) {
+            $this->error('Shipping method references with no match: '.implode(', ', $unplaceable).'. '
+                .'Every demo shipment needs a shipping method. Add them to DemoReset::DEMO_SHIPPING_REFERENCES, map them with a Shipping Method alias, or fix the import data, then run this again.');
 
             return self::FAILURE;
         }
 
         $this->truncateTransactionalTables();
+        $removedAliases = $this->removeDemoShippingAliases();
         $this->ensureChannelAliases($record, $from, $mapping);
         $this->ensureBillingRates();
 
         $result = $this->timed('Import', fn (): ImportResult => ShipmentImportService::forSource($source, $record)->import());
         $this->components->twoColumnDetail('Shipments imported', (string) $result->shipmentsCreated);
+
+        if ($removedAliases > 0) {
+            $this->components->twoColumnDetail('Demo shipping aliases removed', "{$removedAliases}, so the open orders are there to map");
+        }
 
         if ($result->errors !== []) {
             $this->warn(count($result->errors).' import error(s); first: '.$result->errors[0]);
@@ -524,8 +546,10 @@ class DemoReset extends Command
     }
 
     /**
-     * The shipping method references in the window that will import with no
-     * method, with `(none)` for rows that name none at all.
+     * The shipping method references in the window the history cannot be
+     * shipped on, with `(none)` for rows that name none at all: those neither
+     * the demo's own labels (DEMO_SHIPPING_REFERENCES, for a method that
+     * exists) nor an alias resolves.
      *
      * Resolved as the import resolves each row: against the client its
      * `client_column` names, else the source's client, else the default, and
@@ -535,7 +559,7 @@ class DemoReset extends Command
      * @param  array<string, string>  $mapping
      * @return list<string>
      */
-    private function unmappedShippingMethods(DataSource $record, Carbon $from, array $mapping): array
+    private function unplaceableShippingReferences(DataSource $record, Carbon $from, array $mapping): array
     {
         $column = array_search('shipping_method_id', $mapping, true) ?: 'shipping_method';
         $settings = $record->settings ?? [];
@@ -550,6 +574,7 @@ class DemoReset extends Command
             ->get();
 
         $references = new ImportReferenceResolver;
+        $demoMethods = $this->demoShippingMethodIds();
         $unmapped = [];
 
         foreach ($pairs->sortBy('client_name') as $pair) {
@@ -565,13 +590,40 @@ class DemoReset extends Command
             $client = ($clientName !== null ? Client::findByImportName((string) $clientName) : null)
                 ?? $record->client;
 
-            if ($references->shippingMethodIdFor(['shipping_method_id' => $reference], $client) === null) {
+            if (! isset($demoMethods[$reference]) && $references->shippingMethodIdFor(['shipping_method_id' => $reference], $client) === null) {
                 $label = $clientColumn && $clientName !== null ? "{$reference} ({$clientName})" : $reference;
                 $unmapped[$label] = $label;
             }
         }
 
         return array_values($unmapped);
+    }
+
+    /**
+     * Demo reference => the ID of the starter method it means, for the methods
+     * that exist.
+     *
+     * @return array<string, int>
+     */
+    private function demoShippingMethodIds(): array
+    {
+        $ids = ShippingMethod::query()->whereIn('name', self::DEMO_SHIPPING_REFERENCES)->pluck('id', 'name');
+
+        return collect(self::DEMO_SHIPPING_REFERENCES)
+            ->filter(fn (string $name): bool => $ids->has($name))
+            ->map(fn (string $name): int => (int) $ids[$name])
+            ->all();
+    }
+
+    /**
+     * Delete every client's alias for a demo reference, mapped by a presenter
+     * in the last demo, so this one starts with its open orders unmapped.
+     */
+    private function removeDemoShippingAliases(): int
+    {
+        return ShippingMethodAlias::query()
+            ->whereIn('reference', array_keys(self::DEMO_SHIPPING_REFERENCES))
+            ->delete();
     }
 
     /**
@@ -628,6 +680,8 @@ class DemoReset extends Command
         $boxSizeIds = BoxSize::query()->active()->whereNull('carrier_packaging')->pluck('id')->all();
         $userIds = User::pluck('id')->all();
         $timezone = Location::timezone();
+        $demoMethods = $this->demoShippingMethodIds();
+        $methodNames = ShippingMethod::query()->pluck('name', 'id')->all();
 
         /** @var array<string, array<string, int>> $manifests carrier => [date => manifest_id] */
         $manifests = [];
@@ -638,10 +692,15 @@ class DemoReset extends Command
             ->where('status', ShipmentStatus::Open)
             ->where('created_at', '<', $cutoff)
             ->with('shipmentItems.product')
-            ->chunkById(200, function ($shipments) use (&$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone): void {
-                DB::transaction(function () use ($shipments, &$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone): void {
+            ->chunkById(200, function ($shipments) use (&$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone, $demoMethods, $methodNames): void {
+                DB::transaction(function () use ($shipments, &$manifests, &$shipped, $locationId, $boxSizeIds, $userIds, $timezone, $demoMethods, $methodNames): void {
                     foreach ($shipments as $shipment) {
-                        $shippedAt = $this->fabricatePackage($shipment, $manifests, $locationId, $boxSizeIds, $userIds, $timezone);
+                        // An alias already resolved it on import; otherwise the
+                        // demo label names it. The pre-check left no other case.
+                        $methodId = $shipment->shipping_method_id ?? $demoMethods[(string) $shipment->shipping_method_reference] ?? null;
+                        $services = self::HISTORY_SERVICES[$methodNames[$methodId] ?? ''] ?? array_merge(...array_values(self::HISTORY_SERVICES));
+
+                        $shippedAt = $this->fabricatePackage($shipment, $services, $manifests, $locationId, $boxSizeIds, $userIds, $timezone);
                         $shipped++;
 
                         // Shipped by its fabricated Label, so PolyBag set the
@@ -650,6 +709,9 @@ class DemoReset extends Command
                             'status' => ShipmentStatus::Shipped->value,
                             'status_origin' => ShipmentStatusOrigin::PolyBag->value,
                             'status_changed_at' => $shippedAt->format('Y-m-d H:i:s'),
+                            // Set directly, as a method picked by hand would be,
+                            // so no alias exists for the open orders to resolve.
+                            'shipping_method_id' => $methodId,
                             'checked' => true,
                             'deliverability' => 'yes',
                         ]);
@@ -666,14 +728,15 @@ class DemoReset extends Command
     }
 
     /**
+     * @param  list<array{carrier: string, code: string, name: string, weight: int, costMin: float, costMax: float}>  $services  The shipment's method's services
      * @param  array<string, array<string, int>>  $manifests
      * @param  array<int, int>  $boxSizeIds
      * @param  array<int, int>  $userIds
      */
-    private function fabricatePackage(Shipment $shipment, array &$manifests, ?int $locationId, array $boxSizeIds, array $userIds, string $timezone): CarbonInterface
+    private function fabricatePackage(Shipment $shipment, array $services, array &$manifests, ?int $locationId, array $boxSizeIds, array $userIds, string $timezone): CarbonInterface
     {
-        $carrier = $this->pickCarrier();
-        $service = $this->pickService($carrier);
+        $service = $this->pickService($services);
+        $carrier = $service['carrier'];
 
         $createdAt = $shipment->created_at;
         $shippedAt = $createdAt->copy()->addHours(mt_rand(1, 36));
@@ -725,7 +788,7 @@ class DemoReset extends Command
 
         // The bought rate first, so the Label can point at the quote it was
         // bought from, as Rate Comparison reads it.
-        [$boughtQuote, $otherQuotes] = $this->fabricateRateQuotes($packageId, $carrier, $service, (float) $projected['cost'], $shippedAt);
+        [$boughtQuote, $otherQuotes] = $this->fabricateRateQuotes($packageId, $services, $service, (float) $projected['cost'], $shippedAt);
         $rateQuoteId = DB::table('rate_quotes')->insertGetId($boughtQuote);
         DB::table('rate_quotes')->insert($otherQuotes);
 
@@ -753,22 +816,21 @@ class DemoReset extends Command
     }
 
     /**
-     * The quotes the packer chose from: the bought rate, selected, and one to
-     * three other services, so Rate Comparison has history to show. One quote
-     * session: every row shares its `created_at`.
+     * The quotes the packer chose from: the bought rate, selected, and up to
+     * three other services of the same method, as rating would offer, so Rate
+     * Comparison has history to show. One quote session: every row shares its
+     * `created_at`.
      *
-     * @param  array{code: string, name: string, weight: int, costMin: float, costMax: float}  $bought
+     * @param  list<array{carrier: string, code: string, name: string, weight: int, costMin: float, costMax: float}>  $services
+     * @param  array{carrier: string, code: string, name: string, weight: int, costMin: float, costMax: float}  $bought
      * @return array{0: array<string, mixed>, 1: list<array<string, mixed>>} The bought quote, then the others
      */
-    private function fabricateRateQuotes(int $packageId, string $carrier, array $bought, float $cost, CarbonInterface $shippedAt): array
+    private function fabricateRateQuotes(int $packageId, array $services, array $bought, float $cost, CarbonInterface $shippedAt): array
     {
         $quotedAt = $shippedAt->copy()->subMinutes(mt_rand(1, 10))->format('Y-m-d H:i:s');
+        $carrier = $bought['carrier'];
 
-        $alternatives = collect(self::CARRIER_CONFIG)
-            ->flatMap(fn (array $config, string $name): array => array_map(
-                fn (array $service): array => ['carrier' => $name] + $service,
-                $config['services'],
-            ))
+        $alternatives = collect($services)
             ->reject(fn (array $service): bool => $service['carrier'] === $carrier && $service['code'] === $bought['code'])
             ->shuffle()
             ->take(mt_rand(1, 3));
@@ -899,29 +961,13 @@ class DemoReset extends Command
         });
     }
 
-    private function pickCarrier(): string
-    {
-        $roll = mt_rand(1, 100);
-        $cumulative = 0;
-
-        foreach (self::CARRIER_CONFIG as $name => $config) {
-            $cumulative += $config['weight'];
-
-            if ($roll <= $cumulative) {
-                return $name;
-            }
-        }
-
-        return Carrier::USPS;
-    }
-
     /**
-     * @return array{code: string, name: string, weight: int, costMin: float, costMax: float}
+     * @param  list<array{carrier: string, code: string, name: string, weight: int, costMin: float, costMax: float}>  $services
+     * @return array{carrier: string, code: string, name: string, weight: int, costMin: float, costMax: float}
      */
-    private function pickService(string $carrier): array
+    private function pickService(array $services): array
     {
-        $services = self::CARRIER_CONFIG[$carrier]['services'];
-        $roll = mt_rand(1, 100);
+        $roll = mt_rand(1, array_sum(array_column($services, 'weight')));
         $cumulative = 0;
 
         foreach ($services as $service) {
