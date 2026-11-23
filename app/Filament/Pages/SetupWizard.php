@@ -383,7 +383,7 @@ class SetupWizard extends Page
                                     ->required()
                                     ->maxLength(255),
                                 Forms\Components\TextInput::make('commitment_days')
-                                    ->label('Commitment Days')
+                                    ->label('Delivery Commitment (Business Days)')
                                     ->numeric()
                                     ->nullable(),
                                 Forms\Components\CheckboxList::make('carrier_services')
