@@ -144,6 +144,9 @@ class DataSourceFactory
                     'weight' => 'weight',
                     'value' => 'value',
                     'transparency' => 'transparency',
+                    'hs_code' => 'hs_tariff_number',
+                    'country_of_origin' => 'country_of_origin',
+                    'mpn' => 'manufacturer_part_number',
                 ],
             ],
         ];

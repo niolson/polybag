@@ -190,6 +190,10 @@ it('lists on the Printed tab only open Shipments whose slip is current', functio
 });
 
 it('orders the Printed tab newest printed first, keeping a run together in a stable order', function (): void {
+    // `pack_slip_printed_at` is stored to the second; an unfrozen clock crossing a
+    // second between these rows sorts the later one first and fails the test.
+    $this->freezeTime();
+
     $older = printedShipment(['pack_slip_printed_at' => now()->subHour()]);
     $issuedAt = now()->subMinute();
     $runFirst = printedShipment(['pack_slip_printed_at' => now(), 'pack_slip_receipt_issued_at' => $issuedAt]);
