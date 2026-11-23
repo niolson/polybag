@@ -40,9 +40,11 @@ class ShippingMethodResource extends Resource
                     ->required()
                     ->maxLength(255),
                 Forms\Components\TextInput::make('commitment_days')
-                    ->label('Delivery Commitment (Days)')
+                    ->label('Delivery Commitment (Business Days)')
                     ->numeric()
-                    ->live(onBlur: true),
+                    ->minValue(1)
+                    ->live(onBlur: true)
+                    ->helperText('Sets the due-by date for shipments whose order does not give a deliver-by date, counted in business days from when the label is bought. Automated purchases buy the cheapest rate that arrives by the due-by date. Leave blank for no due-by date beyond what the order gives.'),
                 Forms\Components\Toggle::make('active')
                     ->default(true),
                 Forms\Components\Toggle::make('is_expedited')
@@ -61,11 +63,20 @@ class ShippingMethodResource extends Resource
                             ->warning()
                             ->description('When a shipping rule names Shopify Shipping, or it is this method\'s only choice, automated purchases buy it even for an order with a due-by date, and Shopify may choose a service that arrives late. Shopify keeps the buyer\'s checkout delivery method where it can, then the shop\'s preferred carrier and service, so set those in the Shopify admin.')
                             ->visible(fn (?ShippingMethod $record, Get $get): bool => self::warnsOfUndatedShopifyPurchases($record, $get)),
-                        Forms\Components\Toggle::make('excludes_late_rates')
-                            ->label('Exclude rates that deliver after the due-by date')
+                        // `excludes_late_rates` only decides the fallback: an
+                        // on-time rate always outranks a late one whenever
+                        // there is a due-by date (RateSelector::classify()).
+                        Forms\Components\Radio::make('excludes_late_rates')
+                            ->label('When no rate arrives by the due-by date')
+                            ->boolean(
+                                trueLabel: 'Leave it for a person to ship',
+                                falseLabel: 'Buy the cheapest late rate',
+                            )
                             ->default(true)
                             ->live()
-                            ->helperText('Automated purchases skip any rate whose delivery date is after the shipment\'s due-by date, or that gives no delivery date. A Shopify Shipping purchase has no delivery date and is bought anyway when a shipping rule names it or it is the method\'s only choice. With this off, the cheapest late rate is bought when nothing arrives on time.'),
+                            ->helperText(fn (Get $get): string => 'Applies only to a shipment with a due-by date, from the order or from the delivery commitment above. Rates that give no delivery date count as late. '
+                                .'Amazon orders with no due-by date are always left for a person under the first choice.'
+                                .(filled($get('commitment_days')) ? '' : ' With no delivery commitment, this applies only to orders that give their own deliver-by date.')),
                     ])
                     ->columnSpanFull(),
             ]);

@@ -28,6 +28,7 @@ use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\SettingsService;
 use Carbon\Carbon;
+use Database\Seeders\ShippingMethodSeeder;
 use Filament\Actions\CreateAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\Testing\TestAction;
@@ -373,7 +374,9 @@ it('saves the on-time requirement from the shipping method form, which no longer
     Livewire::test(EditShippingMethod::class, ['record' => $method->id])
         ->assertFormSet(['excludes_late_rates' => true])
         ->assertFormFieldDoesNotExist('otdr_protection_orders')
-        ->fillForm(['excludes_late_rates' => false])
+        ->assertSeeText('When no rate arrives by the due-by date')
+        ->assertSeeText('Buy the cheapest late rate')
+        ->fillForm(['excludes_late_rates' => 0])
         ->call('save')
         ->assertHasNoFormErrors();
 
@@ -465,10 +468,20 @@ it('warns that Shopify Shipping is bought without a delivery date when the metho
 
     Livewire::test(EditShippingMethod::class, ['record' => $method->id])
         ->assertSeeText('Shopify Shipping is bought without a delivery date')
-        ->fillForm(['excludes_late_rates' => false])
+        ->fillForm(['excludes_late_rates' => 0])
         ->assertDontSeeText('Shopify Shipping is bought without a delivery date')
         ->fillForm(['commitment_days' => 3])
         ->assertSeeText('Shopify Shipping is bought without a delivery date');
+});
+
+it('says the late-rate fallback reaches only orders with their own deliver-by date when the method has no commitment', function (): void {
+    $this->actingAs(User::factory()->admin()->create());
+    $method = ShippingMethod::factory()->create(['commitment_days' => null]);
+
+    Livewire::test(EditShippingMethod::class, ['record' => $method->id])
+        ->assertSeeText('this applies only to orders that give their own deliver-by date')
+        ->fillForm(['commitment_days' => 3])
+        ->assertDontSeeText('this applies only to orders that give their own deliver-by date');
 });
 
 it('does not warn about Shopify Shipping on a method that does not allow it', function (): void {
@@ -545,4 +558,15 @@ it('still buys for an Amazon order with no due-by date when late rates are not e
     registerRequirementsAdapter([requirementsRate(4.00, null)]);
 
     expect(autoShipForRequirements($package)->success)->toBeTrue();
+});
+
+it('seeds Standard Ground to buy a late rate, and 2 Day and Overnight to leave one for a person', function (): void {
+    $this->seed(ShippingMethodSeeder::class);
+
+    expect(ShippingMethod::query()->pluck('excludes_late_rates', 'name')->all())
+        ->toMatchArray([
+            'Standard Ground' => false,
+            '2 Day' => true,
+            'Overnight' => true,
+        ]);
 });

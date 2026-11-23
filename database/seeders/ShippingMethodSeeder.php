@@ -19,10 +19,12 @@ class ShippingMethodSeeder extends Seeder
     public function run(): void
     {
         // Standard Ground - USPS Ground Advantage, UPS Ground, FedEx Ground and
-        // Home Delivery (commercial and residential, so rating picks by destination)
+        // Home Delivery (commercial and residential, so rating picks by destination).
+        // A late ground parcel is still worth buying automatically; 2 Day and
+        // Overnight leave a late one for a person, the column's default.
         $standardGround = ShippingMethod::firstOrCreate(
             ['name' => 'Standard Ground'],
-            ['commitment_days' => 5, 'active' => true],
+            ['commitment_days' => 5, 'excludes_late_rates' => false, 'active' => true],
         );
         $standardGround->carrierServices()->syncWithoutDetaching(
             CarrierService::whereIn('service_code', [
