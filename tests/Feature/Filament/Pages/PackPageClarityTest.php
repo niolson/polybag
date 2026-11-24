@@ -105,3 +105,29 @@ it('explains Auto Ship on its button', function (): void {
 it('keeps Scan & Pack lit on Print Command Barcodes', function (): void {
     expect(Pack::getNavigationItemActiveRoutePattern())->toContain(PrintCommandBarcodes::getRouteName());
 });
+
+/**
+ * The browser tab's title on a page, whitespace collapsed.
+ */
+function packTabTitle(string $html): string
+{
+    preg_match('#<title>(.*?)</title>#s', $html, $matches);
+
+    return html_entity_decode((string) preg_replace('/\s+/', ' ', trim($matches[1] ?? '')));
+}
+
+it('names the open Shipment in the heading and the browser tab', function (): void {
+    $shipment = Shipment::factory()->create(['shipment_reference' => 'S12345']);
+
+    $response = $this->get('/pack/'.$shipment->id)
+        ->assertOk()
+        ->assertSee('Scan &amp; Pack - S12345', false);
+
+    expect(packTabTitle($response->getContent()))->toBe('Scan & Pack S12345 - '.config('app.name'));
+});
+
+it('keeps the plain heading and tab with no Shipment open', function (): void {
+    $response = $this->get('/pack')->assertOk();
+
+    expect(packTabTitle($response->getContent()))->toBe('Scan & Pack - '.config('app.name'));
+});

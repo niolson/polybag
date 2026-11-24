@@ -34,6 +34,7 @@ use App\Services\SettingsService;
 use App\Services\ShipmentLocationGuard;
 use BackedEnum;
 use Filament\Pages\Page;
+use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Session;
 use Livewire\Attributes\Renderless;
@@ -57,8 +58,6 @@ class Pack extends Page
     protected string $view = 'filament.pages.pack';
 
     protected static ?string $slug = 'pack/{shipment_id?}';
-
-    protected ?string $heading = 'Scan & Pack';
 
     public static function canAccess(): bool
     {
@@ -122,6 +121,27 @@ class Pack extends Page
     public bool $scanToAddMode = false;
 
     public bool $packingValidationEnabled = true;
+
+    /**
+     * The browser tab names the Shipment being packed, as Ship's does.
+     */
+    public function getTitle(): string|Htmlable
+    {
+        $reference = $this->shipment?->shipment_reference;
+
+        return filled($reference) ? "Scan & Pack {$reference}" : 'Scan & Pack';
+    }
+
+    /**
+     * The heading names the Shipment too, so a packer can see at a glance
+     * which order is open.
+     */
+    public function getHeading(): string|Htmlable
+    {
+        $reference = $this->shipment?->shipment_reference;
+
+        return filled($reference) ? "Scan & Pack - {$reference}" : 'Scan & Pack';
+    }
 
     public function mount($shipment_id = null): void
     {
