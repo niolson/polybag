@@ -73,7 +73,7 @@ it('says when the draft was saved, on save and when the shipment is opened again
 });
 
 it('names the box a draft was packed in', function (): void {
-    $box = BoxSize::factory()->create(['code' => '03', 'label' => '8x6x4', 'height' => 4, 'width' => 6, 'length' => 8]);
+    $box = BoxSize::factory()->create(['label' => '8x6x4', 'height' => 4, 'width' => 6, 'length' => 8]);
     app(CacheService::class)->clearBoxSizesCache();
     [$shipment, $packingItems] = clarityShipment();
 
@@ -82,7 +82,7 @@ it('names the box a draft was packed in', function (): void {
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
         ->assertSeeHtml('data-testid="box-name"')
-        ->assertSeeText('Box: 8x6x4 (03)')
+        ->assertSeeText('Box: 8x6x4')
         // A box scanned after the first render is named by the page itself.
         ->assertSeeHtml('x-text="boxName()"');
 });

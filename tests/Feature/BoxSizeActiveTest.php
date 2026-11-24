@@ -12,6 +12,7 @@ use App\Filament\Resources\BoxSizeResource\Pages\ListBoxSizes;
 use App\Models\BoxSize;
 use App\Models\Shipment;
 use App\Models\User;
+use App\Services\Scanning\ScanCode;
 use Filament\Actions\Testing\TestAction;
 use Livewire\Livewire;
 
@@ -28,17 +29,27 @@ it('leaves an inactive box size off the barcode sheet', function (): void {
     expect($printed->pluck('id')->all())->toBe([$active->id]);
 });
 
-it('gives Pack the active box sizes to scan and the inactive ones to report', function (): void {
-    BoxSize::factory()->create(['code' => 'A1']);
-    $inactive = BoxSize::factory()->inactive()->create(['code' => 'Z9', 'label' => 'FedEx Tube']);
+it('gives Pack only the active box sizes to scan', function (): void {
+    $active = BoxSize::factory()->create();
+    BoxSize::factory()->inactive()->create();
 
-    $component = Livewire::test(Pack::class, ['shipment_id' => Shipment::factory()->create()->id])
-        ->assertSet('inactiveBoxSizes.Z9.id', $inactive->id)
-        ->assertSet('inactiveBoxSizes.Z9.label', 'FedEx Tube')
-        ->assertSeeHtml('Box Size Inactive');
+    $component = Livewire::test(Pack::class, ['shipment_id' => Shipment::factory()->create()->id]);
 
-    expect(array_keys($component->get('boxSizes')))->toBe(['A1'])
-        ->and(array_keys($component->get('inactiveBoxSizes')))->toBe(['Z9']);
+    expect(array_keys($component->get('boxSizes')))->toBe([$active->id]);
+});
+
+it('names an inactive box size scanned on Pack', function (): void {
+    $inactive = BoxSize::factory()->inactive()->create(['label' => 'FedEx Tube']);
+
+    Livewire::test(Pack::class, ['shipment_id' => Shipment::factory()->create()->id])
+        ->call('openScanCode', ScanCode::forBoxSize($inactive))
+        ->assertNotified('Box Size Inactive');
+});
+
+it('reports a scanned box size that no longer exists', function (): void {
+    Livewire::test(Pack::class, ['shipment_id' => Shipment::factory()->create()->id])
+        ->call('openScanCode', '%B999999')
+        ->assertNotified('Box Size Not Found');
 });
 
 it('offers only active box sizes on Manual Ship', function (): void {

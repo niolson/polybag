@@ -24,7 +24,6 @@
             scanToAddMode: @js($scanToAddMode),
             packingValidationEnabled: @js($packingValidationEnabled),
             boxSizes: @js($boxSizes),
-            inactiveBoxSizes: @js($inactiveBoxSizes),
             boxSizeId: @js($boxSizeId),
             weight: @js($weight),
             height: @js($height),
@@ -75,20 +74,18 @@
 
                 if (!trimmed) return;
 
-                // A PolyBag code comes first and is never a box, product or
-                // reference (ADR-0007): commands run here, the rest on the server.
+                // A PolyBag code comes first and is never a product or
+                // reference (ADR-0007): commands and active boxes apply here,
+                // the rest on the server.
                 const upper = trimmed.toUpperCase();
                 if (upper.startsWith(this.scanCodePrefix)) {
                     const command = this.commandCodes[upper];
-                    const boxCode = this.hasShipment ? this.boxAliasForScanCode(upper) : undefined;
-                    const inactiveBoxCode = this.hasShipment ? this.boxAliasForScanCode(upper, this.inactiveBoxSizes) : undefined;
+                    const boxSizeId = this.hasShipment ? this.activeBoxSizeIdForScanCode(upper) : undefined;
 
                     if (command) {
                         this.executeCommand(command);
-                    } else if (boxCode !== undefined) {
-                        this.scanBox(boxCode);
-                    } else if (inactiveBoxCode !== undefined) {
-                        this.notifyInactiveBox(inactiveBoxCode);
+                    } else if (boxSizeId !== undefined) {
+                        this.scanBox(boxSizeId);
                     } else {
                         $wire.openScanCode(trimmed);
                     }
@@ -103,56 +100,23 @@
                     return;
                 }
 
-                const isBoxCode = !!this.boxSizes[trimmed];
-                const isInactiveBoxCode = !!this.inactiveBoxSizes[trimmed];
-                const hasDimensions = this.height && this.width && this.length;
-
                 if (this.scanToAddMode) {
-                    // In scan-to-add mode, prefer box scan when dimensions aren't set yet;
-                    // otherwise always try to look up as a product
-                    if (isBoxCode && !hasDimensions) {
-                        this.scanBox(trimmed);
-                    } else if (isInactiveBoxCode && !hasDimensions) {
-                        this.notifyInactiveBox(trimmed);
-                    } else {
-                        $wire.addItemByScan(trimmed);
-                    }
+                    $wire.addItemByScan(trimmed);
                 } else {
-                    const isProduct = this.packingItems.some(item => item.barcode === trimmed || item.sku === trimmed);
-
-                    if (isBoxCode && isProduct) {
-                        // Collision: prefer box code if dimensions aren't set, product if they are
-                        hasDimensions ? this.scanProduct(trimmed) : this.scanBox(trimmed);
-                    } else if (isBoxCode) {
-                        this.scanBox(trimmed);
-                    } else if (isInactiveBoxCode && !isProduct) {
-                        this.notifyInactiveBox(trimmed);
-                    } else {
-                        this.scanProduct(trimmed);
-                    }
+                    this.scanProduct(trimmed);
                 }
 
                 this.input = '';
             },
 
-            // The alias of the box a Box Size code names, among the active boxes
-            // unless another lookup is given, matched by its numeric ID so
-            // leading zeros read as the server's parser reads them.
-            boxAliasForScanCode(upper, boxes = this.boxSizes) {
+            // The ID of the active box a Box Size code names, read as a number so
+            // leading zeros read as the server's parser reads them. An inactive
+            // or deleted box is left to the server to report.
+            activeBoxSizeIdForScanCode(upper) {
                 const match = upper.match(new RegExp(`^${this.scanCodePrefix}B(\\d{1,18})$`));
                 const id = match ? Number(match[1]) : 0;
 
-                return id > 0
-                    ? Object.keys(boxes).find((code) => boxes[code].id === id)
-                    : undefined;
-            },
-
-            notifyInactiveBox(code) {
-                new FilamentNotification()
-                    .title('Box Size Inactive')
-                    .body(`${this.inactiveBoxSizes[code].label} (${code}) is inactive. Ask a manager to activate it under Box Sizes.`)
-                    .warning()
-                    .send();
+                return id > 0 && this.boxSizes[id] ? id : undefined;
             },
 
             executeCommand(name) {
@@ -208,27 +172,17 @@
                 }
             },
 
-            // The chosen box as the packer reads it: label and code.
+            // The chosen box as the packer reads it.
             boxName() {
-                const entry = Object.entries(this.boxSizes).find(([, box]) => box.id === this.boxSizeId);
-
-                return entry ? `${entry[1].label} (${entry[0]})` : '';
+                return this.boxSizes[this.boxSizeId]?.label ?? '';
             },
 
-            scanBox(code) {
-                const box = this.boxSizes[code];
-                if (box) {
-                    this.boxSizeId = box.id;
-                    this.height = box.height;
-                    this.width = box.width;
-                    this.length = box.length;
-                } else {
-                    new FilamentNotification()
-                        .title('Box Size Not Found')
-                        .body(`No box size has the code ${code}.`)
-                        .danger()
-                        .send();
-                }
+            scanBox(id) {
+                const box = this.boxSizes[id];
+                this.boxSizeId = box.id;
+                this.height = box.height;
+                this.width = box.width;
+                this.length = box.length;
             },
 
             scanProduct(barcode) {
@@ -656,7 +610,7 @@
                             x-ref="scanInput"
                             type="text"
                             x-model="input"
-                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box code' : 'Scan pack slip or enter shipment reference'"
+                            x-bind:placeholder="hasShipment ? 'Scan product barcode or box' : 'Scan pack slip or enter shipment reference'"
                             x-bind:disabled="isShipping"
                             autofocus
                         />
@@ -733,7 +687,7 @@
                 <div class="mt-2 grid grid-cols-1 gap-x-4 text-sm sm:grid-cols-2">
                     <x-scale-status />
 
-                    {{-- Named, so a wrong box code is seen before the label is bought. --}}
+                    {{-- Named, so a wrong box is seen before the label is bought. --}}
                     <div class="min-h-5">
                         <p x-show="boxName()" @if(! $this->boxName()) x-cloak @endif class="text-gray-600 dark:text-gray-300" data-testid="box-name">
                             Box: <span class="font-medium text-gray-950 dark:text-white" x-text="boxName()">{{ $this->boxName() }}</span>

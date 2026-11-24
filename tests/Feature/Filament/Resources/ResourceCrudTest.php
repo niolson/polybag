@@ -64,7 +64,6 @@ it('can create a BoxSize', function (): void {
     Livewire::test(CreateBoxSize::class)
         ->fillForm([
             'label' => 'Small Box',
-            'code' => 'SM-BOX',
             'type' => BoxSizeType::BOX->value,
             'height' => 6,
             'width' => 8,
@@ -77,7 +76,6 @@ it('can create a BoxSize', function (): void {
 
     $this->assertDatabaseHas(BoxSize::class, [
         'label' => 'Small Box',
-        'code' => 'SM-BOX',
         'type' => 'BOX',
     ]);
 });
@@ -102,7 +100,6 @@ it('can create a BoxSize that is carrier-supplied packaging', function (): void 
     Livewire::test(CreateBoxSize::class)
         ->fillForm([
             'label' => 'USPS Medium Flat Rate Box',
-            'code' => 'MFRB',
             'type' => BoxSizeType::BOX->value,
             'carrier_packaging' => CarrierPackaging::UspsMediumFlatRateBox->value,
             'height' => 5.5,
@@ -114,58 +111,7 @@ it('can create a BoxSize that is carrier-supplied packaging', function (): void 
         ->call('create')
         ->assertHasNoFormErrors();
 
-    expect(BoxSize::where('code', 'MFRB')->sole()->carrier_packaging)->toBe(CarrierPackaging::UspsMediumFlatRateBox);
-});
-
-it('refuses a BoxSize code that begins with the scan-code prefix', function (string $code): void {
-
-    Livewire::test(CreateBoxSize::class)
-        ->fillForm([
-            'label' => 'Small Box',
-            'code' => $code,
-            'type' => BoxSizeType::BOX->value,
-            'height' => 6,
-            'width' => 8,
-            'length' => 10,
-            'max_weight' => 25,
-            'empty_weight' => 0.5,
-        ])
-        ->call('create')
-        ->assertHasFormErrors(['code']);
-
-    expect(BoxSize::where('code', $code)->exists())->toBeFalse();
-})->with([
-    'a code' => ['%12'],
-    'a code in lower case' => ['%b12'],
-    'surrounding whitespace' => [' %12'],
-]);
-
-it('accepts a BoxSize code that only resembles the scan-code prefix', function (string $code): void {
-
-    Livewire::test(CreateBoxSize::class)
-        ->fillForm([
-            'label' => 'Small Box',
-            'code' => $code,
-            'type' => BoxSizeType::BOX->value,
-            'height' => 6,
-            'width' => 8,
-            'length' => 10,
-            'max_weight' => 25,
-            'empty_weight' => 0.5,
-        ])
-        ->call('create')
-        ->assertHasNoFormErrors();
-})->with(['A1', 'S12', 'PB12', 'A%', '01']);
-
-it('refuses renaming a BoxSize to a code that begins with the scan-code prefix', function (): void {
-    $record = BoxSize::factory()->create(['code' => 'A1']);
-
-    Livewire::test(EditBoxSize::class, ['record' => $record->id])
-        ->fillForm(['code' => '%X'])
-        ->call('save')
-        ->assertHasFormErrors(['code']);
-
-    expect($record->refresh()->code)->toBe('A1');
+    expect(BoxSize::where('label', 'USPS Medium Flat Rate Box')->sole()->carrier_packaging)->toBe(CarrierPackaging::UspsMediumFlatRateBox);
 });
 
 it('can edit a BoxSize between carrier-supplied packaging and its own', function (): void {

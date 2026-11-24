@@ -36,7 +36,6 @@ beforeEach(function (): void {
 
 it('loads box sizes into the component', function (): void {
     $boxSize = BoxSize::factory()->create([
-        'code' => 'A1',
         'height' => 10.00,
         'width' => 8.00,
         'length' => 6.00,
@@ -45,11 +44,10 @@ it('loads box sizes into the component', function (): void {
     $shipment = Shipment::factory()->create();
 
     Livewire::test(Pack::class, ['shipment_id' => $shipment->id])
-        ->assertSet('boxSizes.A1.id', $boxSize->id)
-        ->assertSet('boxSizes.A1.code', 'A1')
-        ->assertSet('boxSizes.A1.height', '10.00')
-        ->assertSet('boxSizes.A1.width', '8.00')
-        ->assertSet('boxSizes.A1.length', '6.00');
+        ->assertSet("boxSizes.{$boxSize->id}.id", $boxSize->id)
+        ->assertSet("boxSizes.{$boxSize->id}.height", '10.00')
+        ->assertSet("boxSizes.{$boxSize->id}.width", '8.00')
+        ->assertSet("boxSizes.{$boxSize->id}.length", '6.00');
 });
 
 it('loads shipment with packing items', function (): void {
@@ -160,7 +158,7 @@ describe('PolyBag codes', function (): void {
     });
 
     it('applies a box by its code only while packing', function (): void {
-        $box = BoxSize::factory()->create(['code' => 'A1']);
+        $box = BoxSize::factory()->create();
 
         Livewire::test(Pack::class)
             ->call('openScanCode', "%B0{$box->id}")
@@ -283,19 +281,18 @@ it('shows error notification for invalid shipment reference', function (): void 
 });
 
 it('passes box sizes to blade view', function (): void {
-    BoxSize::factory()->create(['code' => 'S1']);
-    BoxSize::factory()->create(['code' => 'M2']);
+    $small = BoxSize::factory()->create();
+    $medium = BoxSize::factory()->create();
 
     Livewire::test(Pack::class)
-        ->assertViewHas('boxSizes', function ($boxSizes): bool {
-            return array_key_exists('S1', $boxSizes)
-                && array_key_exists('M2', $boxSizes);
+        ->assertViewHas('boxSizes', function ($boxSizes) use ($small, $medium): bool {
+            return array_key_exists($small->id, $boxSizes)
+                && array_key_exists($medium->id, $boxSizes);
         });
 });
 
 it('ships a package via manual ship', function (): void {
     $boxSize = BoxSize::factory()->create([
-        'code' => 'A1',
         'height' => 10.00,
         'width' => 8.00,
         'length' => 6.00,
