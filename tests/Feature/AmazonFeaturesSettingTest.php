@@ -3,12 +3,15 @@
 use App\Enums\Role;
 use App\Filament\Pages\Settings;
 use App\Filament\Pages\UnmappedObservedServices;
+use App\Filament\Resources\PackageResource\Pages\ViewPackage;
+use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Filament\Resources\ShipmentResource\Pages\ListShipments;
 use App\Filament\Resources\ShipmentResource\Pages\ViewShipment;
 use App\Filament\Resources\ShipmentResource\RelationManagers\ShipmentItemsRelationManager;
 use App\Filament\Resources\ShippingMethodResource\RelationManagers\ShippingRulesRelationManager;
 use App\Models\DataSource;
 use App\Models\ObservedService;
+use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\User;
 use App\Services\SettingsService;
@@ -128,6 +131,23 @@ describe('Shipments', function (): void {
 
         Livewire::test(ShipmentItemsRelationManager::class, ['ownerRecord' => $shipment, 'pageClass' => ViewShipment::class])
             ->assertTableColumnVisible('transparency');
+    });
+
+    it('hides the Transparency Codes package item column with the feature off, even with Transparency on', function (): void {
+        app(SettingsService::class)->set('transparency_enabled', true, 'boolean');
+        $package = Package::factory()->create();
+
+        Livewire::test(PackageItemsRelationManager::class, ['ownerRecord' => $package, 'pageClass' => ViewPackage::class])
+            ->assertTableColumnHidden('transparency_codes');
+    });
+
+    it('shows the Transparency Codes package item column with the feature and Transparency on', function (): void {
+        setAmazonFeatures(true);
+        app(SettingsService::class)->set('transparency_enabled', true, 'boolean');
+        $package = Package::factory()->create();
+
+        Livewire::test(PackageItemsRelationManager::class, ['ownerRecord' => $package, 'pageClass' => ViewPackage::class])
+            ->assertTableColumnVisible('transparency_codes');
     });
 });
 
