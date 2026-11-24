@@ -29,6 +29,7 @@ use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
 use Filament\Support\Enums\Platform;
 use Filament\Support\Enums\Width;
+use Filament\Tables\View\TablesRenderHook;
 use Filament\View\PanelsRenderHook;
 use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
 use Illuminate\Cookie\Middleware\EncryptCookies;
@@ -144,6 +145,13 @@ class AppPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_END,
                 fn (): string => Blade::render('<x-global-search-scan-script />'),
+            )
+            // Filament's selection indicator is a row of its own that appears above the
+            // records when the first one is checked, pushing them down. The count and its
+            // links go in the toolbar instead; the theme hides the stock row.
+            ->renderHook(
+                TablesRenderHook::TOOLBAR_GROUPING_SELECTOR_AFTER,
+                fn (): string => view('filament.table-selection-summary')->render(),
             )
             ->middleware([
                 EncryptCookies::class,
