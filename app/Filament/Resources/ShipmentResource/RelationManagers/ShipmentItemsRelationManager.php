@@ -35,7 +35,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->numeric()
                     ->suffix(fn (): string => $this->shipmentCurrency()),
                 Forms\Components\Toggle::make('transparency')
-                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
+                    ->visible(fn (): bool => $this->showsTransparency()),
             ]);
     }
 
@@ -63,7 +63,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->falseIcon('heroicon-o-minus-circle')
                     ->trueColor('success')
                     ->falseColor('gray')
-                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
+                    ->visible(fn (): bool => $this->showsTransparency()),
             ])
             ->filters([
                 //
@@ -100,6 +100,18 @@ class ShipmentItemsRelationManager extends RelationManager
         $source = $shipment instanceof Shipment ? $shipment->dataSource : null;
 
         return $source !== null && app(ShipmentItemImporter::class)->isEnabledFor($source) ? $source : null;
+    }
+
+    /**
+     * Transparency is an Amazon program, so it shows only with Amazon features
+     * on, as well as the Transparency setting, which keeps its stored value
+     * while the Amazon toggle hides it.
+     */
+    private function showsTransparency(): bool
+    {
+        $settings = app(SettingsService::class);
+
+        return $settings->amazonFeaturesEnabled() && (bool) $settings->get('transparency_enabled', true);
     }
 
     /**
