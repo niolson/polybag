@@ -41,7 +41,6 @@
                 try {
                     await ScaleUtils.claimScale();
 
-                    let prevStable = null;
                     await ScaleUtils.startScaleStream((result) => {
                         this.scaleStable = result.isStable;
                         this.scaleUnderZero = result.weight < 0;
@@ -55,14 +54,6 @@
                             this.lastScaleWeight = formatted;
                             $wire.data.weight = formatted;
                         }
-
-                        // Resync the saved-data hash when the weight settles so
-                        // scale autofill doesn't trigger the unsaved-changes alert.
-                        if (result.isStable && prevStable !== true) {
-                            $wire.syncDataHash();
-                        }
-
-                        prevStable = result.isStable;
                     });
 
                     this.scaleConnected = true;
@@ -102,4 +93,28 @@
 
             </form>
     </div>
+
+    @script
+        <script>
+            // Filament's unsaved-changes alert compares the whole form, so every
+            // scale reading would count as a change. This compares it without
+            // the weight, which is what ManualShip::rememberData() hashed.
+            const warnOfUnsavedChanges = (event) => {
+                const { weight, ...data } = $wire.data;
+
+                if (
+                    window.jsMd5(JSON.stringify(data).replace(/\\/g, '')) === $wire.savedDataHash
+                    || $wire?.__instance?.effects?.redirect
+                ) {
+                    return;
+                }
+
+                event.preventDefault();
+                event.returnValue = true;
+            };
+
+            window.addEventListener('beforeunload', warnOfUnsavedChanges);
+            $wire.__instance.addCleanup(() => window.removeEventListener('beforeunload', warnOfUnsavedChanges));
+        </script>
+    @endscript
 </x-filament-panels::page>

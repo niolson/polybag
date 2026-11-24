@@ -80,6 +80,17 @@ class SettingsService
         return (bool) $this->get('amazon_features_enabled', false) || DataSource::hasActiveAmazonConnection();
     }
 
+    /**
+     * Whether Transparency columns and fields are shown on Shipment and Package
+     * items. Transparency is an Amazon program, so it needs Amazon features on
+     * as well as its own setting, which keeps its stored value while Settings
+     * hides it. Hiding only; packing still prompts for codes by the setting.
+     */
+    public function transparencyShown(): bool
+    {
+        return $this->amazonFeaturesEnabled() && (bool) $this->get('transparency_enabled', true);
+    }
+
     private function resolveSandboxMode(mixed $default): bool
     {
         return match (AppMode::current()) {

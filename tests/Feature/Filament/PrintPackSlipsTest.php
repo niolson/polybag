@@ -4,6 +4,7 @@ use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Enums\PackSlipState;
 use App\Enums\Role;
 use App\Filament\Pages\PrintPackSlips;
+use App\Filament\Resources\ShipmentResource;
 use App\Models\Channel;
 use App\Models\PickBatch;
 use App\Models\PickBatchShipment;
@@ -59,6 +60,13 @@ it('lets a Shipper open the page and see the Shipments waiting', function (): vo
     Livewire::test(PrintPackSlips::class)
         ->assertCanSeeTableRecords([$waiting])
         ->assertCanNotSeeTableRecords([$printed]);
+});
+
+it('links each Shipment reference to the Shipment', function (): void {
+    $shipment = Shipment::factory()->create();
+
+    Livewire::test(PrintPackSlips::class)
+        ->assertSeeHtml('href="'.ShipmentResource::getUrl('view', ['record' => $shipment]).'"');
 });
 
 it('prints the next N, and the Shipments leave the list only once the receipt is redeemed', function (): void {

@@ -35,7 +35,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->numeric()
                     ->suffix(fn (): string => $this->shipmentCurrency()),
                 Forms\Components\Toggle::make('transparency')
-                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
+                    ->visible(fn (): bool => app(SettingsService::class)->transparencyShown()),
             ]);
     }
 
@@ -63,7 +63,7 @@ class ShipmentItemsRelationManager extends RelationManager
                     ->falseIcon('heroicon-o-minus-circle')
                     ->trueColor('success')
                     ->falseColor('gray')
-                    ->visible(fn (): bool => (bool) app(SettingsService::class)->get('transparency_enabled', true)),
+                    ->visible(fn (): bool => app(SettingsService::class)->transparencyShown()),
             ])
             ->filters([
                 //

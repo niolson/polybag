@@ -41,7 +41,6 @@ use Filament\Forms;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
-use Filament\Pages\Concerns\HasUnsavedDataChangesAlert;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Grid;
 use Filament\Schemas\Components\Section;
@@ -49,6 +48,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Session;
 use Illuminate\Support\HtmlString;
@@ -58,7 +58,6 @@ use UnitEnum;
 
 class ManualShip extends Page implements HasForms
 {
-    use HasUnsavedDataChangesAlert;
     use InteractsWithForms;
     use NotifiesUser;
     use PrintsLabels;
@@ -95,6 +94,14 @@ class ManualShip extends Page implements HasForms
      */
     public bool $scaleReadsTooLight = false;
 
+    /**
+     * The form as last filled, less its weight, which the page compares before
+     * the browser leaves. Weight is left out because the scale keeps writing
+     * it: a reading is not an unsaved change.
+     */
+    #[Locked]
+    public string $savedDataHash = '';
+
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-pencil-square';
 
     protected static ?string $navigationLabel = 'Manual Ship';
@@ -128,6 +135,8 @@ class ManualShip extends Page implements HasForms
             'country' => 'US',
             'label_format' => 'pdf',
         ]);
+
+        $this->rememberData();
     }
 
     public function form(Schema $form): Schema
@@ -643,6 +652,8 @@ class ManualShip extends Page implements HasForms
             'country' => 'US',
         ]);
 
+        $this->rememberData();
+
         $this->dispatch('form-reset');
     }
 
@@ -672,9 +683,13 @@ class ManualShip extends Page implements HasForms
             ->all();
     }
 
-    public function syncDataHash(): void
+    /**
+     * Hashed as Filament's unsaved-changes alert hashes a form, so the page's
+     * check matches it, but without the weight.
+     */
+    private function rememberData(): void
     {
-        $this->rememberData();
+        $this->savedDataHash = md5((string) str(json_encode(Arr::except($this->data ?? [], 'weight'), JSON_UNESCAPED_UNICODE))->replace('\\', ''));
     }
 
     public function reprintLastLabel(): void
