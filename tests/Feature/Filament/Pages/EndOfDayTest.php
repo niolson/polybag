@@ -137,24 +137,24 @@ it('shows manifests from all dates sorted newest first', function (): void {
         ->assertSeeInOrder(['MN002', 'MN001']);
 });
 
-it('dispatches print-report event when reprinting manifest with image', function (): void {
+it('dispatches print-report event when printing manifest with image', function (): void {
     $manifest = Manifest::factory()->withImage()->create([
         'manifest_date' => today(),
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->call('reprintManifest', $manifest->id)
+        ->call('printManifest', $manifest->id)
         ->assertDispatched('print-report');
 });
 
-it('shows error when reprinting manifest without image', function (): void {
+it('shows error when printing manifest without image', function (): void {
     $manifest = Manifest::factory()->create([
         'image' => null,
         'manifest_date' => today(),
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->call('reprintManifest', $manifest->id)
+        ->call('printManifest', $manifest->id)
         ->assertNotified();
 });
 

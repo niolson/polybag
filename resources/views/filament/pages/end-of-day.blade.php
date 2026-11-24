@@ -118,12 +118,12 @@
                                     <td class="px-4 py-3 text-right">
                                         @if(!empty($manifest->image))
                                             <x-filament::button
-                                                wire:click="reprintManifest({{ $manifest->id }})"
+                                                wire:click="printManifest({{ $manifest->id }})"
                                                 icon="heroicon-o-printer"
                                                 size="xs"
                                                 color="gray"
                                             >
-                                                Reprint Manifest
+                                                Print Manifest
                                             </x-filament::button>
                                         @else
                                             <span class="text-xs text-gray-400 dark:text-gray-500">No image</span>

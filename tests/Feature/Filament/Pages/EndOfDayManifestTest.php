@@ -242,7 +242,7 @@ it('hides Generate & Print when printing is suppressed', function (): void {
         ->assertDontSee('Generate &amp; Print', escape: false);
 });
 
-it('shows Reprint Manifest for a form with an image and No image for one without', function (): void {
+it('shows Print Manifest for a form with an image and No image for one without', function (): void {
     Manifest::create([
         'carrier' => Carrier::USPS,
         'manifest_number' => 'MN-WITH-IMAGE',
@@ -252,7 +252,7 @@ it('shows Reprint Manifest for a form with an image and No image for one without
     ]);
 
     Livewire::test(EndOfDay::class)
-        ->assertSee('Reprint Manifest')
+        ->assertSee('Print Manifest')
         ->assertDontSee('No image');
 
     Manifest::query()->delete();
@@ -265,5 +265,5 @@ it('shows Reprint Manifest for a form with an image and No image for one without
 
     Livewire::test(EndOfDay::class)
         ->assertSee('No image')
-        ->assertDontSee('Reprint Manifest');
+        ->assertDontSee('Print Manifest');
 });
