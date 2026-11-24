@@ -415,18 +415,18 @@ class EndOfDay extends Page
             ->where('ship_date', '<', $shipDate->addDay()->toDateString());
     }
 
-    public function reprintManifest(int $manifestId): void
+    public function printManifest(int $manifestId): void
     {
         $manifest = Manifest::find($manifestId);
 
         if (! $manifest || empty($manifest->image)) {
-            $this->notifyError('Reprint Error', 'This manifest has no image to print.');
+            $this->notifyError('Print Error', 'This manifest has no image to print.');
 
             return;
         }
 
         $this->dispatch('print-report', data: $manifest->image);
 
-        $this->notifySuccess('Reprinting', "Manifest {$manifest->manifest_number} sent to printer.");
+        $this->notifySuccess('Printing', "Manifest {$manifest->manifest_number} sent to printer.");
     }
 }
