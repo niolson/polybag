@@ -21,6 +21,7 @@ use App\Services\ClientContext;
 use App\Services\SettingsService;
 use Filament\Notifications\Notification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Arr;
 use Livewire\Livewire;
 use Tests\Support\FixedValidationPlan;
 
@@ -457,4 +458,15 @@ it('keeps a real weight even when the page last reported a too-light reading', f
     $package = Shipment::where('shipment_reference', 'MAN-3001')->sole()->packages()->sole();
 
     expect((float) $package->weight)->toBe(1.25);
+});
+
+it('remembers the form for the leave-page warning without its weight', function (): void {
+    $page = Livewire::test(ManualShip::class)->set('data.weight', '3.20');
+
+    $data = $page->get('data');
+    $withoutWeight = md5((string) str(json_encode(Arr::except($data, 'weight'), JSON_UNESCAPED_UNICODE))->replace('\\', ''));
+    $withWeight = md5((string) str(json_encode($data, JSON_UNESCAPED_UNICODE))->replace('\\', ''));
+
+    expect($page->get('savedDataHash'))->toBe($withoutWeight)
+        ->and($withoutWeight)->not()->toBe($withWeight);
 });
