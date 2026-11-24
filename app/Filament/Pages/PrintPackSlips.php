@@ -7,6 +7,7 @@ use App\DataTransferObjects\PackSlips\PackSlipRun;
 use App\Enums\PackSlipQueueTab;
 use App\Enums\PackSlipState;
 use App\Filament\Resources\PickBatches\PickBatchResource;
+use App\Filament\Resources\ShipmentResource;
 use App\Models\Channel;
 use App\Models\Client;
 use App\Models\PickBatch;
@@ -132,6 +133,7 @@ class PrintPackSlips extends Page implements HasTable
             ->columns([
                 Tables\Columns\TextColumn::make('shipment_reference')
                     ->label('Reference')
+                    ->url(fn (Shipment $record): string => ShipmentResource::getUrl('view', ['record' => $record]))
                     ->searchable(),
                 Tables\Columns\TextColumn::make('pack_slip_state')
                     ->label('Pack Slip')
