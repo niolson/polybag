@@ -32,7 +32,7 @@ final readonly class ScanCode
 
     /**
      * The PolyBag code a scan spells, or null for an external identifier (an
-     * order reference, box code, SKU or UPC).
+     * order reference, SKU or UPC).
      */
     public static function parse(string $scan): ?self
     {

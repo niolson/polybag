@@ -36,43 +36,22 @@ class CacheService
     }
 
     /**
-     * Get box sizes formatted for Pack page lookup (keyed by code).
+     * Active box sizes for the Pack page, keyed by ID: a `%B<id>` scan names one.
      *
-     * @return array<string, array<string, mixed>>
+     * @return array<int, array{id: int, label: string, height: string, width: string, length: string}>
      */
     public function getBoxSizesForPacking(): array
     {
         return $this->getBoxSizes()
             ->filter(fn (BoxSize $box): bool => $box->active)
-            ->map(fn (BoxSize $box): array => [
+            ->mapWithKeys(fn (BoxSize $box): array => [$box->id => [
                 'id' => $box->id,
-                'code' => $box->code,
                 'label' => $box->label,
                 'height' => (string) $box->height,
                 'width' => (string) $box->width,
                 'length' => (string) $box->length,
-            ])
-            ->keyBy('code')
-            ->toArray();
-    }
-
-    /**
-     * Inactive box sizes keyed by code, so Pack can say a scanned box is
-     * inactive rather than unknown.
-     *
-     * @return array<string, array{id: int, code: string, label: string}>
-     */
-    public function getInactiveBoxSizesForPacking(): array
-    {
-        return $this->getBoxSizes()
-            ->reject(fn (BoxSize $box): bool => $box->active)
-            ->map(fn (BoxSize $box): array => [
-                'id' => $box->id,
-                'code' => $box->code,
-                'label' => $box->label,
-            ])
-            ->keyBy('code')
-            ->toArray();
+            ]])
+            ->all();
     }
 
     /**

@@ -22,6 +22,7 @@ use App\Exceptions\PackageDraftInvalidException;
 use App\Filament\Concerns\NotifiesUser;
 use App\Filament\Concerns\PrintsLabels;
 use App\Filament\Resources\PackageResource;
+use App\Models\BoxSize;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\Product;
@@ -93,10 +94,8 @@ class Pack extends Page
 
     public array $packingItems = [];
 
+    /** Active box sizes by ID, which a `%B<id>` scan applies in the browser. */
     public array $boxSizes = [];
-
-    /** Inactive box sizes by code, so a scan of one is reported as inactive rather than unknown. */
-    public array $inactiveBoxSizes = [];
 
     public ?int $boxSizeId = null;
 
@@ -156,7 +155,6 @@ class Pack extends Page
 
         // Load box sizes for client-side lookup (cached)
         $this->boxSizes = app(CacheService::class)->getBoxSizesForPacking();
-        $this->inactiveBoxSizes = app(CacheService::class)->getInactiveBoxSizesForPacking();
 
         if ($shipment_id) {
             $this->shipment = Shipment::with(['client', 'location'])->findOrFail($shipment_id);
@@ -457,13 +455,7 @@ class Pack extends Page
      */
     public function boxName(): ?string
     {
-        foreach ($this->boxSizes as $code => $box) {
-            if ($box['id'] === $this->boxSizeId) {
-                return "{$box['label']} ({$code})";
-            }
-        }
-
-        return null;
+        return $this->boxSizeId === null ? null : ($this->boxSizes[$this->boxSizeId]['label'] ?? null);
     }
 
     private function alreadyShippedMessage(): string
@@ -708,10 +700,21 @@ class Pack extends Page
             // The browser applies an active box while packing; one reaching here is not that.
             ScanCodeType::BoxSize => $this->shipment === null
                 ? $this->notifyError('No Shipment Loaded', 'Scan a pack slip before scanning a box.')
-                : $this->notifyError('Box Size Inactive', "{$code->scan} is not an active box size. Ask a manager to activate it under Box Sizes."),
+                : $this->notifyBoxSizeNotActive(BoxSize::find($code->id), $code->scan),
             ScanCodeType::Command => $this->notifyError('Unknown Command', "'{$code->scan}' is not a command PolyBag knows. Reprint the command sheet if it is an old one."),
             ScanCodeType::Action => $this->notifyError('Not Available', 'Custom scan actions are not available yet.'),
         };
+    }
+
+    private function notifyBoxSizeNotActive(?BoxSize $boxSize, string $code): void
+    {
+        if ($boxSize === null) {
+            $this->notifyError('Box Size Not Found', "No box size has the code {$code}. It may have been deleted.");
+
+            return;
+        }
+
+        $this->notifyError('Box Size Inactive', "{$boxSize->label} ({$code}) is inactive. Ask a manager to activate it under Box Sizes.");
     }
 
     private function openScannedShipment(?Shipment $shipment, string $code): void

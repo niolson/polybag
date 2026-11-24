@@ -25,9 +25,9 @@ it('caches box sizes', function (): void {
     expect(Cache::has('box_sizes_all'))->toBeTrue();
 });
 
-it('returns box sizes formatted for packing', function (): void {
-    BoxSize::factory()->create([
-        'code' => 'BOX-A',
+it('returns active box sizes formatted for packing, keyed by ID', function (): void {
+    BoxSize::factory()->inactive()->create();
+    $box = BoxSize::factory()->create([
         'height' => 10,
         'width' => 8,
         'length' => 6,
@@ -35,11 +35,11 @@ it('returns box sizes formatted for packing', function (): void {
 
     $formatted = app(CacheService::class)->getBoxSizesForPacking();
 
-    expect($formatted)->toHaveKey('BOX-A')
-        ->and($formatted['BOX-A'])->toHaveKeys(['id', 'code', 'label', 'height', 'width', 'length'])
-        ->and($formatted['BOX-A']['height'])->toBe('10.00')
-        ->and($formatted['BOX-A']['width'])->toBe('8.00')
-        ->and($formatted['BOX-A']['length'])->toBe('6.00');
+    expect(array_keys($formatted))->toBe([$box->id])
+        ->and($formatted[$box->id])->toHaveKeys(['id', 'label', 'height', 'width', 'length'])
+        ->and($formatted[$box->id]['height'])->toBe('10.00')
+        ->and($formatted[$box->id]['width'])->toBe('8.00')
+        ->and($formatted[$box->id]['length'])->toBe('6.00');
 });
 
 it('caches active carrier services', function (): void {

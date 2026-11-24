@@ -26,7 +26,6 @@ class BoxSize extends Model
         'max_weight',
         'empty_weight',
         'label',
-        'code',
         'active',
         'type',
         'carrier_packaging',

@@ -578,7 +578,7 @@ class ShipmentResource extends Resource
                             ->label('Box Size')
                             ->options(fn (): array => BoxSize::query()->active()->get()
                                 ->sortBy(fn (BoxSize $box): float => (float) $box->length * (float) $box->width * (float) $box->height)
-                                ->mapWithKeys(fn (BoxSize $box): array => [$box->id => filled($box->code) ? "{$box->code} · {$box->label}" : $box->label])
+                                ->mapWithKeys(fn (BoxSize $box): array => [$box->id => $box->label])
                                 ->all())
                             ->required()
                             ->searchable(),

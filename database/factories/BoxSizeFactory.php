@@ -18,7 +18,6 @@ class BoxSizeFactory extends Factory
     {
         return [
             'label' => fake()->words(2, true),
-            'code' => fake()->unique()->regexify('[A-Z][0-9]'),
             'active' => true,
             'type' => fake()->randomElement(BoxSizeType::cases()),
             'height' => fake()->randomFloat(2, 2, 20),

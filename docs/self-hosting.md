@@ -300,7 +300,7 @@ been verified against the Amazon sandbox only.
 
 Every barcode PolyBag prints for scanning begins with `%`: pack slips (`%S216` is
 Shipment 216), box size sheets (`%B3`) and the command sheet (`%CSHIP`). A scan that
-begins with `%` is always read as a PolyBag code, never as an order reference, box code,
+begins with `%` is always read as a PolyBag code, never as an order reference,
 SKU or UPC. Nothing needs configuring for this. ADR-0007
 (`docs/adr/0007-scan-code-grammar.md`) explains the format.
 

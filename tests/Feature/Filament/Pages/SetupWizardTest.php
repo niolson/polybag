@@ -44,7 +44,7 @@ it('loads only the common box sizes when selected', function (): void {
     invokePrivateMethod($component->instance(), 'saveBoxSizes');
 
     expect(BoxSize::count())->toBe(13)
-        ->and(BoxSize::where('code', '01')->exists())->toBeTrue()
+        ->and(BoxSize::where('label', '6x4x4')->exists())->toBeTrue()
         ->and(BoxSize::whereNotNull('carrier_packaging')->exists())->toBeFalse();
 });
 
@@ -54,7 +54,6 @@ it('creates box sizes with and without carrier packaging', function (): void {
         ->set('data.box_sizes', [
             [
                 'label' => 'FedEx Pak',
-                'code' => 'PAK',
                 'type' => 'PADDED_MAILER',
                 'height' => 1,
                 'width' => 11.75,
@@ -65,7 +64,6 @@ it('creates box sizes with and without carrier packaging', function (): void {
             ],
             [
                 'label' => '6x6x6',
-                'code' => 'CUBE',
                 'type' => 'BOX',
                 'height' => 6,
                 'width' => 6,
@@ -78,33 +76,21 @@ it('creates box sizes with and without carrier packaging', function (): void {
 
     invokePrivateMethod($component->instance(), 'saveBoxSizes');
 
-    expect(BoxSize::where('code', 'PAK')->sole()->carrier_packaging)->toBe(CarrierPackaging::FedexPak)
-        ->and(BoxSize::where('code', 'CUBE')->sole()->carrier_packaging)->toBeNull();
+    expect(BoxSize::where('label', 'FedEx Pak')->sole()->carrier_packaging)->toBe(CarrierPackaging::FedexPak)
+        ->and(BoxSize::where('label', '6x6x6')->sole()->carrier_packaging)->toBeNull();
 });
 
-it('refuses a box code that begins with the scan-code prefix', function (string $code): void {
+it('saves a box size added on its step', function (): void {
     setupWizardStep(3);
 
     Livewire::test(SetupWizard::class)
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
-        ->set('data.box_sizes', [setupWizardBoxSize($code)])
-        ->goToNextWizardStep()
-        ->assertHasFormErrors(['box_sizes.0.code']);
-
-    expect(BoxSize::where('code', $code)->exists())->toBeFalse();
-})->with(['%12', '%b12']);
-
-it('accepts a box code that does not begin with the scan-code prefix', function (): void {
-    setupWizardStep(3);
-
-    Livewire::test(SetupWizard::class)
-        ->tap(fn ($component) => fillRequiredSetupWizardFields($component))
-        ->set('data.box_sizes', [setupWizardBoxSize('S12')])
+        ->set('data.box_sizes', [setupWizardBoxSize()])
         ->goToNextWizardStep()
         ->assertHasNoFormErrors()
         ->assertWizardCurrentStep(4);
 
-    expect(BoxSize::where('code', 'S12')->exists())->toBeTrue();
+    expect(BoxSize::where('label', 'Small')->exists())->toBeTrue();
 });
 
 it('prepopulates starter shipping methods when selected', function (): void {
@@ -236,11 +222,11 @@ it('does not repeat a box size when its step is saved again', function (): void 
         ->tap(fn ($component) => fillRequiredSetupWizardFields($component));
 
     foreach ([1, 2] as $pass) {
-        $component->set('data.box_sizes', [setupWizardBoxSize('S12')]);
+        $component->set('data.box_sizes', [setupWizardBoxSize()]);
         invokePrivateMethod($component->instance(), 'saveBoxSizes');
     }
 
-    expect(BoxSize::where('code', 'S12')->count())->toBe(1);
+    expect(BoxSize::where('label', 'Small')->count())->toBe(1);
     $component->assertSet('data.box_sizes', []);
 });
 
@@ -590,11 +576,10 @@ function setupWizardStep(int $step): void
 /**
  * @return array<string, mixed>
  */
-function setupWizardBoxSize(string $code): array
+function setupWizardBoxSize(): array
 {
     return [
         'label' => 'Small',
-        'code' => $code,
         'type' => 'BOX',
         'height' => 4,
         'width' => 6,

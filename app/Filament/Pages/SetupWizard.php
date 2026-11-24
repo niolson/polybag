@@ -6,7 +6,6 @@ use App\Enums\AmazonMarketplace;
 use App\Enums\BoxSizeType;
 use App\Enums\CarrierPackaging;
 use App\Enums\Role;
-use App\Filament\Resources\BoxSizeResource;
 use App\Filament\Resources\CarrierAccounts\CarrierAccountResource;
 use App\Filament\Resources\DataSources\DataSourceResource;
 use App\Filament\Support\AddressForm;
@@ -248,10 +247,6 @@ class SetupWizard extends Page
                         Forms\Components\TextInput::make('label')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\TextInput::make('code')
-                            ->required()
-                            ->maxLength(255)
-                            ->rule(BoxSizeResource::codeOutsideScanPrefix(...)),
                         Forms\Components\Select::make('type')
                             ->options(BoxSizeType::class)
                             ->required()
@@ -805,15 +800,14 @@ class SetupWizard extends Page
         $boxSizes = $data['box_sizes'] ?? [];
 
         // A step is saved each time Next is pressed, so going back and on again
-        // saves it again: keyed by code, a box is updated rather than repeated.
+        // saves it again: keyed by label, a box is updated rather than repeated.
         DB::transaction(function () use ($data, $boxSizes): void {
             if ($data['prepopulate_box_sizes'] ?? false) {
                 app(CommonBoxSizeSeeder::class)->run();
             }
 
             foreach ($boxSizes as $box) {
-                BoxSize::updateOrCreate(['code' => $box['code']], [
-                    'label' => $box['label'],
+                BoxSize::updateOrCreate(['label' => $box['label']], [
                     'type' => $box['type'],
                     'height' => $box['height'],
                     'width' => $box['width'],

@@ -42,6 +42,12 @@ begins with removes the collisions that the configurable prefix and the planned
 collision message (`scan-codes/03`) existed to manage. The previous
 shape is kept as option H.
 
+Amended 2026-11-24: Box Sizes no longer have an operator-chosen code. A box is scanned and
+typed only as `%B<id>`, which the box sheet prints as text beside its barcode. The alias
+was a second identity carried over from an older system. It could collide with a product
+barcode, which the Pack page settled by guessing from whether dimensions were set.
+Decisions 5 and 6 are revised to match.
+
 ## Context
 
 A station has one barcode scanner. It is a USB device in keyboard mode: it types what it
@@ -138,9 +144,9 @@ operators identify and handle â€” pick batches, totes, bins, staging positions â
 something starts printing them, not to every table.
 
 A Box Size's code identifies the warehouse's own box record; it is not a standard box.
-The operator's short code (`01`, `A1`) stays as an alias for typing. Only the alias can
-collide with a product barcode, and only the alias is subject to the Pack page's
-older rule for that collision (box while no dimensions are set, product after). A
+It is the box's only scannable identity: a packer without the sheet types `%B12`, and
+leading zeros are ignored. No other scan applies a box, so a box cannot be mistaken for
+a product (amended 2026-11-24; the operator's alias that preceded it is gone). A
 Product keeps its UPC and SKU; a Product token can follow if PolyBag ever prints its own
 product labels. Tracking numbers, UPCs, SKUs and order references stay external
 identifiers attached to records. They are never PolyBag's own identity.
@@ -195,7 +201,7 @@ In this first implementation:
 | Scan & Pack, packing | The same Shipment, or the draft being packed | Says it is already open |
 | | Any other Shipment or Package | Names it and says to clear the current Shipment first |
 | | Box Size | Applies that box |
-| | Box alias, product | As before |
+| | Product | As before |
 | Global search | Shipment or Package code | That record alone; Enter opens it |
 | | Any other PolyBag code, including commands | Nothing |
 | | Anything not beginning with `%` | Filament's search. Enter opens the result when there is exactly one |
@@ -257,11 +263,10 @@ reference on a slip), so a person can type it.
 
 ### 6. Operator-chosen codes may not begin with `%`
 
-A box alias beginning with `%` would be read as a PolyBag code and could never be scanned
-as a box. Box size validation rejects it, on the Box Size form and the Setup Wizard's box
-step (`scan-codes/02`). None of the seeded aliases does. Products are not validated: a
-SKU is imported, not chosen here, and one beginning with `%` is accepted as data even
-though it cannot be scanned (decision 2).
+Superseded 2026-11-24: box aliases, the only operator-chosen code, were removed, and their
+validation with them (`scan-codes/02`). Products are still not validated: a SKU is
+imported, not chosen here, and one beginning with `%` is accepted as data even though it
+cannot be scanned (decision 2).
 
 ## Foreseen, not decided
 
@@ -349,9 +354,8 @@ different Shipment, except after a restore (decision 5).
 - Scan & Pack no longer opens the first of several Shipments sharing a reference.
 - Global search resolves PolyBag codes exactly, and opens a single result on Enter.
 - Print Command Barcodes prints the new commands. Old `*` sheets must be reprinted.
-- Print Box Size Barcodes prints `%B<id>`, with the alias beside it. Box sheets printed
-  with aliases keep working.
-- Box size validation rejects aliases beginning with `%`.
+- Print Box Size Barcodes prints `%B<id>`, with the code as text beside it. Since
+  2026-11-24 box aliases are gone, and box sheets printed with them no longer work.
 - Station setup includes setting the scanner's keyboard country to the host's layout,
   and the self-hosting guide says so.
 - `SCAN_CODE_PREFIX` is removed, along with the self-hosting guide's instructions for
@@ -370,7 +374,7 @@ different Shipment, except after a restore (decision 5).
 5. Commands renamed, and Print Command Barcodes reprinted. The last Label is remembered
    by Label ID.
 6. Box Size codes on the Pack page and the box barcode sheet.
-7. Box alias validation (`scan-codes/02`).
+7. Box alias validation (`scan-codes/02`), removed with the aliases on 2026-11-24.
 8. Tracked in `docs/issues/archive/scan-codes/`: Box Size codes in global search (`04`)
    and the explicit external lookup (`01`) are `wontfix`; the collision message on failed
    scans (`03`) is superseded by the fixed prefix.

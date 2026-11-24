@@ -79,17 +79,17 @@ it('seeds the USPS packaging at the outside dimensions USPS publishes', function
 
     // Postal Store outside dimensions as length, width, height, rounded to the column's two decimals.
     $published = [
-        'USPS-01' => [12.5, 9.5, 0.5],
-        'USPS-02' => [15.0, 9.5, 0.5],
-        'USPS-03' => [12.5, 9.5, 0.5],
-        'USPS-04' => [8.69, 5.44, 1.75],
-        'USPS-05' => [11.25, 8.75, 6.0],
-        'USPS-06' => [14.13, 12.0, 3.5],
-        'USPS-07' => [12.25, 12.0, 6.0],
+        'USPS Flat Rate Envelope' => [12.5, 9.5, 0.5],
+        'USPS Legal Flat Rate Envelope' => [15.0, 9.5, 0.5],
+        'USPS Padded Flat Rate Envelope' => [12.5, 9.5, 0.5],
+        'USPS Small Flat Rate Box' => [8.69, 5.44, 1.75],
+        'USPS Medium Flat Rate Box (top-loading)' => [11.25, 8.75, 6.0],
+        'USPS Medium Flat Rate Box (side-loading)' => [14.13, 12.0, 3.5],
+        'USPS Large Flat Rate Box' => [12.25, 12.0, 6.0],
     ];
 
-    foreach ($published as $code => [$length, $width, $height]) {
-        $row = BoxSize::where('code', $code)->firstOrFail();
+    foreach ($published as $label => [$length, $width, $height]) {
+        $row = BoxSize::where('label', $label)->firstOrFail();
 
         expect((float) $row->length)->toBe($length, "{$row->label} length")
             ->and((float) $row->width)->toBe($width, "{$row->label} width")
@@ -139,11 +139,11 @@ it('stores every seeded size longest side first and names each in its stored ord
     }
 });
 
-it('gives every seeded box size its own code', function (): void {
+it('gives every seeded box size its own label', function (): void {
     $this->seed(CommonBoxSizeSeeder::class);
     $this->seed(CarrierPackagingSeeder::class);
 
-    expect(BoxSize::pluck('code')->unique()->count())->toBe(BoxSize::count())
+    expect(BoxSize::pluck('label')->unique()->count())->toBe(BoxSize::count())
         ->and(BoxSize::count())->toBe(13 + count(CarrierPackagingSeeder::PACKAGING));
 });
 
@@ -156,10 +156,9 @@ it('reseeds the common set without duplicating box sizes', function (): void {
     expect(BoxSize::count())->toBe($count);
 });
 
-it('leaves a box the operator already gave a seeded code unchanged', function (string $seeder, string $code): void {
+it('leaves a box the operator already gave a seeded label unchanged', function (string $seeder, string $label): void {
     $operatorBox = BoxSize::factory()->create([
-        'code' => $code,
-        'label' => 'Our shoebox',
+        'label' => $label,
         'type' => BoxSizeType::BOX,
         'length' => 14,
         'width' => 8,
@@ -171,11 +170,11 @@ it('leaves a box the operator already gave a seeded code unchanged', function (s
 
     $operatorBox->refresh();
 
-    expect($operatorBox->label)->toBe('Our shoebox')
-        ->and((float) $operatorBox->length)->toBe(14.0)
+    expect((float) $operatorBox->length)->toBe(14.0)
         ->and($operatorBox->active)->toBeTrue()
-        ->and(BoxSize::where('code', $code)->count())->toBe(1);
+        ->and($operatorBox->carrier_packaging)->toBeNull()
+        ->and(BoxSize::where('label', $label)->count())->toBe(1);
 })->with([
-    'common set' => [CommonBoxSizeSeeder::class, '01'],
-    'carrier packaging' => [CarrierPackagingSeeder::class, 'USPS-01'],
+    'common set' => [CommonBoxSizeSeeder::class, '6x4x4'],
+    'carrier packaging' => [CarrierPackagingSeeder::class, 'USPS Flat Rate Envelope'],
 ]);
