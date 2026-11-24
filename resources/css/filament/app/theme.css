@@ -435,3 +435,28 @@ body.fi-body.dark .fi-simple-layout::before {
 .fi-fo-file-upload .filepond--image-clip {
     transform: scale(0.8);
 }
+
+/* Table selection — the count and Select all / Deselect all links sit in the
+ * header toolbar (filament/table-selection-summary), so the stock indicator row,
+ * which pushes the records down when it appears, is hidden. Outside @layer so it
+ * wins over Filament's unlayered table CSS. */
+.fi-ta-selection-indicator {
+    display: none !important;
+}
+
+.pb-ta-selection-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+}
+
+.pb-ta-selection-summary-count {
+    font-weight: 500;
+    color: var(--gray-700);
+}
+
+.dark .pb-ta-selection-summary-count {
+    color: var(--gray-200);
+}
