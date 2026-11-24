@@ -752,7 +752,7 @@ class Package extends Model
      * @param  int|null  $carrierServiceId  The catalog service the Label was bought as, from the server's copy of the rate. Recorded on the Label only. Null for a blind purchase: what Shopify was asked for stays the requested preference (ADR-0003 decision 7), and an inferred service resolves through the ruleset here instead.
      * @param  bool  $announce  Whether to dispatch {@see PackageShipped}, which queues the channel export. False only for a label recorded to be voided at once: the package is then also held from every other export path until {@see releaseForExport()}.
      * @param  array<string, mixed>|null  $customsTerms  What the Label declared (`CustomsTermsSnapshot`), recorded on the Label only; null when nothing was declared or the adapter does not send customs terms
-     * @param  int|null  $rateQuoteId  The logged quote the Label was bought from, through its Offer; null for a blind purchase, which logs no quote. Recorded on the Label only, for Rate Comparison
+     * @param  int|null  $rateQuoteId  The logged quote the Label was bought from, through its Offer; null for a blind purchase, which logs no quote. Recorded on the Label only, for analytics over the quote log
      *
      * @throws \InvalidArgumentException If the postage source and the response's pointers disagree
      * @throws \RuntimeException If the package state changed (optimistic locking)

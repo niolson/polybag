@@ -2,8 +2,15 @@
 
 use App\Enums\Role;
 use App\Filament\Pages\Reports\VolumeReport;
+use App\Filament\Resources\PackageResource;
+use App\Filament\Resources\PackageResource\Pages\ListPackages;
+use App\Filament\Support\LocalDateRange;
+use App\Models\Carrier;
+use App\Models\Channel;
 use App\Models\DailyShippingStat;
+use App\Models\Location;
 use App\Models\Package;
+use App\Models\Shipment;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Livewire\Livewire;
@@ -160,4 +167,118 @@ it('labels weeks by their dates and marks the current one as in progress', funct
         ->assertSee($label)
         ->assertDontSee('-W')
         ->assertSee('In progress, not a full week');
+});
+
+/**
+ * The mounted report page, typed, for calling its export directly.
+ */
+function volumeReportPage(?string $groupBy = null): VolumeReport
+{
+    $test = Livewire::test(VolumeReport::class);
+
+    if ($groupBy !== null) {
+        $test->set('groupBy', $groupBy);
+    }
+
+    $page = $test->instance();
+
+    if (! $page instanceof VolumeReport) {
+        throw new LogicException('Livewire mounted something other than the report.');
+    }
+
+    return $page;
+}
+
+it('groups by carrier under its display name', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    Carrier::query()->updateOrCreate(['name' => 'USPS'], ['display_name' => 'Postal Service']);
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'USPS', 'package_count' => 3, 'costed_package_count' => 3, 'total_cost' => 30, 'total_weight' => 6]);
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'FedEx', 'package_count' => 1, 'costed_package_count' => 1, 'total_cost' => 20, 'total_weight' => 1]);
+
+    Livewire::test(VolumeReport::class)
+        ->set('groupBy', 'carrier')
+        ->assertSee('Postal Service')
+        ->assertSee('FedEx')
+        ->assertSeeInOrder(['Postal Service', '75.0%', '2.00 lb', 'FedEx', '25.0%', '1.00 lb']);
+});
+
+it('narrows to one location when several are in use', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    config()->set('features.multi_location_enabled', true);
+    [$east, $west] = Location::factory()->count(2)->create();
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'USPS', 'location_id' => $east->id, 'package_count' => 7, 'costed_package_count' => 7, 'total_cost' => 70, 'total_weight' => 7]);
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'UPS', 'location_id' => $west->id, 'package_count' => 5, 'costed_package_count' => 5, 'total_cost' => 50, 'total_weight' => 5]);
+
+    Livewire::test(VolumeReport::class)
+        ->set('groupBy', 'carrier')
+        ->filterTable('location', $east->id)
+        ->assertSee('USPS')
+        ->assertDontSee('UPS')
+        ->assertSee('100.0%');
+});
+
+it('links a row to the Packages list showing exactly the packages it counts', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $channel = Channel::factory()->create();
+    $shipment = fn (): int => Shipment::factory()->create(['channel_id' => $channel->id])->id;
+    $counted = Package::factory()->shipped()->create(['shipment_id' => $shipment(), 'ship_date' => today()->subDays(3), 'shipped_at' => now()->subDays(3)]);
+    $outOfRange = Package::factory()->shipped()->create(['shipment_id' => $shipment(), 'ship_date' => today()->subDays(40), 'shipped_at' => now()->subDays(40)]);
+    $otherChannel = Package::factory()->shipped()->create(['ship_date' => today()->subDays(3), 'shipped_at' => now()->subDays(3)]);
+    $this->artisan('stats:aggregate', ['--days' => 60]);
+
+    $page = volumeReportPage();
+    $record = $page->getFilteredSortedTableQuery()->get()->firstWhere('group_name', $channel->name);
+    $url = (fn (): ?string => $this->buildDrillDownUrl($record))->call($page);
+
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+    expect($url)->toStartWith(PackageResource::getUrl('index'))
+        ->and($query['filters']['channel']['value'])->toBe((string) $channel->id)
+        ->and($query['filters']['ship_date']['ship_date_from'])->toBe(LocalDateRange::now()->subDays(30)->format('Y-m-d'))
+        ->and($query['filters']['status']['value'])->toBe('shipped');
+
+    Livewire::withQueryParams(['filters' => $query['filters']])
+        ->test(ListPackages::class)
+        ->assertCanSeeTableRecords([$counted])
+        ->assertCanNotSeeTableRecords([$outOfRange, $otherChannel]);
+});
+
+it('limits a week row link to the part of the week inside the range', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    DailyShippingStat::create(['date' => '2026-09-30', 'package_count' => 2, 'costed_package_count' => 2, 'total_cost' => 20, 'total_weight' => 2]);
+
+    $test = Livewire::test(VolumeReport::class)
+        ->set('groupBy', 'week')
+        ->filterTable('date_range', ['from' => '2026-09-30', 'until' => '2026-10-31']);
+    $page = $test->instance();
+    assert($page instanceof VolumeReport);
+    $record = $page->getFilteredSortedTableQuery()->get()->first();
+    $url = (fn (): ?string => $this->buildDrillDownUrl($record))->call($page);
+    parse_str((string) parse_url($url, PHP_URL_QUERY), $query);
+
+    // The week of Monday September 28, cut at the report's first day.
+    expect($query['filters']['ship_date'])->toBe(['ship_date_from' => '2026-09-30', 'ship_date_until' => '2026-10-04']);
+});
+
+it('gives no link to a row with nothing to filter by', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    DailyShippingStat::create(['date' => today()->toDateString(), 'channel_id' => null, 'package_count' => 1, 'costed_package_count' => 1, 'total_cost' => 5, 'total_weight' => 1]);
+
+    $page = volumeReportPage();
+    $record = $page->getFilteredSortedTableQuery()->get()->first();
+
+    expect((fn (): ?string => $this->buildDrillDownUrl($record))->call($page))->toBeNull();
+});
+
+it('exports the rows it shows', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'USPS', 'package_count' => 4, 'costed_package_count' => 3, 'total_cost' => 30, 'total_weight' => 10]);
+
+    $response = volumeReportPage('carrier')->exportCsv();
+    ob_start();
+    $response->sendContent();
+    $lines = array_map(str_getcsv(...), array_filter(explode("\n", (string) ob_get_clean())));
+
+    expect($lines[0])->toBe(['Carrier', 'Packages', 'Share', 'Total Cost', 'Unpriced Packages', 'Avg Cost', 'Avg Weight (lb)'])
+        ->and($lines[1])->toBe(['USPS', '4', '100.0%', '30.00', '1', '10.00', '2.50']);
 });

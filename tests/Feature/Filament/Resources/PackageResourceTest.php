@@ -11,6 +11,7 @@ use App\DataTransferObjects\Shipping\ShipRequest;
 use App\DataTransferObjects\Shipping\ShipResponse;
 use App\DataTransferObjects\Tracking\TrackShipmentResponse;
 use App\Enums\CustomsDocumentDelivery;
+use App\Enums\Deliverability;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
 use App\Enums\Role;
@@ -18,9 +19,11 @@ use App\Enums\ServiceCapability;
 use App\Enums\VoidReason;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
+use App\Models\Channel;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\Shipment;
+use App\Models\ShippingMethod;
 use App\Models\User;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\Concerns\ConsultsCarrierPolicyForOffers;
@@ -412,4 +415,57 @@ it('labels an Amazon Buy Shipping package on the view page without the Shopify n
         ->assertSee('Carrier (via Amazon Buy Shipping)')
         ->assertDontSee('chosen by Shopify')
         ->assertDontSee('Bought through Shopify Shipping');
+});
+
+it('filters by the label ship date, inclusive at both ends', function (): void {
+    $before = Package::factory()->shipped()->create(['ship_date' => '2026-09-29']);
+    $first = Package::factory()->shipped()->create(['ship_date' => '2026-09-30']);
+    $last = Package::factory()->shipped()->create(['ship_date' => '2026-10-02']);
+    $after = Package::factory()->shipped()->create(['ship_date' => '2026-10-03']);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('ship_date', ['ship_date_from' => '2026-09-30', 'ship_date_until' => '2026-10-02'])
+        ->assertCanSeeTableRecords([$first, $last])
+        ->assertCanNotSeeTableRecords([$before, $after]);
+});
+
+it('filters by the shipment channel and shipping method', function (): void {
+    $channel = Channel::factory()->create();
+    $method = ShippingMethod::factory()->create();
+    $matching = Package::factory()->shipped()->create([
+        'shipment_id' => Shipment::factory()->create(['channel_id' => $channel->id, 'shipping_method_id' => $method->id])->id,
+    ]);
+    $other = Package::factory()->shipped()->create();
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('channel', $channel->id)
+        ->assertCanSeeTableRecords([$matching])
+        ->assertCanNotSeeTableRecords([$other])
+        ->resetTableFilters()
+        ->filterTable('shipping_method', $method->id)
+        ->assertCanSeeTableRecords([$matching])
+        ->assertCanNotSeeTableRecords([$other]);
+});
+
+it('lists only packages whose weight disagreed with the catalog', function (): void {
+    $mismatched = Package::factory()->shipped()->create(['weight_mismatch' => true]);
+    $matched = Package::factory()->shipped()->create(['weight_mismatch' => false]);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('weight_mismatch')
+        ->assertCanSeeTableRecords([$mismatched])
+        ->assertCanNotSeeTableRecords([$matched]);
+});
+
+it('lists only packages whose address was not confirmed', function (): void {
+    $packages = collect(Deliverability::cases())->mapWithKeys(fn (Deliverability $deliverability): array => [
+        $deliverability->value => Package::factory()->shipped()->create([
+            'shipment_id' => Shipment::factory()->create(['deliverability' => $deliverability])->id,
+        ]),
+    ]);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('address_not_confirmed')
+        ->assertCanNotSeeTableRecords([$packages['yes'], $packages['verified']])
+        ->assertCanSeeTableRecords([$packages['partial'], $packages['unverified'], $packages['no'], $packages['not_checked']]);
 });

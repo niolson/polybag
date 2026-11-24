@@ -433,54 +433,6 @@ parameters:
 			path: app/Filament/Pages/Reports/ClientBillingReport.php
 
 		-
-			message: '#^Using nullsafe property access "\?\-\>weight" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
-			identifier: nullsafe.neverNull
-			count: 1
-			path: app/Filament/Pages/Reports/PackingValidationReport.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\Package\:\:\$cheapest_carrier\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Pages/Reports/RateComparison.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\Package\:\:\$cheapest_price\.$#'
-			identifier: property.notFound
-			count: 3
-			path: app/Filament/Pages/Reports/RateComparison.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\Package\:\:\$selected_carrier\.$#'
-			identifier: property.notFound
-			count: 1
-			path: app/Filament/Pages/Reports/RateComparison.php
-
-		-
-			message: '#^Access to an undefined property App\\Models\\Package\:\:\$selected_price\.$#'
-			identifier: property.notFound
-			count: 3
-			path: app/Filament/Pages/Reports/RateComparison.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$group_id\.$#'
-			identifier: property.notFound
-			count: 2
-			path: app/Filament/Pages/Reports/VolumeReport.php
-
-		-
-			message: '#^Access to an undefined property Illuminate\\Database\\Eloquent\\Model\:\:\$group_name\.$#'
-			identifier: property.notFound
-			count: 4
-			path: app/Filament/Pages/Reports/VolumeReport.php
-
-		-
-			message: '#^Match expression does not handle remaining value\: string$#'
-			identifier: match.unhandled
-			count: 1
-			path: app/Filament/Pages/Reports/VolumeReport.php
-
-		-
 			message: '#^Using nullsafe property access "\?\-\>name" on left side of \?\? is unnecessary\. Use \-\> instead\.$#'
 			identifier: nullsafe.neverNull
 			count: 1
@@ -1362,18 +1314,6 @@ parameters:
 			identifier: argument.type
 			count: 10
 			path: tests/Feature/Pages/Reports/ClientBillingReportTest.php
-
-		-
-			message: '#^Call to an undefined method Livewire\\Component\:\:getBatchFailureCount\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: tests/Feature/Pages/Reports/PackingValidationReportTest.php
-
-		-
-			message: '#^Call to an undefined method Livewire\\Component\:\:getTotalPotentialSavings\(\)\.$#'
-			identifier: method.notFound
-			count: 1
-			path: tests/Feature/Pages/Reports/RateComparisonTest.php
 
 		-
 			message: '#^Access to an undefined property App\\Contracts\\DataSourceInterface\:\:\$exportedReferences\.$#'

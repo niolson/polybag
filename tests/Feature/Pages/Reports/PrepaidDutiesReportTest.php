@@ -2,6 +2,7 @@
 
 use App\Enums\Role;
 use App\Filament\Pages\Reports\PrepaidDutiesReport;
+use App\Models\Client;
 use App\Models\Package;
 use App\Models\PackageLabel;
 use App\Models\Shipment;
@@ -160,11 +161,34 @@ it('sorts by ship date', function (): void {
 });
 
 it('restricts access to managers and above', function (): void {
+    ddpLabel();
     $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(PrepaidDutiesReport::canAccess())->toBeFalse();
 
     $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    expect(PrepaidDutiesReport::canAccess())->toBeTrue();
+});
+
+it('is hidden on an install that never ships DDP', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    Client::factory()->create(['duties_policy' => ['EU' => 'ddu']]);
+    PackageLabel::factory()->active()->create(['customs_terms' => ['duties_terms' => 'ddu']]);
+
+    expect(PrepaidDutiesReport::canAccess())->toBeFalse();
+});
+
+it('appears once a client policy names DDP, before any DDP label exists', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    Client::factory()->create(['duties_policy' => ['EU' => 'ddu', 'CA' => 'ddp']]);
+
+    expect(PrepaidDutiesReport::canAccess())->toBeTrue();
+});
+
+it('appears once a DDP label exists, whatever the client policies say', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    ddpLabel();
 
     expect(PrepaidDutiesReport::canAccess())->toBeTrue();
 });
