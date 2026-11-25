@@ -104,17 +104,24 @@ class VolumeReport extends Page implements HasTable
             $this->groupBy = 'channel';
         }
 
+        // Each grouping opens on its own range: a year of months, about a
+        // quarter of weeks, a month of anything else.
+        $this->tableFilters['date_range'] = ['from' => $this->defaultFrom(), 'until' => null];
+
         $this->resetTable();
     }
 
-    public function table(Table $table): Table
+    private function defaultFrom(): string
     {
-        $defaultFrom = match ($this->groupBy) {
+        return match ($this->groupBy) {
             'month' => LocalDateRange::now()->subYear()->format('Y-m-d'),
             'week' => LocalDateRange::now()->subDays(90)->format('Y-m-d'),
             default => LocalDateRange::now()->subDays(30)->format('Y-m-d'),
         };
+    }
 
+    public function table(Table $table): Table
+    {
         return $table
             ->query($this->groupedQuery())
             ->defaultSort($this->isPeriodGrouping() ? 'group_name' : 'package_count', 'desc')
@@ -157,7 +164,7 @@ class VolumeReport extends Page implements HasTable
                 Tables\Filters\Filter::make('date_range')
                     ->form([
                         DatePicker::make('from')
-                            ->default($defaultFrom),
+                            ->default($this->defaultFrom()),
                         DatePicker::make('until'),
                     ])
                     ->columns(2)

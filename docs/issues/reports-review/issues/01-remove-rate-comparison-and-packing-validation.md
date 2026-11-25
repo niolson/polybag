@@ -35,3 +35,4 @@ tested both ways.
 ## Comments
 
 - 2026-11-24 — Done. Both pages, views and tests deleted; `rate_quotes` and `RateQuoteLogger` kept for `09`. The Packages list gained Weight Mismatch and Address Not Confirmed filters. `PrepaidDutiesReport::ddpInUse()` gates the page on a Client policy naming DDP or a DDP Label, cached five minutes because the Label check reads unindexed JSON. Tests in `PackageResourceTest` and `PrepaidDutiesReportTest`.
+- 2026-11-25 — Review fixes. A Client whose duties policy changes forgets the cached Prepaid Duties gate (`PrepaidDutiesReport::forgetDdpInUse()`), so the page shows without waiting out the five minutes. The Packages list keeps a purchase-day filter (Bought From/Until, local days via `LocalDateRange`) beside Ship Date, which is the day the Label is dated for.

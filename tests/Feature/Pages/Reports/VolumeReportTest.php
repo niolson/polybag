@@ -353,3 +353,12 @@ it('groups by client and narrows to one', function (): void {
 
     expect($page->getFilteredSortedTableQuery()->get()->pluck('group_name')->all())->toBe([$theirs->name]);
 });
+
+it('moves to the range of the grouping chosen', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    Livewire::test(VolumeReport::class)
+        ->assertSet('tableFilters.date_range.from', LocalDateRange::now()->subDays(30)->format('Y-m-d'))
+        ->set('groupBy', 'month')
+        ->assertSet('tableFilters.date_range.from', LocalDateRange::now()->subYear()->format('Y-m-d'));
+});
