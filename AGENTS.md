@@ -55,7 +55,7 @@ docker compose --profile standalone -f docker-compose.yml -f docker-compose.onpr
 | Service | Does |
 |---|---|
 | `app` | PHP 8.4-FPM. Entrypoint: wait for DB → migrate → sync reference data → attempt table encryption → optimize → php-fpm |
-| `nginx` | Serves static assets, proxies PHP to `app:9000` |
+| `nginx` | Serves static assets, proxies PHP to `app:9000`. `docker/nginx.conf` gzips static assets and HTML/Livewire responses and logs request timings |
 | `queue` | `queue:work --queue=default,low` with its own config cache |
 | `import-queue` | `queue:work imports` — shipment imports, and product catalog syncs (and Amazon's catalog look-up after one) in one-minute slices that take turns with them, run on their own queue |
 | `label-queue` | `queue:work --queue=labels` — Batch Ship's label purchases, `LABEL_WORKERS` processes (default 2) |
@@ -100,7 +100,9 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
 - **PackageLabel** / **Label** — One purchased outbound-postage instance. A Package has at
   most one active Label; voided Labels remain as history and the Package becomes unshipped
 - **ShippingMethod** — A service class, such as Ground, which one or more concrete
-  `CarrierService` records can satisfy
+  `CarrierService` records can satisfy. With a due-by date, automation ranks on-time rates
+  first; `excludes_late_rates` only decides what happens when no rate arrives on time
+  (hold for a person, or buy the cheapest late rate)
 - **ShippingOffer** / **Offer** — Ephemeral, package-bound purchase authority for a quoted
   rate. Its opaque public ID may cross browser state; purchase tokens and source identity do not
 - **Carrier** / **CarrierService** — Authored carrier and service catalog used for policy and
@@ -116,8 +118,9 @@ Server-operations tooling for our own hosted deployment lives in a separate priv
 - **CarrierAccount** — Per-carrier API credentials; supports multiple accounts per carrier with OAuth
 - **CarrierAccountScope** — Routes a `CarrierAccount`, or an Amazon Shipping connection
   account, to a `Location` and/or `Client` combination with priority-based resolution
-- **BoxSize** — Scannable dimensions plus physical form and optional carrier-supplied
-  packaging identity; compatible packaging is enforced while rating and buying. An
+- **BoxSize** — Dimensions plus physical form and optional carrier-supplied packaging
+  identity; compatible packaging is enforced while rating and buying. It is scanned only
+  by its `%B` PolyBag code: there is no free-text box code. An
   inactive one stays in the catalog, off the barcode sheet, Pack lookup and pickers;
   carrier packaging is seeded inactive by the reference-data sync
 - **Channel** — Sales channel source (Shopify, Amazon, database import)
@@ -155,7 +158,7 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
 
 1. **Picking** (`/pick-batches`) — Optional; generate pick batches (the Generate Pick Batch button on that list, `/generate-pick-batch`) and print picking summaries before packing. Gated by `picking_enabled`. Picking never blocks
    packing or shipping: a Shipment fully shipped while in an open pick batch leaves the batch
-2. **Packing** (`/pack/{shipment_id}`) — Scan box code, scan items, read weight from scale;
+2. **Packing** (`/pack/{shipment_id}`) — Scan the box's `%B` code, scan items, read weight from scale;
    save progress as a resumable Package Draft. Opening the page alone creates no draft.
    Purchase requires positive weight/dimensions and complete items when validation is on
 3. **Shipping** (`/ship/{package_id}`) — Resolve eligible direct and channel postage
@@ -174,6 +177,11 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
    Shipment-level receipts track the rendered item version and print acknowledgment.
    Changed items make a printed slip out of date. Turning off `pack_slips_enabled` hides these flows;
    a Shipment in an in-progress pick batch prints with its batch, not from the queue
+9. **Reports** (Manager and up) — Volume, Fulfillment Speed, Delivery Performance, Packages
+   by User, Voided Labels, Client Billing (multi-client only; bills prepaid duties on DDP
+   Labels), and Prepaid Duties (only while DDP is in use). Volume reads the
+   `daily_shipping_stats` rollup, keyed by client and catalog service and rebuilt by
+   `stats:aggregate`
 
 ## Hardware Integration
 
@@ -226,6 +234,11 @@ Preserve these domain terms in code and prose — see `CONTEXT.md`. In particula
   Tracking comes through Shopify; Labels must be voided in the Shopify admin and are then
   reconciled by the fulfillment synchronizer
 
+Direct carrier adapters declare street-line and city limits through
+`LimitsAddressFieldLengths`. An over-limit field is refused with `AddressFieldTooLong`
+(the carrier is left out of rating with that reason, and purchase checks again) rather than
+truncated; only names are still cut to length.
+
 Carrier and source adapters live in `app/Services/Carriers/`. Direct accounts resolve through
 `CarrierAccount::resolveForShipment()` using the Package's `location_id` and Shipment's
 `client_id`; Shopify and Amazon marketplace postage bind to the Shipment's originating
@@ -259,7 +272,9 @@ missing. Keep service inference separate from a source-confirmed service and cat
   route by destination and eligible accounts: FedEx where appropriate, USPS, and optional
   Google. An implemented UPS validator is not part of the default plan. Validator answers
   and attempts are recorded separately; unavailable validators are not proof of an
-  undeliverable address.
+  undeliverable address. A chain that an unavailable validator left unfinished ends
+  Incomplete: the Shipment returns to unvalidated and a scheduled run resumes the chain
+  without re-asking validators that already answered for the current address.
 
 ## Data Import / Export
 
@@ -272,6 +287,11 @@ written a page at a time, so its memory does not grow with the store; Amazon and
 Database sources still return their whole read from `fetchShipments()`. Shopify
 imports fulfillment orders incrementally; Amazon imports merchant-fulfilled orders.
 Both populate `ship_by` from their source's dispatch deadline; database imports can map it.
+
+An imported shipping-method or channel reference is the source's own code and resolves
+through aliases only, never as a PolyBag ID; unresolved references appear on the Unmapped
+pages for mapping. Shopify and Amazon connections store real IDs for their channel and
+default shipping method and use an explicit ID lookup for those.
 
 A source whose feed holds only open orders implements `ClosesRecordsClosedAtSource`: after the writes, the import looks up the open Shipments that left the feed and closes those the source closed, through `SourceClosureApplier`. Shopify does (`order-reconciliation/06`), and so does Amazon, whose import asks for every order updated since it last read through (`import_updated_through`), closed ones included, so the same search imports and closes (`07`). A Database source with a status query asks it about each of its open Shipments after the run (`08`). A Shipment a manager reopened is never closed this way.
 
@@ -325,7 +345,8 @@ php artisan app:generate-qz-cert              # Generate QZ Tray certificate (in
 php artisan app:generate-qz-cert example.com  # Non-interactive with domain
 php artisan app:create-user                   # Create admin user
 php artisan app:generate-ssh-key              # Keypair for import tunneling
-php artisan demo:reset                        # Reset demo data (APP_ENV demo/local/testing only)
+php artisan demo:provision                    # [Internal] Set up a demo tenant (users, sandbox accounts, catalog)
+php artisan demo:reset                        # [Internal] Reset demo data (APP_ENV demo/local/testing only)
 ```
 
 `composer run setup` is for initial setup and generates a new `APP_KEY`; do not use it
@@ -478,23 +499,24 @@ The package versions below reflect the lockfiles. Check `composer.lock` and
 when dependencies change.
 
 - php - 8.4
-- filament/filament (FILAMENT) - v5.11.2
-- laravel/framework (LARAVEL) - v13.42.0
+- filament/filament (FILAMENT) - v5.11.4
+- laravel/framework (LARAVEL) - v13.43.0
 - laravel/prompts (PROMPTS) - v0.3.27
-- laravel/scout (SCOUT) - v11.9.0
+- laravel/scout (SCOUT) - v11.10.0
 - laravel/socialite (SOCIALITE) - v5.32.0
 - livewire/livewire (LIVEWIRE) - v4.4.8
 - larastan/larastan (LARASTAN) - v3.10.0
-- laravel/boost (BOOST) - v2.4.13
-- laravel/mcp (MCP) - v0.9.1
-- laravel/pail (PAIL) - v1.2.7
+- laravel/boost (BOOST) - v2.10.4
+- laravel/mcp (MCP) - v1.2.1
+- laravel/pail (PAIL) - v1.3.0
 - laravel/pint (PINT) - v1.32.1
 - laravel/sail (SAIL) - v1.70.0
 - pestphp/pest (PEST) - v4.7.5
 - phpunit/phpunit (PHPUNIT) - v12.5.30
-- rector/rector (RECTOR) - v2.8.4
+- rector/rector (RECTOR) - v2.8.5
 - saloonphp/laravel-plugin (SALOON_LARAVEL) - v5.0.1
 - saloonphp/saloon (SALOON) - v4.5.2
+- guzzlehttp/guzzle (GUZZLE) - v8.5.2
 - tailwindcss (TAILWINDCSS) - v4.3.5
 
 ## Conventions
