@@ -44,7 +44,7 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 - Multi-location carrier-account routing
 - Optional multi-client / 3PL scoping and pack-slip branding
 - Product weights, special services, and hazmat metadata
-- Shipping volume, fulfillment speed, delivery performance, packer, client billing, and prepaid-duties reports
+- Shipping volume, fulfillment speed, delivery performance, packer, client billing, prepaid-duties, and voided-label reports
 - Tracking exception monitoring, audit logs, and configurable data retention
 - Packer, Manager, and Admin roles with optional MFA and Google or Entra SSO
 
