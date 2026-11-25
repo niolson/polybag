@@ -51,3 +51,4 @@ Verified: plausible. Line numbers are at `12592f33`; this area is unchanged on `
   table's bounds, so a cleared date is no bound. Tests in `ClientBillingReportTest`.
   "Shipments by User counts Packages" is relabeled as Packages by `49`. The rest is
   untouched.
+- 2026-11-25 — `reports-review` settled the rest: the Volume drill-downs, the user report's name grouping and week numbering (`02`, `03`), the rollup's `client_id` and a Volume client filter (`04`), and duties are now billed (`05`). The live billing-rates finding is still open.

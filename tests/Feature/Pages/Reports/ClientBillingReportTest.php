@@ -5,6 +5,7 @@ use App\Filament\Pages\Reports\ClientBillingReport;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\ShipmentItem;
 use App\Models\User;
@@ -554,7 +555,7 @@ it('exports the later package on its own detail line, without the shipment fees'
     expect($lines)->toHaveCount(2)
         ->and(str_getcsv($lines[1]))->toBe([
             Shipment::where('client_id', $client->id)->sole()->shipment_reference,
-            '2026-10-02 11:00:00', '1', '9.00', '0', '1.00', '0.00', '0.00', '0.00', '0.00', '', '10.00',
+            '2026-10-02 11:00:00', '1', '9.00', '0', '0.00', '0', '1.00', '0.00', '0.00', '0.00', '0.00', '', '10.00',
         ]);
 });
 
@@ -626,4 +627,69 @@ it('defaults to last month by the local calendar, not the UTC one', function ():
 
     expect(ClientBillingReport::defaultFrom())->toBe('2026-09-01')
         ->and(ClientBillingReport::defaultUntil())->toBe('2026-09-30');
+});
+
+/**
+ * A client whose one shipment last month shipped on a DDP Label.
+ *
+ * @param  array<string, mixed>  $label
+ */
+function clientWithDdpPackage(array $label, bool $voidAndRebuy = false): Client
+{
+    $client = Client::factory()->create(['is_default' => false, 'label_fee_per_package' => 0, 'pick_fee_first_item' => 0, 'pick_fee_additional_item' => 0]);
+    $package = Package::factory()->shipped()->create([
+        'shipment_id' => Shipment::factory()->create(['client_id' => $client->id])->id,
+        'cost' => 20.00,
+        'shipped_at' => lastMonth(),
+    ]);
+
+    $active = PackageLabel::query()->where('package_id', $package->id)->whereNull('voided_at')->sole();
+    $active->update($label + ['customs_terms' => ['duties_terms' => 'ddp', 'registration' => null]]);
+
+    if ($voidAndRebuy) {
+        // The voided Label keeps its duties as history; the one bought after it has none.
+        $active->update(['voided_at' => now()]);
+        PackageLabel::factory()->active()->create(['package_id' => $package->id, 'cost' => 20.00, 'customs_terms' => ['duties_terms' => 'ddu']]);
+    }
+
+    return $client;
+}
+
+it('bills the prepaid duties on a DDP label with the package', function (): void {
+    $client = clientWithDdpPackage(['duties_cost' => 31.50]);
+
+    $row = billingRow(reportOf(Livewire::test(ClientBillingReport::class)), $client->id);
+
+    expect((float) $row->total_duties)->toBe(31.50)
+        ->and((int) $row->unrecorded_duties_count)->toBe(0)
+        ->and(round((float) $row->total_billable, 2))->toBe(51.50);
+});
+
+it('does not bill the duties of a voided label', function (): void {
+    $client = clientWithDdpPackage(['duties_cost' => 31.50], voidAndRebuy: true);
+
+    $row = billingRow(reportOf(Livewire::test(ClientBillingReport::class)), $client->id);
+
+    expect((float) $row->total_duties)->toBe(0.0)
+        ->and(round((float) $row->total_billable, 2))->toBe(20.00);
+});
+
+it('flags a DDP label with no duties recorded rather than billing it silently', function (): void {
+    $client = clientWithDdpPackage(['duties_cost' => null]);
+
+    Livewire::test(ClientBillingReport::class)
+        ->assertSee('1 DDP label with no duties recorded');
+
+    Livewire::test(ClientBillingReport::class)
+        ->set('viewMode', 'detail')
+        ->set('clientId', $client->id)
+        ->assertSee('Duties not recorded');
+
+    ob_start();
+    reportOf(Livewire::test(ClientBillingReport::class))->exportCsv()->sendContent();
+    $lines = array_map(str_getcsv(...), explode("\n", trim((string) ob_get_clean())));
+    $columns = array_combine($lines[0], $lines[1]);
+
+    expect($columns['Duties'])->toBe('0.00')
+        ->and($columns['Unrecorded Duties'])->toBe('1');
 });
