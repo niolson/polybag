@@ -9,6 +9,7 @@ use App\Filament\Concerns\DescribesReportRange;
 use App\Filament\Resources\ShipmentResource;
 use App\Filament\Support\LocalDateRange;
 use App\Models\Client;
+use App\Models\Location;
 use App\Models\Shipment;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -32,13 +33,17 @@ use UnitEnum;
  * How quickly imported orders leave, and whether they leave by their ship-by
  * date (`reports-review/06`).
  *
- * An order counts in the period its first package shipped. Its time to ship
- * runs from when PolyBag imported it, `shipments.created_at`, not when the
- * customer placed it, which no source reports consistently. Manual Ship
- * orders are left out: they are created at the bench and ship minutes later.
- * On time means the first package's ship date, the Location's calendar day,
+ * An order counts on the local day its first Label was bought. Its time to
+ * ship runs from when PolyBag received it, `shipments.created_at`: the import
+ * for an imported order, not when the customer placed it, which no source
+ * reports consistently. The Orders filter keeps imported orders apart from
+ * those created in PolyBag, by default showing only imported ones, since a
+ * Manual Ship order is made at the bench and ships minutes later. On time
+ * means the first package's ship date, the day its Label is dated to leave,
  * is on or before `ship_by`; an order with no ship-by is in the counts and
- * times but not in the on-time rate.
+ * times but not in the on-time rate. The two firsts are taken separately, so
+ * across Locations with different cutoffs the ship date can belong to a
+ * different package than the purchase time; that is rare and left as it is.
  *
  * Medians and percentiles are not portable SQL, so the page reads one row per
  * order shipped in range and groups them here.
@@ -62,6 +67,18 @@ class FulfillmentSpeedReport extends Page implements HasTable
     ];
 
     private const PERIODS = ['day', 'week', 'month'];
+
+    /** Orders a Connection imported. */
+    public const IMPORTED = 'imported';
+
+    /**
+     * Orders created in PolyBag: on the New Shipment form, or by Manual Ship.
+     * Nothing on a Shipment says which, and a Manual Ship order ships minutes
+     * after it is made, so these are kept apart from imported ones.
+     */
+    public const CREATED_IN_POLYBAG = 'created';
+
+    public const ALL_ORDERS = 'all';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-bolt';
 
@@ -123,6 +140,15 @@ class FulfillmentSpeedReport extends Page implements HasTable
                 ])
                 ->columns(2)
                 ->default(),
+            Tables\Filters\SelectFilter::make('origin')
+                ->label('Orders')
+                ->options([
+                    self::IMPORTED => 'Imported',
+                    self::CREATED_IN_POLYBAG => 'Created in PolyBag',
+                    self::ALL_ORDERS => 'All',
+                ])
+                ->default(self::IMPORTED)
+                ->selectablePlaceholder(false),
             Tables\Filters\SelectFilter::make('client')
                 ->label('Client')
                 ->options(fn (): array => Client::query()->orderBy('name')->pluck('name', 'id')->all())
@@ -173,8 +199,9 @@ class FulfillmentSpeedReport extends Page implements HasTable
             ])
             ->filters($filters, layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
-            ->filtersFormColumns(3)
-            ->emptyStateHeading('No imported orders shipped in this range');
+            ->filtersFormColumns(4)
+            ->emptyStateHeading(fn (): string => $this->dateRange()['from'] === null ? 'Choose a From date' : 'No orders shipped in this range')
+            ->emptyStateDescription(fn (): ?string => $this->dateRange()['from'] === null ? 'The report reads every order in its range, so it needs a first day.' : null);
     }
 
     protected function getHeaderActions(): array
@@ -194,7 +221,7 @@ class FulfillmentSpeedReport extends Page implements HasTable
     public function exportCsv(): StreamedResponse
     {
         $rows = $this->sortedRows($this->getTableSortColumn(), $this->getTableSortDirection());
-        $heading = $this->isPeriodGrouping() ? 'Period' : self::GROUPINGS[$this->groupBy];
+        $heading = $this->isPeriodGrouping() ? 'Period Starting' : self::GROUPINGS[$this->groupBy];
         $filename = 'fulfillment-speed-by-'.$this->groupBy.'-'.now()->format('Y-m-d').'.csv';
 
         return response()->streamDownload(function () use ($rows, $heading): void {
@@ -203,7 +230,8 @@ class FulfillmentSpeedReport extends Page implements HasTable
 
             foreach ($rows as $row) {
                 fputcsv($out, [
-                    $row['group'],
+                    // A period as its first day, so a spreadsheet sorts it.
+                    $this->isPeriodGrouping() ? $row['sort_key'] : $row['group'],
                     $row['orders'],
                     $row['median_hours'] === null ? null : number_format($row['median_hours'], 1, '.', ''),
                     $row['p90_hours'] === null ? null : number_format($row['p90_hours'], 1, '.', ''),
@@ -244,6 +272,7 @@ class FulfillmentSpeedReport extends Page implements HasTable
     public function getPastShipBy(): array
     {
         $query = Shipment::query()->dueToShip(false);
+        $this->forOrigin($query, 'data_source_id');
 
         if ($clientId = $this->clientId()) {
             $query->where('client_id', $clientId);
@@ -330,7 +359,7 @@ class FulfillmentSpeedReport extends Page implements HasTable
     {
         $hours = $orders->map(fn (object $order): float => $order->hours_to_ship)->sort()->values();
         $withShipBy = $orders->filter(fn (object $order): bool => $order->ship_by !== null);
-        $onTime = $withShipBy->filter(fn (object $order): bool => $order->first_ship_date <= $order->ship_by)->count();
+        $onTime = $withShipBy->filter(fn (object $order): bool => $order->left_on <= $order->ship_by)->count();
 
         return [
             'orders' => $orders->count(),
@@ -371,11 +400,54 @@ class FulfillmentSpeedReport extends Page implements HasTable
      */
     private function shippedOrders(): Collection
     {
-        $range = $this->tableFilters['date_range'] ?? [];
-        $clientId = $this->clientId();
-        $key = json_encode([$range['from'] ?? null, $range['until'] ?? null, $clientId]);
+        ['from' => $from, 'until' => $until] = $this->dateRange();
 
-        return $this->orders[$key] ??= $this->readShippedOrders($range['from'] ?? null, $range['until'] ?? null, $clientId);
+        // Unbounded, the read would hold every order ever shipped.
+        if ($from === null) {
+            return collect();
+        }
+
+        $clientId = $this->clientId();
+        $key = json_encode([$from, $until, $clientId, $this->origin()]);
+
+        return $this->orders[$key] ??= $this->readShippedOrders($from, $until, $clientId);
+    }
+
+    /**
+     * @return array{from: ?string, until: ?string}
+     */
+    private function dateRange(): array
+    {
+        $state = $this->tableFilters['date_range'] ?? [];
+
+        return [
+            'from' => filled($state['from'] ?? null) ? (string) $state['from'] : null,
+            'until' => filled($state['until'] ?? null) ? (string) $state['until'] : null,
+        ];
+    }
+
+    private function origin(): string
+    {
+        $value = $this->tableFilters['origin']['value'] ?? self::IMPORTED;
+
+        return in_array($value, [self::IMPORTED, self::CREATED_IN_POLYBAG, self::ALL_ORDERS], true) ? $value : self::IMPORTED;
+    }
+
+    /**
+     * Narrow a Shipments query to the orders the Orders filter names.
+     *
+     * @template TQuery of \Illuminate\Database\Eloquent\Builder<Shipment>|Builder
+     *
+     * @param  TQuery  $query
+     * @return TQuery
+     */
+    private function forOrigin($query, string $column)
+    {
+        return match ($this->origin()) {
+            self::CREATED_IN_POLYBAG => $query->whereNull($column),
+            self::ALL_ORDERS => $query,
+            default => $query->whereNotNull($column),
+        };
     }
 
     /**
@@ -384,6 +456,7 @@ class FulfillmentSpeedReport extends Page implements HasTable
     private function readShippedOrders(?string $from, ?string $until, ?string $clientId): Collection
     {
         $bounds = LocalDateRange::utcBounds($from, $until);
+        $timezone = Location::timezone();
 
         $firstPackages = DB::table('packages')
             ->where('packages.status', PackageStatus::Shipped->value)
@@ -406,7 +479,7 @@ class FulfillmentSpeedReport extends Page implements HasTable
             ->leftJoin('channels', 'shipments.channel_id', '=', 'channels.id')
             ->leftJoin('clients', 'shipments.client_id', '=', 'clients.id')
             ->where('shipments.status', '!=', ShipmentStatus::Draft->value)
-            ->whereNotNull('shipments.data_source_id')
+            ->tap(fn (Builder $query): Builder => $this->forOrigin($query, 'shipments.data_source_id'))
             ->when($clientId, fn (Builder $query, string $id): Builder => $query->where('shipments.client_id', $id))
             ->get([
                 'shipments.created_at',
@@ -418,9 +491,15 @@ class FulfillmentSpeedReport extends Page implements HasTable
                 'first_packages.first_shipped_at',
                 'first_packages.first_ship_date',
             ])
-            ->map(function (object $order): object {
+            ->map(function (object $order) use ($timezone): object {
+                // The local day the order was bought for: the range is in
+                // these days, so the groups are too.
+                $order->bought_on = Carbon::parse($order->first_shipped_at, 'UTC')->setTimezone($timezone)->toDateString();
                 // SQLite returns a date column with a time; MySQL does not.
-                $order->first_ship_date = substr((string) $order->first_ship_date, 0, 10);
+                // The Label's ship date is when it leaves, which after the
+                // carrier cutoff is the next pickup day; with none, the day
+                // it was bought.
+                $order->left_on = filled($order->first_ship_date) ? substr((string) $order->first_ship_date, 0, 10) : $order->bought_on;
                 $order->ship_by = $order->ship_by === null ? null : substr((string) $order->ship_by, 0, 10);
                 $order->hours_to_ship = max(0, (strtotime($order->first_shipped_at.' UTC') - strtotime($order->created_at.' UTC')) / 3600);
 
@@ -431,9 +510,9 @@ class FulfillmentSpeedReport extends Page implements HasTable
     private function groupKey(object $order): string
     {
         return match ($this->groupBy) {
-            'day' => $order->first_ship_date,
-            'week' => Carbon::parse($order->first_ship_date)->startOfWeek()->toDateString(),
-            'month' => substr($order->first_ship_date, 0, 7),
+            'day' => $order->bought_on,
+            'week' => Carbon::parse($order->bought_on)->startOfWeek()->toDateString(),
+            'month' => substr($order->bought_on, 0, 7),
             'channel' => (string) ($order->channel_id ?? 'none'),
             default => (string) ($order->client_id ?? 'none'),
         };

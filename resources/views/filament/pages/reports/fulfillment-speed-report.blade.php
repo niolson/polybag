@@ -29,9 +29,9 @@
     </div>
 
     <p class="text-sm text-gray-600 dark:text-gray-400">
-        Imported orders, counted on the day their first package shipped. Time to ship runs from when
-        PolyBag imported the order, not when it was placed. Orders without a ship-by date are left out of
-        the on-time figures.
+        Orders counted on the day their first label was bought. Time to ship runs from when PolyBag received
+        the order (the import, for an imported order), not when it was placed. Orders without a ship-by date
+        are left out of the on-time figures.
     </p>
 
     <div class="flex items-center gap-3">
