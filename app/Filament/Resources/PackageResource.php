@@ -57,7 +57,7 @@ class PackageResource extends Resource
      * catalog service: a blind purchase nothing was inferred for, an inferred
      * name the catalog splits.
      */
-    private const UNMAPPED_SERVICE = 'unmapped';
+    public const UNMAPPED_SERVICE = 'unmapped';
 
     protected static ?string $model = Package::class;
 

@@ -99,14 +99,16 @@ class AggregateShippingStats extends Command
         // MySQL: efficient INSERT...SELECT
         return DB::affectingStatement('
             INSERT INTO daily_shipping_stats
-                (date, carrier, service, channel_id, shipping_method_id, location_id, package_count, costed_package_count, total_cost, total_weight, created_at, updated_at)
+                (date, carrier, service, carrier_service_id, channel_id, shipping_method_id, location_id, client_id, package_count, costed_package_count, total_cost, total_weight, created_at, updated_at)
             SELECT
                 p.ship_date,
                 p.carrier,
                 p.service,
+                active_label.carrier_service_id,
                 s.channel_id,
                 s.shipping_method_id,
                 p.location_id,
+                s.client_id,
                 COUNT(*),
                 COUNT(p.cost),
                 COALESCE(SUM(p.cost), 0),
@@ -115,9 +117,10 @@ class AggregateShippingStats extends Command
                 NOW()
             FROM packages p
             JOIN shipments s ON p.shipment_id = s.id
+            LEFT JOIN package_labels active_label ON active_label.active_package_id = p.id
             WHERE p.status = "shipped"
               AND p.ship_date BETWEEN ? AND ?
-            GROUP BY p.ship_date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id
+            GROUP BY p.ship_date, p.carrier, p.service, active_label.carrier_service_id, s.channel_id, s.shipping_method_id, p.location_id, s.client_id
         ', [$from->toDateString(), $to->toDateString()]);
     }
 
@@ -128,11 +131,12 @@ class AggregateShippingStats extends Command
     {
         $rows = DB::table('packages as p')
             ->join('shipments as s', 'p.shipment_id', '=', 's.id')
+            ->leftJoin('package_labels as active_label', 'active_label.active_package_id', '=', 'p.id')
             ->where('p.status', 'shipped')
             ->whereBetween('p.ship_date', [$from->toDateString(), $to->toDateString()])
-            ->selectRaw('p.ship_date as date, p.carrier, p.service, s.channel_id, s.shipping_method_id, p.location_id')
+            ->selectRaw('p.ship_date as date, p.carrier, p.service, active_label.carrier_service_id, s.channel_id, s.shipping_method_id, p.location_id, s.client_id')
             ->selectRaw('COUNT(*) as package_count, COUNT(p.cost) as costed_package_count, COALESCE(SUM(p.cost), 0) as total_cost, COALESCE(SUM(p.weight), 0) as total_weight')
-            ->groupBy('p.ship_date', 'p.carrier', 'p.service', 's.channel_id', 's.shipping_method_id', 'p.location_id')
+            ->groupBy('p.ship_date', 'p.carrier', 'p.service', 'active_label.carrier_service_id', 's.channel_id', 's.shipping_method_id', 'p.location_id', 's.client_id')
             ->get();
 
         $now = now();
@@ -140,9 +144,11 @@ class AggregateShippingStats extends Command
             'date' => $row->date,
             'carrier' => $row->carrier,
             'service' => $row->service,
+            'carrier_service_id' => $row->carrier_service_id,
             'channel_id' => $row->channel_id,
             'shipping_method_id' => $row->shipping_method_id,
             'location_id' => $row->location_id,
+            'client_id' => $row->client_id,
             'package_count' => $row->package_count,
             'costed_package_count' => $row->costed_package_count,
             'total_cost' => $row->total_cost,

@@ -8,6 +8,7 @@ use App\Filament\Concerns\DescribesReportRange;
 use App\Filament\Resources\PackageResource;
 use App\Filament\Support\LocalDateRange;
 use App\Models\Carrier;
+use App\Models\Client;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Services\SettingsService;
@@ -48,6 +49,8 @@ class VolumeReport extends Page implements HasTable
         'channel' => 'Channel',
         'shipping_method' => 'Shipping Method',
         'carrier' => 'Carrier',
+        'service' => 'Service',
+        'client' => 'Client',
         'day' => 'Day',
         'week' => 'Week',
         'month' => 'Month',
@@ -82,9 +85,22 @@ class VolumeReport extends Page implements HasTable
         return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;
     }
 
+    /**
+     * The Group by choices this install offers: Client only in multi-client
+     * mode.
+     *
+     * @return array<string, string>
+     */
+    public function groupings(): array
+    {
+        return $this->multiClientEnabled()
+            ? self::GROUPINGS
+            : array_diff_key(self::GROUPINGS, ['client' => true]);
+    }
+
     public function updatedGroupBy(): void
     {
-        if (! array_key_exists($this->groupBy, self::GROUPINGS)) {
+        if (! array_key_exists($this->groupBy, $this->groupings())) {
             $this->groupBy = 'channel';
         }
 
@@ -107,7 +123,7 @@ class VolumeReport extends Page implements HasTable
                 Tables\Columns\TextColumn::make('group_name')
                     ->label($this->isPeriodGrouping() ? 'Period' : self::GROUPINGS[$this->groupBy])
                     ->sortable()
-                    ->formatStateUsing(fn (string $state): string => $this->groupLabel($state))
+                    ->formatStateUsing(fn (string $state, Model $record): string => $this->groupLabel($record))
                     ->description(fn (Model $record): ?string => $this->isCurrentPeriod((string) $record->getAttribute('group_name')) ? 'In progress, not a full '.$this->groupBy : null)
                     ->url(fn (Model $record): ?string => $this->buildDrillDownUrl($record)),
                 Tables\Columns\TextColumn::make('package_count')
@@ -152,9 +168,14 @@ class VolumeReport extends Page implements HasTable
                     ->options(fn (): array => Location::query()->orderBy('name')->pluck('name', 'id')->all())
                     ->query(fn (Builder $query, array $data): Builder => $this->atLocation($query, $data['value'] ?? null))
                     ->visible(fn (): bool => $this->multiLocationEnabled()),
+                Tables\Filters\SelectFilter::make('client')
+                    ->label('Client')
+                    ->options(fn (): array => Client::query()->orderBy('name')->pluck('name', 'id')->all())
+                    ->query(fn (Builder $query, array $data): Builder => $this->forClient($query, $data['value'] ?? null))
+                    ->visible(fn (): bool => $this->multiClientEnabled()),
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
-            ->filtersFormColumns(3);
+            ->filtersFormColumns(4);
     }
 
     public function resolveTableRecord(?string $key): ?Model
@@ -188,7 +209,7 @@ class VolumeReport extends Page implements HasTable
 
             foreach ($rows as $row) {
                 fputcsv($out, [
-                    $this->groupLabel((string) $row->getAttribute('group_name')),
+                    $this->groupLabel($row),
                     (int) $row->getAttribute('package_count'),
                     $this->shareOf($row),
                     number_format((float) $row->getAttribute('total_cost'), 2, '.', ''),
@@ -215,6 +236,8 @@ class VolumeReport extends Page implements HasTable
         [$nameExpression, $idExpression] = match ($this->groupBy) {
             'shipping_method' => ["COALESCE(shipping_methods.name, 'Unmapped')", 'daily_shipping_stats.shipping_method_id'],
             'carrier' => ["COALESCE(daily_shipping_stats.carrier, 'Unknown')", 'daily_shipping_stats.carrier'],
+            'service' => ["COALESCE(carrier_services.name, 'Not a catalog service')", 'daily_shipping_stats.carrier_service_id'],
+            'client' => ["COALESCE(clients.name, 'No client')", 'daily_shipping_stats.client_id'],
             'day', 'week', 'month' => [$this->periodGroupExpression(), null],
             default => ["COALESCE(channels.name, 'Unknown')", 'daily_shipping_stats.channel_id'],
         };
@@ -222,6 +245,10 @@ class VolumeReport extends Page implements HasTable
         match ($this->groupBy) {
             'shipping_method' => $query->leftJoin('shipping_methods', 'daily_shipping_stats.shipping_method_id', '=', 'shipping_methods.id'),
             'channel' => $query->leftJoin('channels', 'daily_shipping_stats.channel_id', '=', 'channels.id'),
+            'service' => $query
+                ->leftJoin('carrier_services', 'daily_shipping_stats.carrier_service_id', '=', 'carrier_services.id')
+                ->leftJoin('carriers', 'carrier_services.carrier_id', '=', 'carriers.id'),
+            'client' => $query->leftJoin('clients', 'daily_shipping_stats.client_id', '=', 'clients.id'),
             default => null,
         };
 
@@ -237,6 +264,12 @@ class VolumeReport extends Page implements HasTable
 
         if ($idExpression === null) {
             return $query->groupBy('group_name');
+        }
+
+        if ($this->groupBy === 'service') {
+            return $query
+                ->addSelect([DB::raw("{$idExpression} as group_id"), DB::raw('carriers.name as group_carrier')])
+                ->groupBy('group_name', 'group_id', 'group_carrier');
         }
 
         return $query
@@ -280,6 +313,15 @@ class VolumeReport extends Page implements HasTable
     }
 
     /**
+     * @param  Builder<DailyShippingStat>  $query
+     * @return Builder<DailyShippingStat>
+     */
+    private function forClient(Builder $query, mixed $clientId): Builder
+    {
+        return $query->when(filled($clientId), fn (Builder $query): Builder => $query->where('daily_shipping_stats.client_id', $clientId));
+    }
+
+    /**
      * The row's packages as a share of every package in range.
      */
     private function shareOf(Model $record): ?string
@@ -297,11 +339,12 @@ class VolumeReport extends Page implements HasTable
     {
         ['from' => $from, 'until' => $until] = $this->dateRange();
         $locationId = $this->locationId();
-        $key = json_encode([$from, $until, $locationId]);
+        $clientId = $this->clientId();
+        $key = json_encode([$from, $until, $locationId, $clientId]);
 
-        return $this->totalPackages[$key] ??= (int) $this->atLocation(
-            $this->withinDates(DailyShippingStat::query(), $from, $until),
-            $locationId,
+        return $this->totalPackages[$key] ??= (int) $this->forClient(
+            $this->atLocation($this->withinDates(DailyShippingStat::query(), $from, $until), $locationId),
+            $clientId,
         )->sum('daily_shipping_stats.package_count');
     }
 
@@ -327,6 +370,22 @@ class VolumeReport extends Page implements HasTable
         $value = $this->tableFilters['location']['value'] ?? null;
 
         return filled($value) ? (string) $value : null;
+    }
+
+    private function clientId(): ?string
+    {
+        if (! $this->multiClientEnabled()) {
+            return null;
+        }
+
+        $value = $this->tableFilters['client']['value'] ?? null;
+
+        return filled($value) ? (string) $value : null;
+    }
+
+    private function multiClientEnabled(): bool
+    {
+        return (bool) app(SettingsService::class)->get('multi_client_enabled', false);
     }
 
     private function multiLocationEnabled(): bool
@@ -365,11 +424,16 @@ class VolumeReport extends Page implements HasTable
 
     /**
      * The row's heading: a week as its dates ("Oct 12–18"), a month by name,
-     * a carrier by its display name, anything else as it is.
+     * a carrier by its display name, a catalog service after its carrier's,
+     * anything else as it is.
      */
-    private function groupLabel(string $groupName): string
+    private function groupLabel(Model $record): string
     {
+        $groupName = (string) $record->getAttribute('group_name');
+        $carrier = $record->getAttribute('group_carrier');
+
         return match ($this->groupBy) {
+            'service' => filled($carrier) ? Carrier::labelForName((string) $carrier).' '.$groupName : $groupName,
             'week' => $this->weekLabel($groupName),
             'month' => Carbon::createFromFormat('Y-m', $groupName)->format('F Y'),
             'carrier' => Carrier::labelForName($groupName),
@@ -407,12 +471,18 @@ class VolumeReport extends Page implements HasTable
      * The Packages list, filtered to the packages the row counts.
      *
      * A row with no id to filter by — an unknown channel, an unmapped method,
-     * no carrier — has no link, rather than one listing something else.
+     * no carrier, no client — has no link, rather than one listing something
+     * else.
      */
     private function buildDrillDownUrl(Model $record): ?string
     {
         $groupName = (string) $record->getAttribute('group_name');
         $groupId = $record->getAttribute('group_id');
+
+        // A Label naming no catalog service has a filter value of its own.
+        if ($this->groupBy === 'service' && blank($groupId)) {
+            $groupId = PackageResource::UNMAPPED_SERVICE;
+        }
 
         if (! $this->isPeriodGrouping() && blank($groupId)) {
             return null;
@@ -446,10 +516,16 @@ class VolumeReport extends Page implements HasTable
             $filters['location'] = ['value' => $this->locationId()];
         }
 
+        if ($this->clientId() !== null) {
+            $filters['client'] = ['value' => $this->clientId()];
+        }
+
         match ($this->groupBy) {
             'channel' => $filters['channel'] = ['value' => $groupId],
             'shipping_method' => $filters['shipping_method'] = ['value' => $groupId],
             'carrier' => $filters['carrier'] = ['value' => $groupId],
+            'service' => $filters['service'] = ['value' => $groupId],
+            'client' => $filters['client'] = ['value' => $groupId],
             default => null,
         };
 

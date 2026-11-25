@@ -3,7 +3,7 @@
         <label for="volume-group-by" class="text-sm font-medium text-gray-700 dark:text-gray-200">Group by</label>
         <x-filament::input.wrapper class="w-56">
             <x-filament::input.select id="volume-group-by" wire:model.live="groupBy">
-                @foreach (\App\Filament\Pages\Reports\VolumeReport::GROUPINGS as $value => $label)
+                @foreach ($this->groupings() as $value => $label)
                     <option value="{{ $value }}">{{ $label }}</option>
                 @endforeach
             </x-filament::input.select>
