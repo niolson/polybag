@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages\Reports;
 
+use App\Enums\DutiesTerms;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Support\LocalDateRange;
@@ -178,6 +179,11 @@ class ClientBillingReport extends Page implements HasTable
                     ->money('USD')
                     ->description(fn (Model $record): ?string => $this->uncostedNote($record))
                     ->sortable(),
+                Tables\Columns\TextColumn::make('total_duties')
+                    ->label('Duties')
+                    ->money('USD')
+                    ->description(fn (Model $record): ?string => $this->unrecordedDutiesNote($record))
+                    ->sortable(),
                 Tables\Columns\TextColumn::make('label_fees')
                     ->label('Label Fees')
                     ->money('USD')
@@ -239,6 +245,9 @@ class ClientBillingReport extends Page implements HasTable
                     ->label('Postage')
                     ->money('USD')
                     ->description(fn (Model $record): ?string => $this->uncostedNote($record)),
+                Tables\Columns\TextColumn::make('duties')
+                    ->label('Duties')
+                    ->money('USD'),
                 Tables\Columns\TextColumn::make('label_fee')
                     ->label('Label Fee')
                     ->money('USD'),
@@ -264,6 +273,11 @@ class ClientBillingReport extends Page implements HasTable
                     ->badge()
                     ->color('danger')
                     ->formatStateUsing(fn ($state): ?string => (int) $state > 0 ? 'Unpriced postage' : null),
+                Tables\Columns\TextColumn::make('unrecorded_duties_count')
+                    ->label('')
+                    ->badge()
+                    ->color('danger')
+                    ->formatStateUsing(fn ($state): ?string => (int) $state > 0 ? 'Duties not recorded' : null),
                 Tables\Columns\TextColumn::make('line_total')
                     ->label('Line Total')
                     ->money('USD')
@@ -303,6 +317,8 @@ class ClientBillingReport extends Page implements HasTable
                 DB::raw('COALESCE(SUM(billing.package_count), 0) as package_count'),
                 DB::raw('COALESCE(SUM(billing.postage), 0) as total_postage'),
                 DB::raw('COALESCE(SUM(billing.uncosted_package_count), 0) as uncosted_package_count'),
+                DB::raw('COALESCE(SUM(billing.duties), 0) as total_duties'),
+                DB::raw('COALESCE(SUM(billing.unrecorded_duties_count), 0) as unrecorded_duties_count'),
                 DB::raw('COALESCE(SUM(billing.label_fee), 0) as label_fees'),
                 DB::raw('COALESCE(SUM(billing.pick_fee_base + billing.pick_fee_extra), 0) as pick_fees'),
                 DB::raw('COALESCE(SUM(billing.materials), 0) as total_materials'),
@@ -338,6 +354,8 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.package_count',
                 'pkg.postage',
                 'pkg.uncosted_package_count',
+                'pkg.duties',
+                'pkg.unrecorded_duties_count',
                 'pkg.weight',
                 'pkg.materials',
                 DB::raw('CASE WHEN itm.shipment_id IS NOT NULL THEN 1 ELSE 0 END as has_items'),
@@ -352,7 +370,8 @@ class ClientBillingReport extends Page implements HasTable
                     $firstItemFee.' + '.
                     'GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * '.$additionalItemFee.' + '.
                     'COALESCE(itm.product_surcharges, 0)) + '.
-                    'pkg.materials as line_total'
+                    'pkg.materials + '.
+                    'pkg.duties as line_total'
                 ),
             ]);
     }
@@ -365,6 +384,11 @@ class ClientBillingReport extends Page implements HasTable
      * The per-shipment fees — the pick fees and the product surcharges — fall
      * once, on the line of the period its first package shipped in:
      * `carries_shipment_fees` is 1 on that line and 0 on any later one.
+     *
+     * Duties are the prepaid duties, taxes and fees on each package's active
+     * Label (`reports-review/05`): the 3PL paid them, so they are billed with
+     * the package. A DDP Label with none recorded — UPS and FedEx bill the
+     * account after clearance — is counted, so the line says what it lacks.
      */
     private function buildPackageSubquery(?string $from = null, ?string $until = null): \Illuminate\Database\Query\Builder
     {
@@ -373,12 +397,15 @@ class ClientBillingReport extends Page implements HasTable
 
         return DB::table('packages as p')
             ->leftJoin('box_sizes as bs', 'p.box_size_id', '=', 'bs.id')
+            ->leftJoin('package_labels as active_label', 'active_label.active_package_id', '=', 'p.id')
             ->where('p.status', PackageStatus::Shipped->value)
             ->select('p.shipment_id')
             ->selectRaw("MIN(CASE WHEN {$inPeriod['sql']} THEN p.shipped_at END) as shipped_at", $inPeriod['bindings'])
             ->selectRaw("SUM(CASE WHEN {$inPeriod['sql']} THEN 1 ELSE 0 END) as package_count", $inPeriod['bindings'])
             ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN p.cost END), 0) as postage", $inPeriod['bindings'])
             ->selectRaw("SUM(CASE WHEN {$inPeriod['sql']} AND p.cost IS NULL THEN 1 ELSE 0 END) as uncosted_package_count", $inPeriod['bindings'])
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN active_label.duties_cost END), 0) as duties", $inPeriod['bindings'])
+            ->selectRaw("SUM(CASE WHEN {$inPeriod['sql']} AND {$this->dutiesTermsExpression('active_label.customs_terms')} = ? AND active_label.duties_cost IS NULL THEN 1 ELSE 0 END) as unrecorded_duties_count", [...$inPeriod['bindings'], DutiesTerms::Ddp->value])
             ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN p.weight END), 0) as weight", $inPeriod['bindings'])
             ->selectRaw("COALESCE(SUM(CASE WHEN {$inPeriod['sql']} THEN COALESCE(bs.materials_cost, 0) END), 0) as materials", $inPeriod['bindings'])
             ->selectRaw("CASE WHEN {$firstInPeriod['sql']} THEN 1 ELSE 0 END as carries_shipment_fees", $firstInPeriod['bindings'])
@@ -458,6 +485,8 @@ class ClientBillingReport extends Page implements HasTable
                 'pkg.package_count',
                 'pkg.postage',
                 'pkg.uncosted_package_count',
+                'pkg.duties',
+                'pkg.unrecorded_duties_count',
                 'pkg.materials',
                 'pkg.carries_shipment_fees',
                 DB::raw('pkg.carries_shipment_fees * COALESCE(itm.product_surcharges, 0) as product_surcharges'),
@@ -471,9 +500,31 @@ class ClientBillingReport extends Page implements HasTable
                     'COALESCE(c.pick_fee_first_item, 0) + '.
                     'GREATEST(0, COALESCE(itm.total_qty, 0) - 1) * COALESCE(c.pick_fee_additional_item, 0) + '.
                     'COALESCE(itm.product_surcharges, 0)) + '.
-                    'pkg.materials as line_total'
+                    'pkg.materials + '.
+                    'pkg.duties as line_total'
                 ),
             ]);
+    }
+
+    /**
+     * The `duties_terms` a Label's customs snapshot declared, as SQL text.
+     */
+    private function dutiesTermsExpression(string $column): string
+    {
+        return DB::getDriverName() === 'sqlite'
+            ? "json_extract({$column}, '$.duties_terms')"
+            : "JSON_UNQUOTE(JSON_EXTRACT({$column}, '$.duties_terms'))";
+    }
+
+    private function unrecordedDutiesNote(Model $record): ?string
+    {
+        $unrecorded = (int) ($record->getAttribute('unrecorded_duties_count') ?? 0);
+
+        if ($unrecorded < 1) {
+            return null;
+        }
+
+        return number_format($unrecorded).' DDP '.($unrecorded === 1 ? 'label' : 'labels').' with no duties recorded';
     }
 
     private function streamSummaryCsv(?string $from, ?string $until): StreamedResponse
@@ -484,7 +535,7 @@ class ClientBillingReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['Client', 'Orders', 'Packages', 'Postage', 'Unpriced Packages', 'Label Fees', 'Pick Fees', 'Materials', 'Surcharges', 'Total Billable']);
+            fputcsv($out, ['Client', 'Orders', 'Packages', 'Postage', 'Unpriced Packages', 'Duties', 'Unrecorded Duties', 'Label Fees', 'Pick Fees', 'Materials', 'Surcharges', 'Total Billable']);
 
             foreach ($rows as $row) {
                 fputcsv($out, [
@@ -493,6 +544,8 @@ class ClientBillingReport extends Page implements HasTable
                     $row->package_count,
                     number_format((float) $row->total_postage, 2),
                     (int) $row->uncosted_package_count,
+                    number_format((float) $row->getAttribute('total_duties'), 2),
+                    (int) $row->getAttribute('unrecorded_duties_count'),
                     number_format((float) $row->label_fees, 2),
                     number_format((float) $row->pick_fees, 2),
                     number_format((float) $row->total_materials, 2),
@@ -518,7 +571,7 @@ class ClientBillingReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['Reference', 'Date', 'Packages', 'Postage', 'Unpriced Packages', 'Label Fee', 'Pick Fee', 'Extra Items', 'Materials', 'Surcharges', 'No Item Data', 'Line Total']);
+            fputcsv($out, ['Reference', 'Date', 'Packages', 'Postage', 'Unpriced Packages', 'Duties', 'Unrecorded Duties', 'Label Fee', 'Pick Fee', 'Extra Items', 'Materials', 'Surcharges', 'No Item Data', 'Line Total']);
 
             foreach ($rows as $row) {
                 fputcsv($out, [
@@ -527,6 +580,8 @@ class ClientBillingReport extends Page implements HasTable
                     $row->package_count,
                     number_format((float) $row->postage, 2),
                     (int) $row->uncosted_package_count,
+                    number_format((float) $row->getAttribute('duties'), 2),
+                    (int) $row->getAttribute('unrecorded_duties_count'),
                     number_format((float) $row->label_fee, 2),
                     number_format((float) $row->pick_fee_base, 2),
                     number_format((float) $row->pick_fee_extra, 2),
