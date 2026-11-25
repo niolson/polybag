@@ -78,7 +78,8 @@ class VoidedLabelsReport extends Page implements HasTable
                 'shipments.shipment_reference as order_reference',
                 'shipments.client_id as client_id',
             ])
-            // Bought again: the Package has an active Label now, which is never this one.
+            // The Package has an active Label now, which is never this one: it
+            // shipped after all, whether on the Label bought next or a later one.
             ->selectSub(fn (QueryBuilder $query): QueryBuilder => $query
                 ->selectRaw('COUNT(*)')
                 ->from('package_labels as rebought')
@@ -114,9 +115,14 @@ class VoidedLabelsReport extends Page implements HasTable
                     ->label('Postage')
                     ->money('USD')
                     ->placeholder('Not reported')
+                    // A blind Shopify purchase whose cost was never recovered has
+                    // none, and the sum leaves it out, so the gap is counted.
                     ->summarize([
                         Count::make()->label('Labels'),
-                        Sum::make()->money('USD')->label('Postage'),
+                        Sum::make()->money('USD')->label('Reported postage'),
+                        Count::make()
+                            ->query(fn (QueryBuilder $query): QueryBuilder => $query->whereNull('cost'))
+                            ->label('Postage not reported'),
                     ])
                     ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderBy('package_labels.cost', $direction)),
                 Tables\Columns\TextColumn::make('voidedBy.name')
@@ -126,7 +132,8 @@ class VoidedLabelsReport extends Page implements HasTable
                     ->label('How')
                     ->formatStateUsing(fn (?VoidReason $state): string => $state?->getLabel() ?? '—'),
                 Tables\Columns\IconColumn::make('rebought')
-                    ->label('Bought Again')
+                    ->label('Package Shipped Now')
+                    ->tooltip('The package has an active label today')
                     ->state(fn (PackageLabel $record): bool => (int) $record->getAttribute('rebought') > 0)
                     ->boolean(),
             ])
@@ -218,7 +225,7 @@ class VoidedLabelsReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($query, $chunkSize, $timezone): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, ['Voided', 'Order', 'Tracking', 'Carrier', 'Service', 'Bought Through', 'Postage', 'Voided By', 'How', 'Bought Again']);
+            fputcsv($out, ['Voided', 'Order', 'Tracking', 'Carrier', 'Service', 'Bought Through', 'Postage', 'Voided By', 'How', 'Package Shipped Now']);
 
             foreach ($query?->orderBy('package_labels.id')->lazy($chunkSize) ?? [] as $label) {
                 if (! $label instanceof PackageLabel) {
@@ -226,10 +233,11 @@ class VoidedLabelsReport extends Page implements HasTable
                 }
 
                 fputcsv($out, [
-                    $label->voided_at?->setTimezone($timezone)->format('Y-m-d H:i:s'),
+                    // Local time, with its offset, so the file says which.
+                    $label->voided_at?->setTimezone($timezone)->format('Y-m-d H:i:s P'),
                     $label->getAttribute('order_reference'),
                     $label->tracking_number,
-                    $label->carrier,
+                    filled($label->carrier) ? Carrier::labelForName($label->carrier) : null,
                     $label->carrierService->name ?? $label->service,
                     $this->postageSourceLabel($label),
                     $label->cost,

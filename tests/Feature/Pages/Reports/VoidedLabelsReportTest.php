@@ -4,9 +4,12 @@ use App\Enums\PostageSource;
 use App\Enums\Role;
 use App\Enums\VoidReason;
 use App\Filament\Pages\Reports\VoidedLabelsReport;
+use App\Models\Carrier;
+use App\Models\Client;
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Models\Shipment;
 use App\Models\User;
 use Livewire\Livewire;
 
@@ -99,7 +102,7 @@ it('exports the rows it shows', function (): void {
     $lines = array_map(str_getcsv(...), explode("\n", trim((string) ob_get_clean())));
 
     expect($lines)->toHaveCount(2)
-        ->and($lines[0])->toBe(['Voided', 'Order', 'Tracking', 'Carrier', 'Service', 'Bought Through', 'Postage', 'Voided By', 'How', 'Bought Again'])
+        ->and($lines[0])->toBe(['Voided', 'Order', 'Tracking', 'Carrier', 'Service', 'Bought Through', 'Postage', 'Voided By', 'How', 'Package Shipped Now'])
         ->and($lines[1][2])->toBe('9400100000000000000001')
         ->and($lines[1][6])->toBe('8.25')
         ->and($lines[1][8])->toBe('Recorded by a manager')
@@ -111,4 +114,51 @@ it('restricts access to managers and above', function (): void {
     $this->actingAs(User::factory()->create(['role' => Role::Packer]));
 
     expect(VoidedLabelsReport::canAccess())->toBeFalse();
+});
+
+it('counts the labels whose postage was never reported beside the total it leaves out', function (): void {
+    voidedLabel(['cost' => 8.00]);
+    voidedLabel(['cost' => 9.00]);
+    voidedLabel(['cost' => null]);
+
+    Livewire::test(VoidedLabelsReport::class)
+        ->assertSee('$17.00')
+        ->assertSee('Postage not reported');
+});
+
+it('narrows to one client in multi-client mode', function (): void {
+    config()->set('features.multi_client_enabled', true);
+    [$ours, $theirs] = Client::factory()->count(2)->create();
+    $mine = voidedLabel(['package_id' => Package::factory()->create(['shipment_id' => Shipment::factory()->create(['client_id' => $ours->id])->id])->id]);
+    $other = voidedLabel(['package_id' => Package::factory()->create(['shipment_id' => Shipment::factory()->create(['client_id' => $theirs->id])->id])->id]);
+
+    Livewire::test(VoidedLabelsReport::class)
+        ->filterTable('client', $ours->id)
+        ->assertCanSeeTableRecords([$mine])
+        ->assertCanNotSeeTableRecords([$other]);
+});
+
+it('exports every row once when rows share a void time across chunks', function (): void {
+    $at = now()->subDay()->startOfSecond();
+    $labels = collect(range(1, 3))->map(fn (): PackageLabel => voidedLabel(['voided_at' => $at]));
+
+    ob_start();
+    voidedLabelsPage()->exportCsv(1)->sendContent();
+    $lines = array_map(str_getcsv(...), explode("\n", trim((string) ob_get_clean())));
+
+    expect(array_slice($lines, 1))->toHaveCount(3)
+        ->and(collect(array_slice($lines, 1))->pluck(2)->sort()->values()->all())
+        ->toBe($labels->pluck('tracking_number')->sort()->values()->all());
+});
+
+it('exports the carrier under its display name and the void time with its offset', function (): void {
+    Carrier::query()->updateOrCreate(['name' => 'USPS'], ['display_name' => 'Postal Service']);
+    voidedLabel();
+
+    ob_start();
+    voidedLabelsPage()->exportCsv()->sendContent();
+    $row = array_map(str_getcsv(...), explode("\n", trim((string) ob_get_clean())))[1];
+
+    expect($row[3])->toBe('Postal Service')
+        ->and($row[0])->toMatch('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} [+-]\d{2}:\d{2}$/');
 });
