@@ -8,6 +8,7 @@ use App\Enums\ShipmentStatus;
 use App\Filament\Concerns\DescribesReportRange;
 use App\Filament\Resources\ShipmentResource;
 use App\Filament\Support\LocalDateRange;
+use App\Filament\Support\Percentile;
 use App\Models\Client;
 use App\Models\Location;
 use App\Models\Shipment;
@@ -357,35 +358,19 @@ class FulfillmentSpeedReport extends Page implements HasTable
      */
     private function summarize(Collection $orders): array
     {
-        $hours = $orders->map(fn (object $order): float => $order->hours_to_ship)->sort()->values();
+        $hours = $orders->map(fn (object $order): float => $order->hours_to_ship);
         $withShipBy = $orders->filter(fn (object $order): bool => $order->ship_by !== null);
         $onTime = $withShipBy->filter(fn (object $order): bool => $order->left_on <= $order->ship_by)->count();
 
         return [
             'orders' => $orders->count(),
-            'median_hours' => self::percentile($hours, 50),
-            'p90_hours' => self::percentile($hours, 90),
+            'median_hours' => Percentile::of($hours, 50),
+            'p90_hours' => Percentile::of($hours, 90),
             'with_ship_by' => $withShipBy->count(),
             'on_time' => $onTime,
             'late' => $withShipBy->count() - $onTime,
             'on_time_rate' => $withShipBy->isEmpty() ? null : $onTime / $withShipBy->count() * 100,
         ];
-    }
-
-    /**
-     * The nearest-rank percentile of sorted values.
-     *
-     * @param  Collection<int, float>  $sorted
-     */
-    public static function percentile(Collection $sorted, int $percentile): ?float
-    {
-        if ($sorted->isEmpty()) {
-            return null;
-        }
-
-        $rank = (int) ceil($percentile / 100 * $sorted->count());
-
-        return $sorted->get(max(1, $rank) - 1);
     }
 
     /**
