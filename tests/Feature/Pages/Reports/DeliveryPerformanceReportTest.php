@@ -149,8 +149,8 @@ it('exports every row', function (): void {
     deliveryReport()->exportCsv()->sendContent();
     $lines = array_map(str_getcsv(...), explode("\n", trim((string) ob_get_clean())));
 
-    expect($lines[0])->toBe(['Carrier', 'Packages', 'Delivered', 'Delivered %', 'Median Transit Days', '90th Percentile Transit Days', 'Due by Deliver-By', 'On Time', 'Late', 'On-Time %', 'Exceptions', 'Returned', 'Stuck Pre-Transit'])
-        ->and($lines[1])->toBe(['USPS', '1', '1', '100.0', '2.0', '2.0', '1', '1', '0', '100.0', '0', '0', '0']);
+    expect($lines[0])->toBe(['Carrier', 'Packages', 'Delivered', 'Delivered %', 'Median Transit Days', '90th Percentile Transit Days', 'Due by Deliver-By', 'On Time', 'Late', 'On-Time %', 'Exceptions', 'Returned', 'Stuck Pre-Transit', 'No Tracking'])
+        ->and($lines[1])->toBe(['USPS', '1', '1', '100.0', '2.0', '2.0', '1', '1', '0', '100.0', '0', '0', '0', '0']);
 });
 
 it('renders the page', function (): void {
@@ -161,4 +161,45 @@ it('renders the page', function (): void {
         ->assertOk()
         ->assertSee('Median Transit')
         ->assertSee('2.0 days');
+});
+
+it('counts a package tracked as delivered with no delivery time as delivered, and neither late nor on time', function (): void {
+    Carbon::setTestNow('2026-11-20 12:00:00');
+    // Shopify reported Delivered without saying when.
+    packageInTransit('2026-10-05 18:00:00', deliverBy: '2026-10-08', package: ['tracking_status' => TrackingStatus::Delivered]);
+
+    $row = deliveryRows(deliveryReport())[0];
+
+    expect($row['delivered'])->toBe(1)
+        ->and($row['delivered_rate'])->toBe(100.0)
+        ->and($row['median_days'])->toBeNull()
+        ->and($row['judged'])->toBe(0)
+        ->and($row['late'])->toBe(0);
+});
+
+it('leaves packages with no tracking out of the delivered share and counts them apart', function (): void {
+    packageInTransit('2026-10-05 18:00:00', '2026-10-07 18:00:00');
+    packageInTransit('2026-10-05 18:00:00', package: ['tracking_status' => null]);
+
+    $row = deliveryRows(deliveryReport())[0];
+
+    expect($row['packages'])->toBe(2)
+        ->and($row['untracked'])->toBe(1)
+        ->and($row['delivered_rate'])->toBe(100.0);
+});
+
+it('judges a package with no location against the default location country', function (): void {
+    $this->location->update(['country' => 'CA']);
+    Location::clearDefaultCache();
+    packageInTransit('2026-10-05 18:00:00', '2026-10-07 18:00:00', package: ['location_id' => null], shipment: ['country' => 'CA']);
+
+    expect(array_column(deliveryRows(deliveryReport('destination')), 'group'))->toBe(['Domestic']);
+});
+
+it('asks for a From date rather than reading every package ever shipped', function (): void {
+    packageInTransit('2026-10-05 18:00:00', '2026-10-07 18:00:00');
+
+    Livewire::test(DeliveryPerformanceReport::class)
+        ->filterTable('date_range', ['from' => null, 'until' => null])
+        ->assertSee('Choose a From date');
 });
