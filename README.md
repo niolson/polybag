@@ -14,7 +14,8 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 
 - Optional pick batches, printable summaries, and a pack-slip queue with printed and
   out-of-date indicators
-- Barcode-guided packing with item, quantity, and transparency-code validation
+- Barcode-guided packing with item, quantity, and transparency-code validation; boxes and
+  commands are scanned from printed PolyBag barcode sheets
 - USB scale support through WebHID or QZ Tray
 - Direct USPS, FedEx, and UPS rate shopping, postage purchase, tracking, and voids
 - International shipping with customs declarations, including separate customs forms when
@@ -44,7 +45,8 @@ Built with Laravel 13, Filament 5, Livewire 4, Tailwind CSS 4, MySQL, and Redis.
 - Multi-location carrier-account routing
 - Optional multi-client / 3PL scoping and pack-slip branding
 - Product weights, special services, and hazmat metadata
-- Shipping volume, fulfillment speed, delivery performance, packer, client billing, prepaid-duties, and voided-label reports
+- Volume, fulfillment speed, delivery performance, packages-by-user, voided-label, client
+  billing (including prepaid duties), and prepaid-duties reports
 - Tracking exception monitoring, audit logs, and configurable data retention
 - Packer, Manager, and Admin roles with optional MFA and Google or Entra SSO
 
@@ -140,8 +142,8 @@ php artisan app:create-user
 composer run dev
 ```
 
-`composer run dev` starts the Laravel server, default/low queue worker, dedicated import
-worker, scheduler, and Vite development server.
+`composer run dev` starts the Laravel server, the default/low queue worker, the dedicated
+import and label-purchase workers, the scheduler, and the Vite development server.
 
 PDF generation also needs a reachable Gotenberg service configured with `GOTENBERG_URL`.
 The standalone Docker stack includes it; `composer run dev` does not start it.
@@ -207,8 +209,9 @@ after `app:reencrypt-secrets` succeeds without undecryptable values.
 The scheduler runs configured imports, exports and address validation, tracking refreshes,
 Shopify fulfillment and label-cost synchronization, exchange-rate fetching, shipping
 statistics, retention and archival tasks, abandoned Manual Ship draft cleanup, and a
-daily label-integrity check. Keep the `scheduler` and both queue workers running in
-production. Schedules live in `routes/console.php` and `bootstrap/app.php`.
+daily label-integrity check. Keep the `scheduler` and all three queue workers (`queue`,
+`import-queue`, and `label-queue`) running in production. Schedules live in
+`routes/console.php` and `bootstrap/app.php`.
 
 ## Development commands
 
