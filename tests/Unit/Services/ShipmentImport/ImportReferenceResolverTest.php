@@ -4,6 +4,7 @@ use App\Models\Product;
 use App\Services\ClientContext;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\Sources\DatabaseSource;
+use Illuminate\Database\DeadlockException;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -241,3 +242,47 @@ it('makes no product for a blank SKU', function (mixed $sku): void {
     'empty' => [''],
     'spaces' => ['   '],
 ]);
+
+it('writes a product once when the same line arrives on many orders in a run', function (): void {
+    $resolver = app(ImportReferenceResolver::class);
+    $line = ['sku' => 'DROP-1', 'name' => 'Tour Shirt', 'weight' => 0.5];
+    $productReads = 0;
+    DB::listen(function (QueryExecuted $query) use (&$productReads): void {
+        $productReads += str_contains($query->sql, '"products"') ? 1 : 0;
+    });
+
+    $first = $resolver->productIdFor($line + ['quantity' => 1, 'value' => 20]);
+    $readsAfterFirst = $productReads;
+    $again = $resolver->productIdFor($line + ['quantity' => 3, 'value' => 60]);
+
+    expect($again)->toBe(['id' => $first['id'], 'created' => false, 'updated' => false])
+        ->and($productReads)->toBe($readsAfterFirst);
+});
+
+it('still writes a product whose line changed within a run', function (): void {
+    $resolver = app(ImportReferenceResolver::class);
+
+    $resolver->productIdFor(['sku' => 'DROP-2', 'name' => 'Old name']);
+    $changed = $resolver->productIdFor(['sku' => 'DROP-2', 'name' => 'New name']);
+
+    expect($changed['updated'])->toBeTrue()
+        ->and(Product::where('sku', 'DROP-2')->sole()->name)->toBe('New name');
+});
+
+it('writes the product again when a retried transaction rolled back the first write', function (): void {
+    $resolver = app(ImportReferenceResolver::class);
+    $line = ['sku' => 'RETRY-1', 'name' => 'Tour Hoodie'];
+
+    // A deadlocked page: its first attempt wrote the product, then rolled back.
+    expect(fn () => DB::transaction(function () use ($resolver, $line): void {
+        $resolver->productIdFor($line);
+
+        throw new DeadlockException('Deadlock found when trying to get lock');
+    }))->toThrow(DeadlockException::class);
+    expect(Product::where('sku', 'RETRY-1')->exists())->toBeFalse();
+
+    $retry = DB::transaction(fn (): array => $resolver->productIdFor($line));
+
+    expect($retry['created'])->toBeTrue()
+        ->and(Product::whereKey($retry['id'])->exists())->toBeTrue();
+});

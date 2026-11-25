@@ -35,7 +35,7 @@ class ValidateShipmentsCommand extends Command
         // until someone validates it by hand or changes its address or method.
         $due = $this->unsettled()
             ->where('validation_attempts', '<', self::MAX_SCHEDULED_ATTEMPTS)
-            ->with('shippingMethod');
+            ->with('shippingMethod.postageSources');
 
         $this->warnAboutCappedShipments();
 

@@ -168,6 +168,7 @@ class ShipmentBatchWriter
 
         $shipmentsBySourceRecord = Shipment::where('data_source_id', $importSource->id)
             ->whereIn('source_record_id', $sourceRecordIds)
+            ->with('client')
             ->get()
             ->keyBy('source_record_id');
 

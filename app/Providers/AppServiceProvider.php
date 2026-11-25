@@ -27,6 +27,7 @@ use App\Services\CacheService;
 use App\Services\Carriers\CarrierRegistry;
 use App\Services\Carriers\FakeCarrierAdapter;
 use App\Services\Carriers\FakeCarrierLatency;
+use App\Services\ClientContext;
 use App\Services\FedexRegistrationService;
 use App\Services\ManifestService;
 use App\Services\OAuthProviderRegistry;
@@ -41,6 +42,7 @@ use App\Services\SettingsService;
 use App\Services\ShippingRateService;
 use App\Services\Validation\ShipmentValidationPlan;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 use SocialiteProviders\Azure\Provider;
@@ -54,6 +56,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(SettingsService::class);
+        $this->app->scoped(ClientContext::class);
         $this->app->singleton(CacheService::class);
         $this->app->singleton(RateQuoteLogger::class);
         $this->app->singleton(RuleEvaluator::class);
@@ -81,6 +84,12 @@ class AppServiceProvider extends ServiceProvider
         if (str_starts_with(config('app.url'), 'https://')) {
             URL::forceScheme('https');
         }
+
+        // Workers keep singletons between jobs; settings saved meanwhile must
+        // reach the next job (`ClientContext` is scoped, so the worker resets it).
+        Queue::before(function (): void {
+            $this->app->make(SettingsService::class)->forgetResolved();
+        });
 
         Event::listen(function (SocialiteWasCalled $event): void {
             $event->extendSocialite('azure', Provider::class);

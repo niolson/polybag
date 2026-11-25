@@ -45,7 +45,7 @@ class PackagesRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('tracking_number')
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->scopes('withDraftState'))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->scopes('withDraftState')->with('activeLabel.carrierService'))
             ->columns([
                 Tables\Columns\TextColumn::make('tracking_number'),
                 Tables\Columns\TextColumn::make('tracking_status')

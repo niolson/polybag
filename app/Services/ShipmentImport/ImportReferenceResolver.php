@@ -10,6 +10,7 @@ use App\Models\ShippingMethod;
 use App\Models\ShippingMethodAlias;
 use App\Services\ClientContext;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ImportReferenceResolver
@@ -31,6 +32,15 @@ class ImportReferenceResolver
 
     private ?int $warmedClientId = null;
 
+    /**
+     * Product upserts this run already applied, keyed by client, SKU and the
+     * product fields the line writes. A drop sells one SKU on thousands of orders; the same line
+     * again would read and save the same Product to no effect.
+     *
+     * @var array<string, int>
+     */
+    private array $appliedProductUpserts = [];
+
     public function warm(?Client $client = null): void
     {
         $client ??= app(ClientContext::class)->default();
@@ -38,6 +48,7 @@ class ImportReferenceResolver
         $this->channelCache = [];
         $this->shippingMethodCache = [];
         $this->productCache = [];
+        $this->appliedProductUpserts = [];
 
         // A reference resolves through the client's aliases only. The source's
         // value is its own code, not a PolyBag key: matching it against IDs
@@ -156,6 +167,12 @@ class ImportReferenceResolver
                 'is_media' => $this->mediaFlagFrom($itemData, $sku),
             ], filled(...));
 
+            $upsertKey = $client->id."\0".$sku."\0".md5(serialize([$updateData, $this->fillOnlyFieldsFrom($itemData)]));
+
+            if (isset($this->appliedProductUpserts[$upsertKey])) {
+                return ['id' => $this->appliedProductUpserts[$upsertKey], 'created' => false, 'updated' => false];
+            }
+
             $key = ['client_id' => $client->id, 'sku' => $sku];
             $product = Product::query()->where($key)->first();
 
@@ -166,6 +183,7 @@ class ImportReferenceResolver
                     );
 
                     $this->productCache[$sku] = $product->id;
+                    $this->rememberProductUpsert($upsertKey, $product->id);
 
                     return ['id' => $product->id, 'created' => true, 'updated' => false];
                 } catch (UniqueConstraintViolationException $e) {
@@ -185,6 +203,7 @@ class ImportReferenceResolver
             $product->fill(array_merge($updateData, ['active' => true]))->save();
 
             $this->productCache[$sku] = $product->id;
+            $this->rememberProductUpsert($upsertKey, $product->id);
 
             return [
                 'id' => $product->id,
@@ -200,6 +219,22 @@ class ImportReferenceResolver
             'created' => false,
             'updated' => false,
         ];
+    }
+
+    /**
+     * Remember an applied upsert until the transaction it was written in rolls
+     * back: a deadlocked page is retried with this resolver, and a remembered
+     * write that was undone would be skipped on the retry.
+     */
+    private function rememberProductUpsert(string $key, int $productId): void
+    {
+        $this->appliedProductUpserts[$key] = $productId;
+
+        if (DB::transactionLevel() > 0) {
+            DB::afterRollBack(function (): void {
+                $this->appliedProductUpserts = [];
+            });
+        }
     }
 
     /**

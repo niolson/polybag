@@ -16,6 +16,9 @@ use Illuminate\Support\Facades\DB;
 
 class ShipmentImportService
 {
+    /** @var array<string, Client|null> */
+    private array $clientsByImportName = [];
+
     public function __construct(
         private readonly DataSourceInterface $source,
         private readonly ImportReferenceResolver $references,
@@ -309,7 +312,7 @@ class ShipmentImportService
 
                 $clientOverride = null;
                 if ($clientColumn && isset($data['_client_column_value'])) {
-                    $clientOverride = Client::findByImportName((string) $data['_client_column_value']);
+                    $clientOverride = $this->clientByImportName((string) $data['_client_column_value']);
                 }
 
                 $prepared = $this->rowPreparer->prepare($data, $this->importSource, $clientOverride);
@@ -377,6 +380,20 @@ class ShipmentImportService
 
             $this->markSourceRecordExported($sourceRecordId, $data);
         }
+    }
+
+    /**
+     * The Client a row's client column names, looked up once per name per run.
+     */
+    private function clientByImportName(string $name): ?Client
+    {
+        $key = strtolower(trim($name));
+
+        if (! array_key_exists($key, $this->clientsByImportName)) {
+            $this->clientsByImportName[$key] = Client::findByImportName($name);
+        }
+
+        return $this->clientsByImportName[$key];
     }
 
     /**

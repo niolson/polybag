@@ -13,6 +13,7 @@ use App\Http\Integrations\Amazon\Requests\SearchListingsItems;
 use App\Models\Concerns\HasDefaultClient;
 use App\Services\DemoLifetime;
 use App\Services\ProductCatalog\ProductCatalogSyncRuns;
+use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
 use App\Services\ShipmentImport\Sources\ShopifySource;
 use Database\Factories\DataSourceFactory;
@@ -98,6 +99,12 @@ class DataSource extends Model
             if ($source->wasChanged('client_id') && $source->client_id !== null) {
                 $source->dropScopesOutsideClient();
             }
+
+            app(SettingsService::class)->forgetResolved();
+        });
+
+        static::deleted(function (): void {
+            app(SettingsService::class)->forgetResolved();
         });
     }
 
