@@ -51,7 +51,7 @@ it('groups the sidebar by task, daily work first', function (): void {
         'Ship' => ['Scan & Pack', 'Manual Ship', 'End of Day'],
         'Fulfillment' => ['Shipments', 'Packages', 'Label Batches'],
         'Picking' => ['Pick Batches', 'Print Pack Slips'],
-        'Reports' => ['Volume', 'Fulfillment Speed', 'Delivery Performance', 'Packages by User', 'Client Billing'],
+        'Reports' => ['Volume', 'Fulfillment Speed', 'Delivery Performance', 'Packages by User', 'Client Billing', 'Voided Labels'],
         'Shipping Setup' => ['Shipping Methods', 'Box Sizes', 'Products'],
         'Carriers' => ['Carrier Accounts', 'Carriers', 'Carrier Services', 'Special Services'],
         'Integrations' => ['Connections', 'Channels', 'Map Shipping Refs', 'Map Channel Refs'],
