@@ -59,7 +59,7 @@ class UserShipmentsReport extends Page implements HasTable
 
     protected static UnitEnum|string|null $navigationGroup = 'Reports';
 
-    protected static ?int $navigationSort = 31;
+    protected static ?int $navigationSort = 33;
 
     protected string $view = 'filament.pages.reports.user-shipments-report';
 
