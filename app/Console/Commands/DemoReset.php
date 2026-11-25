@@ -787,7 +787,7 @@ class DemoReset extends Command
         ]);
 
         // The bought rate first, so the Label can point at the quote it was
-        // bought from, as Rate Comparison reads it.
+        // bought from, as a purchase through an Offer does.
         [$boughtQuote, $otherQuotes] = $this->fabricateRateQuotes($packageId, $services, $service, (float) $projected['cost'], $shippedAt);
         $rateQuoteId = DB::table('rate_quotes')->insertGetId($boughtQuote);
         DB::table('rate_quotes')->insert($otherQuotes);

@@ -10,10 +10,10 @@ use Illuminate\Support\Collection;
 /**
  * The analytics log of what a package was quoted — `rate_quotes`.
  *
- * One row per rate ever offered, kept on a long retention so that *Rate
- * Comparison* can answer what the other options would have cost. It is a log,
- * not purchase authority: the offer store holds that, and points at its row
- * here through {@see ShippingOffer::$rate_quote_id}.
+ * One row per rate ever offered, kept on a long retention so that analysis can
+ * answer what the other options would have cost (`reports-review/09`). It is a
+ * log, not purchase authority: the offer store holds that, and points at its
+ * row here through {@see ShippingOffer::$rate_quote_id}.
  */
 class RateQuoteLogger
 {

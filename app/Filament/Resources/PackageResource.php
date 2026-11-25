@@ -3,6 +3,7 @@
 namespace App\Filament\Resources;
 
 use App\Contracts\PackageLabelWorkflow;
+use App\Enums\Deliverability;
 use App\Enums\PackageDraftState;
 use App\Enums\PackageStatus;
 use App\Enums\PostageSource;
@@ -13,12 +14,16 @@ use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Filament\Support\CarrierLogoColumn;
 use App\Filament\Support\LabelVoidNotification;
+use App\Filament\Support\LocalDateRange;
 use App\Models\Carrier;
 use App\Models\CarrierService;
+use App\Models\Channel;
 use App\Models\Client;
+use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
+use App\Models\ShippingMethod;
 use App\Services\PostageSources\UnresolvedPurchaseResolver;
 use App\Services\SettingsService;
 use App\Services\ShipmentImport\Sources\AmazonSource;
@@ -483,13 +488,18 @@ class PackageResource extends Resource
                     ->label('Tracking Status'),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->label('Carrier or Postage Source')
-                    ->options([
-                        Carrier::USPS => Carrier::USPS,
-                        Carrier::FEDEX => Carrier::FEDEX,
-                        Carrier::UPS => Carrier::UPS,
-                        'shopify_shipping' => 'Shopify Shipping',
-                        'amazon_buy_shipping' => 'Amazon Buy Shipping',
-                    ])
+                    // Every carrier that has shipped, from the rollup's small
+                    // table, so a marketplace's own carrier (OnTrac, Amazon
+                    // Shipping) can be chosen, and a Volume drill-down by it
+                    // shows as selected.
+                    ->options(fn (): array => collect([Carrier::USPS, Carrier::FEDEX, Carrier::UPS])
+                        ->merge(DailyShippingStat::query()->whereNotNull('carrier')->distinct()->pluck('carrier'))
+                        ->unique()
+                        ->mapWithKeys(fn (string $carrier): array => [$carrier => Carrier::labelForName($carrier)])
+                        ->sort()
+                        ->put('shopify_shipping', 'Shopify Shipping')
+                        ->put('amazon_buy_shipping', 'Amazon Buy Shipping')
+                        ->all())
                     ->query(function (Builder $query, array $data): Builder {
                         $value = $data['value'] ?? null;
 
@@ -510,6 +520,33 @@ class PackageResource extends Resource
 
                         return $query->when($value, fn (Builder $query, string $value): Builder => $query->where('carrier', $value));
                     }),
+                Tables\Filters\SelectFilter::make('channel')
+                    ->label('Channel')
+                    ->options(fn (): array => Channel::query()->orderBy('name')->pluck('name', 'id')->all())
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        $data['value'] ?? null,
+                        fn (Builder $query, $value): Builder => $query->whereHas('shipment', fn (Builder $query): Builder => $query->where('channel_id', $value)),
+                    )),
+                Tables\Filters\SelectFilter::make('shipping_method')
+                    ->label('Shipping Method')
+                    ->options(fn (): array => ShippingMethod::query()->orderBy('name')->pluck('name', 'id')->all())
+                    ->query(fn (Builder $query, array $data): Builder => $query->when(
+                        $data['value'] ?? null,
+                        fn (Builder $query, $value): Builder => $query->whereHas('shipment', fn (Builder $query): Builder => $query->where('shipping_method_id', $value)),
+                    )),
+                // Set at pack time when the scale disagreed with the products'
+                // catalog weights.
+                Tables\Filters\Filter::make('weight_mismatch')
+                    ->label('Weight Mismatch')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->where('packages.weight_mismatch', true)),
+                Tables\Filters\Filter::make('address_not_confirmed')
+                    ->label('Address Not Confirmed')
+                    ->toggle()
+                    ->query(fn (Builder $query): Builder => $query->whereHas(
+                        'shipment',
+                        fn (Builder $query): Builder => $query->whereNotIn('deliverability', Deliverability::confirmed()),
+                    )),
                 Tables\Filters\TernaryFilter::make('exported')
                     ->label('Exported')
                     ->trueLabel('Exported')
@@ -564,27 +601,52 @@ class PackageResource extends Resource
                         'zpl' => 'ZPL',
                         'image' => 'Image',
                     ]),
+                // By the Label's ship date, the Location's calendar day the
+                // rollup and Volume count by, so a Volume drill-down lists
+                // exactly the packages it counted.
+                Tables\Filters\Filter::make('ship_date')
+                    ->columnSpan(2)
+                    ->columns(2)
+                    ->form([
+                        DatePicker::make('ship_date_from')
+                            ->label('Ship Date From'),
+                        DatePicker::make('ship_date_until')
+                            ->label('Ship Date Until'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => $query
+                        ->when($data['ship_date_from'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('packages.ship_date', '>=', $date))
+                        ->when($data['ship_date_until'] ?? null, fn (Builder $query, string $date): Builder => $query->whereDate('packages.ship_date', '<=', $date)))
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['ship_date_from'] ?? null) {
+                            $indicators['ship_date_from'] = 'Ship date from '.$data['ship_date_from'];
+                        }
+                        if ($data['ship_date_until'] ?? null) {
+                            $indicators['ship_date_until'] = 'Ship date until '.$data['ship_date_until'];
+                        }
+
+                        return $indicators;
+                    }),
+                // When the Label was bought, in the Location's calendar days;
+                // Ship Date above is the day it is dated for, which after the
+                // carrier cutoff is the next pickup day.
                 Tables\Filters\Filter::make('shipped_at')
                     ->columnSpan(2)
                     ->columns(2)
                     ->form([
                         DatePicker::make('shipped_from')
-                            ->label('Shipped From'),
+                            ->label('Bought From'),
                         DatePicker::make('shipped_until')
-                            ->label('Shipped Until'),
+                            ->label('Bought Until'),
                     ])
-                    ->query(function ($query, array $data) {
-                        return $query
-                            ->when($data['shipped_from'], fn ($query, $date) => $query->whereDate('shipped_at', '>=', $date))
-                            ->when($data['shipped_until'], fn ($query, $date) => $query->whereDate('shipped_at', '<=', $date));
-                    })
+                    ->query(fn (Builder $query, array $data): Builder => LocalDateRange::apply($query, 'packages.shipped_at', $data['shipped_from'] ?? null, $data['shipped_until'] ?? null))
                     ->indicateUsing(function (array $data): array {
                         $indicators = [];
                         if ($data['shipped_from'] ?? null) {
-                            $indicators['shipped_from'] = 'Shipped from '.$data['shipped_from'];
+                            $indicators['shipped_from'] = 'Bought from '.$data['shipped_from'];
                         }
                         if ($data['shipped_until'] ?? null) {
-                            $indicators['shipped_until'] = 'Shipped until '.$data['shipped_until'];
+                            $indicators['shipped_until'] = 'Bought until '.$data['shipped_until'];
                         }
 
                         return $indicators;

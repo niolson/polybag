@@ -2,9 +2,11 @@
 
 namespace App\Filament\Pages\Reports;
 
+use App\Enums\DutiesTerms;
 use App\Enums\Role;
 use App\Filament\Concerns\HasMultiClientFilter;
 use App\Filament\Support\LocalDateRange;
+use App\Models\Client;
 use App\Models\PackageLabel;
 use App\Services\SettingsService;
 use BackedEnum;
@@ -18,6 +20,7 @@ use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
@@ -51,9 +54,36 @@ class PrepaidDutiesReport extends Page implements HasTable
 
     protected string $view = 'filament.pages.reports.prepaid-duties-report';
 
+    public const DDP_IN_USE_CACHE_KEY = 'nav:prepaid_duties_ddp_in_use';
+
     public static function canAccess(): bool
     {
-        return auth()->user()?->role->isAtLeast(Role::Manager) ?? false;
+        return (auth()->user()?->role->isAtLeast(Role::Manager) ?? false) && self::ddpInUse();
+    }
+
+    /**
+     * Whether this install ships on DDP terms at all: a Client's duties policy
+     * names DDP for some destination, or a Label was bought on DDP terms or
+     * with prepaid duties recorded. Without either, the page is an empty
+     * table. Cached briefly, because the Label check reads the customs
+     * snapshot, which no index covers, and the sidebar asks on every page.
+     */
+    public static function ddpInUse(): bool
+    {
+        return Cache::remember(self::DDP_IN_USE_CACHE_KEY, 300, fn (): bool => Client::query()
+            ->whereNotNull('duties_policy')
+            ->pluck('duties_policy')
+            ->contains(fn (?array $policy): bool => in_array(DutiesTerms::Ddp->value, $policy ?? [], true))
+            || PackageLabel::query()
+                ->where(fn (Builder $query) => $query
+                    ->where('customs_terms->duties_terms', DutiesTerms::Ddp->value)
+                    ->orWhereNotNull('duties_cost'))
+                ->exists());
+    }
+
+    public static function forgetDdpInUse(): void
+    {
+        Cache::forget(self::DDP_IN_USE_CACHE_KEY);
     }
 
     /**
