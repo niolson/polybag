@@ -27,3 +27,4 @@ Tests for same-name users, each column, the period groupings and the export.
 ## Comments
 
 - 2026-11-24 — Done. One table with Group by User / User and day / week / month, grouped by user id. Labels Voided counts the user's voids in range, scoped to the client filter. Weeks are named by their Monday, as in Volume. Tests in `UserShipmentsReportTest`.
+- 2026-11-25 — Review fixes. The range now bounds the packages' `ship_date`, the day they are grouped and counted by, rather than `shipped_at`; that is consistent with Volume. A Label bought after the carrier cutoff counts on the next pickup day, and a Saturday shift on Monday. User rows come from users who shipped or voided in range, so a user who only voided is listed and the Labels Voided total is whole.
