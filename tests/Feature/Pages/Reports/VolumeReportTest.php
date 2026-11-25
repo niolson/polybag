@@ -6,13 +6,18 @@ use App\Filament\Resources\PackageResource;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Support\LocalDateRange;
 use App\Models\Carrier;
+use App\Models\CarrierService;
 use App\Models\Channel;
+use App\Models\Client;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
 use App\Models\Shipment;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 
 uses(RefreshDatabase::class);
@@ -281,6 +286,72 @@ it('exports the rows it shows', function (): void {
 
     expect($lines[0])->toBe(['Carrier', 'Packages', 'Share', 'Total Cost', 'Unpriced Packages', 'Avg Cost', 'Avg Weight (lb)'])
         ->and($lines[1])->toBe(['USPS', '4', '100.0%', '30.00', '1', '10.00', '2.50']);
+});
+
+it('groups by catalog service after the carrier, and links each row to the packages it counts', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Admin]));
+    $carrier = Carrier::factory()->create(['name' => 'Acme Post', 'display_name' => 'Acme']);
+    $ground = CarrierService::factory()->create(['carrier_id' => $carrier->id, 'name' => 'Economy']);
+    $mapped = Package::factory()->shipped()->create(['carrier' => 'Acme Post']);
+    $unmapped = Package::factory()->shipped()->create(['carrier' => 'Acme Post']);
+    PackageLabel::query()->where('package_id', $mapped->id)->update(['carrier_service_id' => $ground->id]);
+    PackageLabel::query()->where('package_id', $unmapped->id)->update(['carrier_service_id' => null]);
+    DB::table('packages')->update(['ship_date' => LocalDateRange::now()->toDateString()]);
+    $this->artisan('stats:aggregate', ['--today' => true]);
+
+    $page = volumeReportPage('service');
+    $rows = $page->getFilteredSortedTableQuery()->get();
+    $label = fn (Model $row): string => (fn (): string => $this->groupLabel($row))->call($page);
+    $linkFor = function (string $name) use ($rows, $page): array {
+        $url = (fn (): ?string => $this->buildDrillDownUrl($rows->firstWhere('group_name', $name)))->call($page);
+        parse_str((string) parse_url((string) $url, PHP_URL_QUERY), $query);
+
+        return $query['filters'];
+    };
+
+    expect($rows->map($label)->sort()->values()->all())->toBe(['Acme Economy', 'Not a catalog service']);
+
+    Livewire::withQueryParams(['filters' => $linkFor('Economy')])
+        ->test(ListPackages::class)
+        ->assertCanSeeTableRecords([$mapped])
+        ->assertCanNotSeeTableRecords([$unmapped]);
+
+    Livewire::withQueryParams(['filters' => $linkFor('Not a catalog service')])
+        ->test(ListPackages::class)
+        ->assertCanSeeTableRecords([$unmapped])
+        ->assertCanNotSeeTableRecords([$mapped]);
+});
+
+it('offers the client grouping only in multi-client mode', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    expect(volumeReportPage()->groupings())->not->toHaveKey('client');
+
+    config()->set('features.multi_client_enabled', true);
+
+    expect(volumeReportPage()->groupings())->toHaveKey('client');
+});
+
+it('groups by client and narrows to one', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    config()->set('features.multi_client_enabled', true);
+    [$ours, $theirs] = Client::factory()->count(2)->create();
+    DailyShippingStat::create(['date' => today()->toDateString(), 'client_id' => $ours->id, 'package_count' => 3, 'costed_package_count' => 3, 'total_cost' => 30, 'total_weight' => 3]);
+    DailyShippingStat::create(['date' => today()->toDateString(), 'client_id' => $theirs->id, 'package_count' => 1, 'costed_package_count' => 1, 'total_cost' => 10, 'total_weight' => 1]);
+
+    $test = Livewire::test(VolumeReport::class)->set('groupBy', 'client');
+    $test->assertSeeInOrder(['75.0%', '25.0%']);
+    $page = $test->instance();
+    assert($page instanceof VolumeReport);
+
+    expect($page->getFilteredSortedTableQuery()->get()->pluck('group_name')->all())->toBe([$ours->name, $theirs->name]);
+
+    $test->filterTable('client', $theirs->id);
+    $test->assertSee('100.0%');
+    $page = $test->instance();
+    assert($page instanceof VolumeReport);
+
+    expect($page->getFilteredSortedTableQuery()->get()->pluck('group_name')->all())->toBe([$theirs->name]);
 });
 
 it('moves to the range of the grouping chosen', function (): void {

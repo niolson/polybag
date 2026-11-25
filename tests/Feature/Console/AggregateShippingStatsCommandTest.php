@@ -2,9 +2,13 @@
 
 use App\Enums\VoidReason;
 use App\Jobs\RebuildDailyShippingStats;
+use App\Models\CarrierService;
+use App\Models\Client;
 use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Package;
+use App\Models\PackageLabel;
+use App\Models\Shipment;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -110,4 +114,27 @@ it('queues the rebuild on the low queue, behind batch labels', function (): void
     Package::factory()->shipped()->create();
 
     Queue::assertPushedOn('low', RebuildDailyShippingStats::class);
+});
+
+it('keys the rollup by client and by the catalog service the active label was bought as', function (): void {
+    [$ours, $theirs] = Client::factory()->count(2)->create();
+    $ground = CarrierService::factory()->create();
+    $ourPackages = Package::factory()->shipped()->count(2)->create([
+        'carrier' => 'USPS', 'service' => 'Ground',
+        'shipment_id' => Shipment::factory()->create(['client_id' => $ours->id])->id,
+    ]);
+    Package::factory()->shipped()->create([
+        'carrier' => 'USPS', 'service' => 'Ground',
+        'shipment_id' => Shipment::factory()->create(['client_id' => $theirs->id])->id,
+    ]);
+    PackageLabel::query()->whereIn('package_id', $ourPackages->pluck('id'))->update(['carrier_service_id' => $ground->id]);
+    normalizeAggregationShipDates();
+
+    $this->artisan('stats:aggregate', ['--today' => true])->assertSuccessful();
+
+    expect(DailyShippingStat::query()->orderBy('client_id')->get(['client_id', 'carrier_service_id', 'package_count'])->map->only(['client_id', 'carrier_service_id', 'package_count'])->all())
+        ->toBe([
+            ['client_id' => $ours->id, 'carrier_service_id' => $ground->id, 'package_count' => 2],
+            ['client_id' => $theirs->id, 'carrier_service_id' => null, 'package_count' => 1],
+        ]);
 });

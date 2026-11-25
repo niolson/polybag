@@ -13,9 +13,11 @@ class DailyShippingStat extends Model
         'date',
         'carrier',
         'service',
+        'carrier_service_id',
         'channel_id',
         'shipping_method_id',
         'location_id',
+        'client_id',
         'package_count',
         'costed_package_count',
         'total_cost',
@@ -56,6 +58,25 @@ class DailyShippingStat extends Model
     public function shippingMethod(): BelongsTo
     {
         return $this->belongsTo(ShippingMethod::class);
+    }
+
+    /**
+     * @return BelongsTo<Client, $this>
+     */
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
+    }
+
+    /**
+     * The catalog service the packages' active Labels were bought as; null
+     * when a Label names none.
+     *
+     * @return BelongsTo<CarrierService, $this>
+     */
+    public function carrierService(): BelongsTo
+    {
+        return $this->belongsTo(CarrierService::class);
     }
 
     /**
