@@ -46,8 +46,8 @@ function packageShippedSeptember30Evening(array $attributes = []): Package
     return Package::factory()->shipped()->create(['shipped_at' => '2026-10-01 01:00:00', ...$attributes]);
 }
 
-it('counts a package in Shipments by User on the local day it shipped', function (): void {
-    packageShippedSeptember30Evening(['shipped_by_user_id' => auth()->id()]);
+it('counts a package in Packages by User on its local ship date', function (): void {
+    packageShippedSeptember30Evening(['shipped_by_user_id' => auth()->id(), 'ship_date' => '2026-09-30']);
 
     Livewire::test(UserShipmentsReport::class)
         ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31'])
