@@ -14,10 +14,12 @@ use App\Filament\Resources\PackageResource\Pages;
 use App\Filament\Resources\PackageResource\RelationManagers\PackageItemsRelationManager;
 use App\Filament\Support\CarrierLogoColumn;
 use App\Filament\Support\LabelVoidNotification;
+use App\Filament\Support\LocalDateRange;
 use App\Models\Carrier;
 use App\Models\CarrierService;
 use App\Models\Channel;
 use App\Models\Client;
+use App\Models\DailyShippingStat;
 use App\Models\Location;
 use App\Models\Package;
 use App\Models\PackageLabel;
@@ -486,13 +488,18 @@ class PackageResource extends Resource
                     ->label('Tracking Status'),
                 Tables\Filters\SelectFilter::make('carrier')
                     ->label('Carrier or Postage Source')
-                    ->options([
-                        Carrier::USPS => Carrier::USPS,
-                        Carrier::FEDEX => Carrier::FEDEX,
-                        Carrier::UPS => Carrier::UPS,
-                        'shopify_shipping' => 'Shopify Shipping',
-                        'amazon_buy_shipping' => 'Amazon Buy Shipping',
-                    ])
+                    // Every carrier that has shipped, from the rollup's small
+                    // table, so a marketplace's own carrier (OnTrac, Amazon
+                    // Shipping) can be chosen, and a Volume drill-down by it
+                    // shows as selected.
+                    ->options(fn (): array => collect([Carrier::USPS, Carrier::FEDEX, Carrier::UPS])
+                        ->merge(DailyShippingStat::query()->whereNotNull('carrier')->distinct()->pluck('carrier'))
+                        ->unique()
+                        ->mapWithKeys(fn (string $carrier): array => [$carrier => Carrier::labelForName($carrier)])
+                        ->sort()
+                        ->put('shopify_shipping', 'Shopify Shipping')
+                        ->put('amazon_buy_shipping', 'Amazon Buy Shipping')
+                        ->all())
                     ->query(function (Builder $query, array $data): Builder {
                         $value = $data['value'] ?? null;
 
@@ -616,6 +623,30 @@ class PackageResource extends Resource
                         }
                         if ($data['ship_date_until'] ?? null) {
                             $indicators['ship_date_until'] = 'Ship date until '.$data['ship_date_until'];
+                        }
+
+                        return $indicators;
+                    }),
+                // When the Label was bought, in the Location's calendar days;
+                // Ship Date above is the day it is dated for, which after the
+                // carrier cutoff is the next pickup day.
+                Tables\Filters\Filter::make('shipped_at')
+                    ->columnSpan(2)
+                    ->columns(2)
+                    ->form([
+                        DatePicker::make('shipped_from')
+                            ->label('Bought From'),
+                        DatePicker::make('shipped_until')
+                            ->label('Bought Until'),
+                    ])
+                    ->query(fn (Builder $query, array $data): Builder => LocalDateRange::apply($query, 'packages.shipped_at', $data['shipped_from'] ?? null, $data['shipped_until'] ?? null))
+                    ->indicateUsing(function (array $data): array {
+                        $indicators = [];
+                        if ($data['shipped_from'] ?? null) {
+                            $indicators['shipped_from'] = 'Bought from '.$data['shipped_from'];
+                        }
+                        if ($data['shipped_until'] ?? null) {
+                            $indicators['shipped_until'] = 'Bought until '.$data['shipped_until'];
                         }
 
                         return $indicators;

@@ -5,13 +5,16 @@ namespace App\Filament\Pages\Reports;
 use App\Enums\PackageStatus;
 use App\Enums\Role;
 use App\Filament\Concerns\DescribesReportRange;
-use App\Filament\Concerns\HasMultiClientFilter;
 use App\Filament\Support\LocalDateRange;
+use App\Models\Client;
 use App\Models\Package;
+use App\Models\User;
+use App\Services\SettingsService;
 use BackedEnum;
 use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Select;
 use Filament\Pages\Page;
 use Filament\Tables;
 use Filament\Tables\Columns\Summarizers\Sum;
@@ -21,18 +24,19 @@ use Filament\Tables\Enums\FiltersLayout;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder as QueryBuilder;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
 /**
  * Shipped packages by the user who bought their Label, per user or per user
- * and period. Grouped by user id, so two users who share a name stay apart.
+ * and period, on the packages' ship date. Grouped by user id, so two users
+ * who share a name stay apart.
  */
 class UserShipmentsReport extends Page implements HasTable
 {
     use DescribesReportRange;
-    use HasMultiClientFilter;
     use InteractsWithTable;
 
     /**
@@ -86,11 +90,21 @@ class UserShipmentsReport extends Page implements HasTable
                 ])
                 ->columns(2)
                 ->default()
-                ->query(fn (Builder $query, array $data): Builder => LocalDateRange::apply($query, 'packages.shipped_at', $data['from'] ?? null, $data['until'] ?? null)),
+                // The range bounds the subqueries in groupedQuery(), so the
+                // filter carries no query of its own.
+                ->query(fn (Builder $query): Builder => $query),
         ];
 
-        if ($filter = $this->buildClientFilter()) {
-            $filters[] = $filter;
+        if ($this->multiClientEnabled()) {
+            $filters[] = Tables\Filters\Filter::make('client')
+                ->form([
+                    Select::make('client_id')
+                        ->label('Client')
+                        ->options(fn (): array => Client::query()->orderBy('name')->pluck('name', 'id')->all())
+                        ->native(false)
+                        ->placeholder('All clients'),
+                ])
+                ->query(fn (Builder $query): Builder => $query);
         }
 
         $byUser = $this->groupBy === 'user';
@@ -146,7 +160,7 @@ class UserShipmentsReport extends Page implements HasTable
 
     public function resolveTableRecord(?string $key): ?Model
     {
-        return Package::find($key);
+        return $this->groupBy === 'user' ? User::find($key) : Package::find($key);
     }
 
     protected function getHeaderActions(): array
@@ -192,83 +206,142 @@ class UserShipmentsReport extends Page implements HasTable
     }
 
     /**
-     * Shipped packages grouped by the user who shipped them, and by period
-     * when one is chosen.
+     * Per user: the packages they shipped and the Labels they voided in the
+     * range, from users with either. Per user and period: the packages they
+     * shipped.
      *
-     * @return Builder<Package>
+     * Packages count on their ship date, the Location's calendar day the
+     * Label is dated for, as on Volume and the Packages list; a Label bought
+     * after the carrier cutoff is dated for the next pickup day. Voids count
+     * on the local day they were made.
+     *
+     * @return Builder<User>|Builder<Package>
      */
     private function groupedQuery(): Builder
     {
+        if ($this->groupBy !== 'user') {
+            return Package::query()
+                ->tap(fn (Builder $query): Builder => $this->shippedInRange($query))
+                ->join('users', 'packages.shipped_by_user_id', '=', 'users.id')
+                ->select([
+                    DB::raw('users.id as user_id'),
+                    DB::raw('users.name as user_name'),
+                    DB::raw('COUNT(*) as package_count'),
+                    DB::raw('COUNT(DISTINCT packages.shipment_id) as order_count'),
+                    DB::raw('COALESCE(SUM(item_totals.quantity), 0) as item_count'),
+                    DB::raw('MIN(packages.id) as id'),
+                    DB::raw($this->periodExpression().' as period'),
+                ])
+                ->groupBy('users.id', 'users.name', 'period');
+        }
+
+        $shipped = $this->shippedInRange(Package::query())
+            ->toBase()
+            ->select([
+                DB::raw('packages.shipped_by_user_id as user_id'),
+                DB::raw('COUNT(*) as package_count'),
+                DB::raw('COUNT(DISTINCT packages.shipment_id) as order_count'),
+                DB::raw('COALESCE(SUM(item_totals.quantity), 0) as item_count'),
+                DB::raw('COUNT(DISTINCT packages.ship_date) as active_days'),
+            ])
+            ->groupBy('packages.shipped_by_user_id');
+
+        return User::query()
+            ->leftJoinSub($shipped, 'shipped', 'shipped.user_id', '=', 'users.id')
+            ->leftJoinSub($this->voidedInRange(), 'voided', 'voided.user_id', '=', 'users.id')
+            ->where(fn (Builder $query): Builder => $query->whereNotNull('shipped.user_id')->orWhereNotNull('voided.user_id'))
+            ->select([
+                'users.id',
+                DB::raw('users.name as user_name'),
+                DB::raw('COALESCE(shipped.package_count, 0) as package_count'),
+                DB::raw('COALESCE(shipped.order_count, 0) as order_count'),
+                DB::raw('COALESCE(shipped.item_count, 0) as item_count'),
+                DB::raw('COALESCE(shipped.active_days, 0) as active_days'),
+                DB::raw('CASE WHEN shipped.active_days > 0 THEN 1.0 * shipped.package_count / shipped.active_days ELSE NULL END as per_active_day'),
+                DB::raw('COALESCE(voided.voided_count, 0) as voided_count'),
+            ]);
+    }
+
+    /**
+     * Shipped packages with a shipping user, on a ship date in range, for the
+     * chosen client, with each package's item quantity joined on.
+     *
+     * @param  Builder<Package>  $query
+     * @return Builder<Package>
+     */
+    private function shippedInRange(Builder $query): Builder
+    {
+        ['from' => $from, 'until' => $until] = $this->dateRange();
+        $clientId = $this->clientId();
+
         $items = DB::table('package_items')
             ->select('package_id', DB::raw('SUM(quantity) as quantity'))
             ->groupBy('package_id');
 
-        $query = Package::query()
+        return $query
             ->where('packages.status', PackageStatus::Shipped->value)
             ->whereNotNull('packages.shipped_by_user_id')
-            ->join('users', 'packages.shipped_by_user_id', '=', 'users.id')
-            ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
             ->leftJoinSub($items, 'item_totals', 'item_totals.package_id', '=', 'packages.id')
-            ->select([
-                DB::raw('users.id as user_id'),
-                DB::raw('users.name as user_name'),
-                DB::raw('COUNT(*) as package_count'),
-                DB::raw('COUNT(DISTINCT packages.shipment_id) as order_count'),
-                DB::raw('COALESCE(SUM(item_totals.quantity), 0) as item_count'),
-                DB::raw('MIN(packages.id) as id'),
-            ]);
-
-        if ($this->groupBy !== 'user') {
-            return $query
-                ->addSelect(DB::raw($this->periodExpression().' as period'))
-                ->groupBy('users.id', 'users.name', 'period');
-        }
-
-        [$voided, $bindings] = $this->voidedCountSubquery();
-
-        return $query
-            ->addSelect([
-                DB::raw('COUNT(DISTINCT packages.ship_date) as active_days'),
-                DB::raw('1.0 * COUNT(*) / COUNT(DISTINCT packages.ship_date) as per_active_day'),
-            ])
-            ->selectRaw("({$voided}) as voided_count", $bindings)
-            ->groupBy('users.id', 'users.name');
+            ->when($from, fn (Builder $query, string $date): Builder => $query->whereDate('packages.ship_date', '>=', $date))
+            ->when($until, fn (Builder $query, string $date): Builder => $query->whereDate('packages.ship_date', '<=', $date))
+            ->when($clientId, fn (Builder $query, string $clientId): Builder => $query
+                ->join('shipments', 'packages.shipment_id', '=', 'shipments.id')
+                ->where('shipments.client_id', $clientId));
     }
 
     /**
-     * Labels the user voided in the period, whichever user had bought them,
-     * scoped to the chosen client like the rest of the row.
-     *
-     * @return array{0: string, 1: array<int, mixed>}
+     * Labels each user voided in range, whoever bought them, for the chosen
+     * client.
      */
-    private function voidedCountSubquery(): array
+    private function voidedInRange(): QueryBuilder
     {
-        $range = $this->tableFilters['date_range'] ?? [];
-        $bounds = LocalDateRange::utcBounds($range['from'] ?? null, $range['until'] ?? null);
-        $clientId = $this->tableFilters['client']['client_id'] ?? null;
+        ['from' => $from, 'until' => $until] = $this->dateRange();
+        $bounds = LocalDateRange::utcBounds($from, $until);
+        $clientId = $this->clientId();
 
-        $sql = 'SELECT COUNT(*) FROM package_labels voided_labels';
-        $conditions = ['voided_labels.voided_by_user_id = users.id', 'voided_labels.voided_at IS NOT NULL'];
-        $bindings = [];
+        return DB::table('package_labels as voided_labels')
+            ->whereNotNull('voided_labels.voided_at')
+            ->whereNotNull('voided_labels.voided_by_user_id')
+            ->when($bounds['from'], fn (QueryBuilder $query, string $bound): QueryBuilder => $query->where('voided_labels.voided_at', '>=', $bound))
+            ->when($bounds['until'], fn (QueryBuilder $query, string $bound): QueryBuilder => $query->where('voided_labels.voided_at', '<', $bound))
+            ->when($clientId, fn (QueryBuilder $query, string $clientId): QueryBuilder => $query
+                ->join('packages as voided_packages', 'voided_packages.id', '=', 'voided_labels.package_id')
+                ->join('shipments as voided_shipments', 'voided_shipments.id', '=', 'voided_packages.shipment_id')
+                ->where('voided_shipments.client_id', $clientId))
+            ->select([
+                DB::raw('voided_labels.voided_by_user_id as user_id'),
+                DB::raw('COUNT(*) as voided_count'),
+            ])
+            ->groupBy('voided_labels.voided_by_user_id');
+    }
 
-        if (filled($clientId) && $this->buildClientFilter() !== null) {
-            $sql .= ' JOIN packages voided_packages ON voided_packages.id = voided_labels.package_id'
-                .' JOIN shipments voided_shipments ON voided_shipments.id = voided_packages.shipment_id';
-            $conditions[] = 'voided_shipments.client_id = ?';
-            $bindings[] = $clientId;
+    /**
+     * @return array{from: ?string, until: ?string}
+     */
+    private function dateRange(): array
+    {
+        $state = $this->tableFilters['date_range'] ?? [];
+
+        return [
+            'from' => filled($state['from'] ?? null) ? (string) $state['from'] : null,
+            'until' => filled($state['until'] ?? null) ? (string) $state['until'] : null,
+        ];
+    }
+
+    private function clientId(): ?string
+    {
+        if (! $this->multiClientEnabled()) {
+            return null;
         }
 
-        if ($bounds['from'] !== null) {
-            $conditions[] = 'voided_labels.voided_at >= ?';
-            $bindings[] = $bounds['from'];
-        }
+        $value = $this->tableFilters['client']['client_id'] ?? null;
 
-        if ($bounds['until'] !== null) {
-            $conditions[] = 'voided_labels.voided_at < ?';
-            $bindings[] = $bounds['until'];
-        }
+        return filled($value) ? (string) $value : null;
+    }
 
-        return [$sql.' WHERE '.implode(' AND ', $conditions), $bindings];
+    private function multiClientEnabled(): bool
+    {
+        return (bool) app(SettingsService::class)->get('multi_client_enabled', false);
     }
 
     /**

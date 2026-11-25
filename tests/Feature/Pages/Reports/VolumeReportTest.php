@@ -282,3 +282,12 @@ it('exports the rows it shows', function (): void {
     expect($lines[0])->toBe(['Carrier', 'Packages', 'Share', 'Total Cost', 'Unpriced Packages', 'Avg Cost', 'Avg Weight (lb)'])
         ->and($lines[1])->toBe(['USPS', '4', '100.0%', '30.00', '1', '10.00', '2.50']);
 });
+
+it('moves to the range of the grouping chosen', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+
+    Livewire::test(VolumeReport::class)
+        ->assertSet('tableFilters.date_range.from', LocalDateRange::now()->subDays(30)->format('Y-m-d'))
+        ->set('groupBy', 'month')
+        ->assertSet('tableFilters.date_range.from', LocalDateRange::now()->subYear()->format('Y-m-d'));
+});

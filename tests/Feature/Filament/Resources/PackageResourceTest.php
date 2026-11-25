@@ -20,7 +20,9 @@ use App\Enums\VoidReason;
 use App\Filament\Resources\PackageResource\Pages\ListPackages;
 use App\Filament\Resources\PackageResource\Pages\ViewPackage;
 use App\Models\Channel;
+use App\Models\DailyShippingStat;
 use App\Models\DataSource;
+use App\Models\Location;
 use App\Models\Package;
 use App\Models\Shipment;
 use App\Models\ShippingMethod;
@@ -468,4 +470,31 @@ it('lists only packages whose address was not confirmed', function (): void {
         ->filterTable('address_not_confirmed')
         ->assertCanNotSeeTableRecords([$packages['yes'], $packages['verified']])
         ->assertCanSeeTableRecords([$packages['partial'], $packages['unverified'], $packages['no'], $packages['not_checked']]);
+});
+
+it('filters by the local day the label was bought', function (): void {
+    Location::factory()->default()->create(['timezone' => 'America/Los_Angeles']);
+    Location::clearDefaultCache();
+    // 18:00 on September 30 in Los Angeles, dated for the next pickup day.
+    $evening = Package::factory()->shipped()->create(['shipped_at' => '2026-10-01 01:00:00', 'ship_date' => '2026-10-01']);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('shipped_at', ['shipped_from' => '2026-09-30', 'shipped_until' => '2026-09-30'])
+        ->assertCanSeeTableRecords([$evening])
+        ->filterTable('shipped_at', ['shipped_from' => '2026-10-01', 'shipped_until' => '2026-10-01'])
+        ->assertCanNotSeeTableRecords([$evening]);
+
+    Location::clearDefaultCache();
+});
+
+it('offers a marketplace carrier that has shipped, so a Volume drill-down by it shows selected', function (): void {
+    DailyShippingStat::create(['date' => today()->toDateString(), 'carrier' => 'OnTrac', 'package_count' => 1, 'costed_package_count' => 1, 'total_cost' => 5, 'total_weight' => 1]);
+    $ontrac = Package::factory()->shipped()->create(['carrier' => 'OnTrac']);
+    $usps = Package::factory()->shipped()->create(['carrier' => 'USPS']);
+
+    Livewire::test(ListPackages::class)
+        ->filterTable('carrier', 'OnTrac')
+        ->assertCanSeeTableRecords([$ontrac])
+        ->assertCanNotSeeTableRecords([$usps])
+        ->assertSee('OnTrac');
 });
