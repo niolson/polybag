@@ -41,6 +41,15 @@ use UnitEnum;
  * and is undelivered is not yet either, and is left out of the rate.
  * Exceptions and stuck pre-transit are counted as the dashboard counts them:
  * the Exception status, and Pre-Transit more than 48 hours after shipping.
+ *
+ * A package is delivered when tracking says so, with or without a delivery
+ * time: Shopify and Amazon can report Delivered without one, and USPS gives
+ * none it cannot vouch for. Only a package with a time has a transit time or
+ * an on-time verdict; one delivered at an unknown time is neither late nor on
+ * time. Delivered % is over the packages that have tracking at all, and the
+ * rest are counted as No Tracking. Each package is judged on its own against
+ * its Shipment's deliver-by, so a two-box order with one late box counts one
+ * of each. Delivery days are the default Location's, as `deliver_by` is.
  */
 class DeliveryPerformanceReport extends Page implements HasTable
 {
@@ -150,6 +159,10 @@ class DeliveryPerformanceReport extends Page implements HasTable
                     ->numeric()
                     ->color(fn (array $record): ?string => $record['stuck_pre_transit'] > 0 ? 'warning' : null)
                     ->sortable(),
+                Tables\Columns\TextColumn::make('untracked')
+                    ->label('No Tracking')
+                    ->numeric()
+                    ->sortable(),
             ])
             ->filters([
                 Tables\Filters\Filter::make('date_range')
@@ -171,7 +184,8 @@ class DeliveryPerformanceReport extends Page implements HasTable
             ], layout: FiltersLayout::AboveContent)
             ->deferFilters(false)
             ->filtersFormColumns(4)
-            ->emptyStateHeading('No packages shipped in this range');
+            ->emptyStateHeading(fn (): string => $this->dateRange()['from'] === null ? 'Choose a From date' : 'No packages shipped in this range')
+            ->emptyStateDescription(fn (): ?string => $this->dateRange()['from'] === null ? 'The report reads every package in its range, so it needs a first day.' : null);
     }
 
     protected function getHeaderActions(): array
@@ -195,7 +209,7 @@ class DeliveryPerformanceReport extends Page implements HasTable
 
         return response()->streamDownload(function () use ($rows): void {
             $out = fopen('php://output', 'w');
-            fputcsv($out, [self::GROUPINGS[$this->groupBy], 'Packages', 'Delivered', 'Delivered %', 'Median Transit Days', '90th Percentile Transit Days', 'Due by Deliver-By', 'On Time', 'Late', 'On-Time %', 'Exceptions', 'Returned', 'Stuck Pre-Transit']);
+            fputcsv($out, [self::GROUPINGS[$this->groupBy], 'Packages', 'Delivered', 'Delivered %', 'Median Transit Days', '90th Percentile Transit Days', 'Due by Deliver-By', 'On Time', 'Late', 'On-Time %', 'Exceptions', 'Returned', 'Stuck Pre-Transit', 'No Tracking']);
 
             foreach ($rows as $row) {
                 fputcsv($out, [
@@ -212,6 +226,7 @@ class DeliveryPerformanceReport extends Page implements HasTable
                     $row['exceptions'],
                     $row['returned'],
                     $row['stuck_pre_transit'],
+                    $row['untracked'],
                 ]);
             }
 
@@ -294,15 +309,19 @@ class DeliveryPerformanceReport extends Page implements HasTable
 
     /**
      * @param  Collection<int, stdClass>  $packages
-     * @return array{packages: int, delivered: int, delivered_rate: ?float, median_days: ?float, p90_days: ?float, judged: int, on_time: int, late: int, on_time_rate: ?float, exceptions: int, returned: int, stuck_pre_transit: int}
+     * @return array{packages: int, delivered: int, delivered_rate: ?float, median_days: ?float, p90_days: ?float, judged: int, on_time: int, late: int, on_time_rate: ?float, exceptions: int, returned: int, stuck_pre_transit: int, untracked: int}
      */
     private function summarize(Collection $packages): array
     {
         $today = LocalDateRange::now()->toDateString();
         $stuckBefore = now()->subHours(self::STUCK_PRE_TRANSIT_HOURS)->getTimestamp();
 
-        $delivered = $packages->filter(fn (stdClass $package): bool => $package->delivered_at !== null);
-        $transit = $delivered->map(fn (stdClass $package): float => max(0, $package->delivered_ts - $package->shipped_ts) / 86400);
+        $tracked = $packages->filter(fn (stdClass $package): bool => $package->tracking_status !== null);
+        $delivered = $packages->filter(fn (stdClass $package): bool => $package->delivered_at !== null
+            || $package->tracking_status === TrackingStatus::Delivered->value);
+        $transit = $delivered
+            ->filter(fn (stdClass $package): bool => $package->delivered_ts !== null)
+            ->map(fn (stdClass $package): float => max(0, $package->delivered_ts - $package->shipped_ts) / 86400);
 
         // Judged against deliver-by: delivered, or still out once it passed.
         $onTime = 0;
@@ -315,6 +334,9 @@ class DeliveryPerformanceReport extends Page implements HasTable
 
             if ($package->delivered_date !== null) {
                 $package->delivered_date <= $package->deliver_by ? $onTime++ : $late++;
+            } elseif ($package->tracking_status === TrackingStatus::Delivered->value) {
+                // Delivered on a day nobody reported.
+                continue;
             } elseif ($package->deliver_by < $today) {
                 $late++;
             }
@@ -325,17 +347,18 @@ class DeliveryPerformanceReport extends Page implements HasTable
         return [
             'packages' => $packages->count(),
             'delivered' => $delivered->count(),
-            'delivered_rate' => $packages->isEmpty() ? null : $delivered->count() / $packages->count() * 100,
+            'delivered_rate' => $tracked->isEmpty() ? null : (float) ($delivered->count() / $tracked->count() * 100),
             'median_days' => Percentile::of($transit, 50),
             'p90_days' => Percentile::of($transit, 90),
             'judged' => $judged,
             'on_time' => $onTime,
             'late' => $late,
-            'on_time_rate' => $judged === 0 ? null : $onTime / $judged * 100,
+            'on_time_rate' => $judged === 0 ? null : (float) ($onTime / $judged * 100),
             'exceptions' => $packages->where('tracking_status', TrackingStatus::Exception->value)->count(),
             'returned' => $packages->where('tracking_status', TrackingStatus::Returned->value)->count(),
             'stuck_pre_transit' => $packages->filter(fn (stdClass $package): bool => $package->tracking_status === TrackingStatus::PreTransit->value
                 && $package->shipped_ts <= $stuckBefore)->count(),
+            'untracked' => $packages->count() - $tracked->count(),
         ];
     }
 
@@ -347,12 +370,31 @@ class DeliveryPerformanceReport extends Page implements HasTable
      */
     private function shippedPackages(): Collection
     {
-        $range = $this->tableFilters['date_range'] ?? [];
+        ['from' => $from, 'until' => $until] = $this->dateRange();
+
+        // Unbounded, the read would hold every package ever shipped.
+        if ($from === null) {
+            return collect();
+        }
+
         $locationId = $this->filterValue('location', $this->multiLocationEnabled());
         $clientId = $this->filterValue('client', $this->multiClientEnabled());
-        $key = json_encode([$range['from'] ?? null, $range['until'] ?? null, $locationId, $clientId]);
+        $key = json_encode([$from, $until, $locationId, $clientId]);
 
-        return $this->packages[$key] ??= $this->readShippedPackages($range['from'] ?? null, $range['until'] ?? null, $locationId, $clientId);
+        return $this->packages[$key] ??= $this->readShippedPackages($from, $until, $locationId, $clientId);
+    }
+
+    /**
+     * @return array{from: ?string, until: ?string}
+     */
+    private function dateRange(): array
+    {
+        $state = $this->tableFilters['date_range'] ?? [];
+
+        return [
+            'from' => filled($state['from'] ?? null) ? (string) $state['from'] : null,
+            'until' => filled($state['until'] ?? null) ? (string) $state['until'] : null,
+        ];
     }
 
     /**
@@ -429,11 +471,14 @@ class DeliveryPerformanceReport extends Page implements HasTable
     }
 
     /**
-     * Domestic when the parcel stays in the country of the Location it left.
+     * Domestic when the parcel stays in the country of the Location it left,
+     * or of the default Location for a package with none.
      */
     private function isDomestic(stdClass $package): bool
     {
-        return strtoupper((string) $package->destination_country) === strtoupper((string) ($package->origin_country ?? 'US'));
+        $origin = $package->origin_country ?? once(fn (): string => Location::getDefault()->country ?? 'US');
+
+        return strtoupper((string) $package->destination_country) === strtoupper((string) $origin);
     }
 
     private function filterValue(string $filter, bool $enabled): ?string

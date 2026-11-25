@@ -8,7 +8,7 @@
         <x-filament::section>
             <div class="text-sm text-gray-500 dark:text-gray-400">Delivered</div>
             <div class="text-2xl font-bold">{{ $report::percent($summary['delivered_rate']) }}</div>
-            <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ number_format($summary['delivered']) }} of {{ number_format($summary['packages']) }} packages</div>
+            <div class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ number_format($summary['delivered']) }} of {{ number_format($summary['packages'] - $summary['untracked']) }} tracked packages</div>
         </x-filament::section>
         <x-filament::section>
             <div class="text-sm text-gray-500 dark:text-gray-400">Median Transit</div>
@@ -31,8 +31,9 @@
 
     <p class="text-sm text-gray-600 dark:text-gray-400">
         Packages shipped in this range. Transit is calendar days from purchase to the delivery scan. A package
-        is late when it was delivered after its deliver-by date, or is still out once that date has passed.
-        Recently shipped packages may still be in transit.
+        is late when it was delivered after its deliver-by date, or is still out once that date has passed; one
+        reported delivered without a delivery time counts as delivered but has no transit time. Delivered % is
+        over packages with tracking. Recently shipped packages may still be in transit.
     </p>
 
     <div class="flex items-center gap-3">
