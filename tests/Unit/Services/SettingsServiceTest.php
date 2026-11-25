@@ -1,8 +1,13 @@
 <?php
 
+use App\Models\DataSource;
 use App\Models\Setting;
 use App\Services\SettingsService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\Jobs\SyncJob;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -222,3 +227,38 @@ it('reads multi-client and multi-location from config and ignores a settings row
     expect(app(SettingsService::class)->get($key))->toBeTrue();
 })->with(['production', 'demo', 'local', 'testing'])
     ->with(['multi_client_enabled', 'multi_location_enabled']);
+
+it('asks whether an Amazon connection is active once per request', function (): void {
+    $asked = 0;
+    DB::listen(function ($query) use (&$asked): void {
+        $asked += str_contains($query->sql, '"data_sources"') ? 1 : 0;
+    });
+
+    app(SettingsService::class)->amazonFeaturesEnabled();
+    app(SettingsService::class)->amazonFeaturesEnabled();
+    app(SettingsService::class)->transparencyShown();
+
+    expect($asked)->toBe(1);
+});
+
+it('shows Amazon features as soon as an Amazon connection is saved active', function (): void {
+    expect(app(SettingsService::class)->amazonFeaturesEnabled())->toBeFalse();
+
+    DataSource::factory()->amazon()->create(['active' => true]);
+
+    expect(app(SettingsService::class)->amazonFeaturesEnabled())->toBeTrue();
+});
+
+it('reads settings afresh at the start of each queued job', function (): void {
+    expect(app(SettingsService::class)->get('batch_shipping_enabled'))->toBeNull();
+
+    // Saved by another process: the shared cache is cleared, this worker's copy is not.
+    Setting::create(['key' => 'batch_shipping_enabled', 'value' => '1', 'type' => 'boolean']);
+    Cache::forget('app_settings');
+    expect(app(SettingsService::class)->get('batch_shipping_enabled'))->toBeNull();
+
+    $job = new SyncJob(app(), json_encode(['uuid' => 'test', 'displayName' => 'TestJob', 'job' => 'TestJob', 'data' => []]), 'sync', 'default');
+    event(new JobProcessing('sync', $job));
+
+    expect(app(SettingsService::class)->get('batch_shipping_enabled'))->toBeTrue();
+});

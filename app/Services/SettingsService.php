@@ -25,6 +25,12 @@ class SettingsService
     private ?array $resolved = null;
 
     /**
+     * Whether an Amazon connection is active, read once per request: Amazon
+     * columns and fields ask several times while one page renders.
+     */
+    private ?bool $hasActiveAmazonConnection = null;
+
+    /**
      * Get a setting value by key.
      */
     public function get(string $key, mixed $default = null): mixed
@@ -77,7 +83,8 @@ class SettingsService
      */
     public function amazonFeaturesEnabled(): bool
     {
-        return (bool) $this->get('amazon_features_enabled', false) || DataSource::hasActiveAmazonConnection();
+        return (bool) $this->get('amazon_features_enabled', false)
+            || ($this->hasActiveAmazonConnection ??= DataSource::hasActiveAmazonConnection());
     }
 
     /**
@@ -162,7 +169,19 @@ class SettingsService
     public function clearCache(): void
     {
         Cache::forget(self::CACHE_KEY);
+        $this->forgetResolved();
+    }
+
+    /**
+     * Drop what this instance has read, so the next read goes back to the
+     * shared cache. The instance is a singleton, which a queue worker keeps for
+     * its whole life, so this runs before every job: a setting saved while the
+     * worker runs reaches its next job rather than waiting for a restart.
+     */
+    public function forgetResolved(): void
+    {
         $this->resolved = null;
+        $this->hasActiveAmazonConnection = null;
     }
 
     /**

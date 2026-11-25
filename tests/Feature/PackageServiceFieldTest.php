@@ -8,6 +8,7 @@ use App\Filament\Resources\ShipmentResource\RelationManagers\PackagesRelationMan
 use App\Models\DataSource;
 use App\Models\Package;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
@@ -59,4 +60,19 @@ it('lists the service on the Shipment\'s Packages tab instead of an empty field'
         'ownerRecord' => $package->shipment,
         'pageClass' => ViewShipment::class,
     ])->assertTableColumnStateSet('service', 'Priority Mail', $package);
+});
+
+it('loads every Package\'s active Label together on the Shipment\'s Packages tab', function (): void {
+    $shipment = Package::factory()->shipped()->withLabel()->create()->shipment;
+    Package::factory()->count(2)->shipped()->withLabel()->for($shipment)->create();
+    Model::preventLazyLoading();
+
+    try {
+        Livewire::test(PackagesRelationManager::class, [
+            'ownerRecord' => $shipment,
+            'pageClass' => ViewShipment::class,
+        ])->assertCanSeeTableRecords($shipment->packages);
+    } finally {
+        Model::preventLazyLoading(false);
+    }
 });

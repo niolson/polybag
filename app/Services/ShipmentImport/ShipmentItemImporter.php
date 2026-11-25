@@ -44,6 +44,9 @@ class ShipmentItemImporter
         $importedShipmentItemIds = [];
         $hasUnresolvedItems = false;
 
+        // Read once and matched in memory, rather than looked up line by line.
+        $existingItems = $shipment->shipmentItems()->orderBy('id')->get();
+
         foreach ($items as $itemData) {
             // An order line's price is what one buyer paid, so an order never sets a
             // Product's customs value; the catalog sync fills it (`manual-ship-contents/03`).
@@ -65,42 +68,40 @@ class ShipmentItemImporter
             ];
 
             if (filled($sourceItemId)) {
-                $shipmentItem = ShipmentItem::query()
-                    ->where('shipment_id', $shipment->id)
-                    ->where('source_item_id', $sourceItemId)
-                    ->first()
-                    ?? ShipmentItem::query()
-                        ->where('shipment_id', $shipment->id)
-                        ->where('product_id', $productId)
-                        ->whereNull('source_item_id')
-                        ->when($importedShipmentItemIds !== [], fn ($query) => $query->whereNotIn('id', $importedShipmentItemIds))
-                        ->orderBy('id')
-                        ->first();
-
-                if ($shipmentItem) {
-                    $shipmentItem->update($values + ['source_item_id' => $sourceItemId]);
-                } else {
-                    $shipmentItem = ShipmentItem::query()->updateOrCreate(
-                        [
-                            'shipment_id' => $shipment->id,
-                            'source_item_id' => $sourceItemId,
-                        ],
-                        $values,
-                    );
-                }
-            } else {
-                $shipmentItem = ShipmentItem::query()->updateOrCreate(
-                    [
-                        'shipment_id' => $shipment->id,
-                        'product_id' => $productId,
-                    ],
-                    $values,
+                $shipmentItem = $existingItems->first(
+                    // Case-insensitive, as MySQL's collation compares the column.
+                    fn (ShipmentItem $item): bool => $item->source_item_id !== null
+                        && mb_strtolower((string) $item->source_item_id) === mb_strtolower((string) $sourceItemId),
+                ) ?? $existingItems->first(
+                    fn (ShipmentItem $item): bool => $item->source_item_id === null
+                        && (int) $item->product_id === (int) $productId
+                        && ! in_array($item->id, $importedShipmentItemIds, true),
                 );
+                $matchValues = $values + ['source_item_id' => $sourceItemId];
+                $newKey = ['shipment_id' => $shipment->id, 'source_item_id' => $sourceItemId];
+            } else {
+                $shipmentItem = $existingItems->first(
+                    fn (ShipmentItem $item): bool => (int) $item->product_id === (int) $productId,
+                );
+                $matchValues = $values;
+                $newKey = ['shipment_id' => $shipment->id, 'product_id' => $productId];
+            }
+
+            $created = false;
+
+            if ($shipmentItem) {
+                $shipmentItem->update($matchValues);
+            } else {
+                // Still an upsert by its key: another import may have written
+                // the line since the items were read.
+                $shipmentItem = ShipmentItem::query()->updateOrCreate($newKey, $values);
+                $created = $shipmentItem->wasRecentlyCreated;
+                $existingItems->push($shipmentItem);
             }
 
             $importedShipmentItemIds[] = $shipmentItem->id;
 
-            if ($shipmentItem->wasRecentlyCreated) {
+            if ($created) {
                 $stats['items_created']++;
             } else {
                 $stats['items_updated']++;

@@ -32,6 +32,12 @@ class ShipmentValidationPlan implements AddressValidationPlan
     ) {}
 
     /**
+     * The seeded FedEx carrier's id, read once: a system carrier is never
+     * renamed or deleted. Not remembered while it is missing.
+     */
+    private ?int $fedexCarrierId = null;
+
+    /**
      * None for a withheld address (`live-store-demo/03`): a placeholder
      * street is not the buyer's, so no answer about it could be true, and an
      * undeliverable one would hold the Shipment from purchase. It is left
@@ -107,7 +113,7 @@ class ShipmentValidationPlan implements AddressValidationPlan
             return false;
         }
 
-        $carrierId = Carrier::where('name', Carrier::FEDEX)->value('id');
+        $carrierId = $this->fedexCarrierId ??= Carrier::where('name', Carrier::FEDEX)->value('id');
 
         return $carrierId !== null
             && CarrierAccount::resolveForAddressValidation($carrierId, $shipment) !== null;

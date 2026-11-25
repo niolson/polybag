@@ -2,6 +2,7 @@
 
 use App\Models\Client;
 use App\Services\ClientContext;
+use Illuminate\Support\Facades\DB;
 
 it('demotes the previous default when a new client is saved as default', function (): void {
     // Global beforeEach already creates a default client
@@ -80,4 +81,27 @@ it('hasReturnAddress returns false when return_postal_code is blank', function (
     ]);
 
     expect($client->hasReturnAddress())->toBeFalse();
+});
+
+it('reads the default client once per request', function (): void {
+    $context = app(ClientContext::class);
+    $context->forget();
+    $reads = 0;
+    DB::listen(function ($query) use (&$reads): void {
+        $reads += str_contains($query->sql, '"clients"') ? 1 : 0;
+    });
+
+    $context->default();
+    $context->default();
+    $context->id();
+
+    expect($reads)->toBe(1);
+});
+
+it('gives the new default client once another is saved as default', function (): void {
+    app(ClientContext::class)->default();
+
+    $second = Client::factory()->create(['is_default' => true]);
+
+    expect(app(ClientContext::class)->id())->toBe($second->id);
 });

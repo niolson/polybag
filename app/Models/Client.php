@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\LabelReferenceSource;
 use App\Filament\Pages\Reports\PrepaidDutiesReport;
+use App\Services\ClientContext;
 use App\Support\ExporterEin;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -111,6 +112,12 @@ class Client extends Model
             if ($client->wasChanged('duties_policy') || $client->wasRecentlyCreated) {
                 PrepaidDutiesReport::forgetDdpInUse();
             }
+
+            app(ClientContext::class)->forget();
+        });
+
+        static::deleted(function (): void {
+            app(ClientContext::class)->forget();
         });
     }
 

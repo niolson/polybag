@@ -7,6 +7,7 @@ use App\Models\ShipmentItem;
 use App\Services\ShipmentImport\ImportReferenceResolver;
 use App\Services\ShipmentImport\ShipmentItemImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 
 uses(RefreshDatabase::class);
 
@@ -167,4 +168,37 @@ test('an order import never sets a Product\'s customs value', function (): void 
 
     expect((float) $product->refresh()->customs_value)->toBe(12.0)
         ->and(Product::where('sku', 'NEW-SKU')->sole()->customs_value)->toBeNull();
+});
+
+test('reads the shipment\'s existing items once, not once per line', function (): void {
+    [$shipment, $source] = authoritativeShipmentWithItems(3);
+    $lines = $shipment->shipmentItems()->with('product')->get()->map(fn (ShipmentItem $item): array => [
+        'sku' => $item->product->sku,
+        'name' => $item->product->name,
+        'quantity' => 2,
+    ]);
+    $itemReads = 0;
+    DB::listen(function ($query) use (&$itemReads): void {
+        $itemReads += str_starts_with(strtolower($query->sql), 'select') && str_contains($query->sql, 'from "shipment_items"') ? 1 : 0;
+    });
+
+    shipmentItemImporter()->import($shipment, $lines, $source);
+
+    expect($itemReads)->toBe(1)
+        ->and($shipment->shipmentItems()->pluck('quantity')->all())->toBe([2, 2, 2]);
+});
+
+test('a source item identifier matches its line whatever its case, as MySQL compares it', function (): void {
+    $source = DataSource::factory()->create();
+    $shipment = Shipment::factory()->create(['data_source_id' => $source]);
+    $product = Product::factory()->create(['client_id' => $shipment->client_id, 'sku' => 'CASE-SKU']);
+    $existing = ShipmentItem::factory()->create(['shipment_id' => $shipment, 'product_id' => $product, 'source_item_id' => 'abc-1', 'quantity' => 1]);
+    $legacy = ShipmentItem::factory()->create(['shipment_id' => $shipment, 'product_id' => $product, 'source_item_id' => null, 'quantity' => 1]);
+
+    shipmentItemImporter()->import($shipment, collect([
+        ['sku' => 'CASE-SKU', 'source_item_id' => 'ABC-1', 'quantity' => 5],
+    ]), $source);
+
+    expect($existing->refresh()->quantity)->toBe(5)
+        ->and($legacy->refresh()->source_item_id)->toBeNull();
 });
