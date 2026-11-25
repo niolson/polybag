@@ -81,6 +81,11 @@ class PrepaidDutiesReport extends Page implements HasTable
                 ->exists());
     }
 
+    public static function forgetDdpInUse(): void
+    {
+        Cache::forget(self::DDP_IN_USE_CACHE_KEY);
+    }
+
     /**
      * Labels declared DDP, or that carry a prepaid amount whatever the
      * snapshot says.

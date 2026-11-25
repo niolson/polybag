@@ -120,3 +120,27 @@ it('exports the rows it shows', function (): void {
     expect($lines[0])->toBe(['User', 'Packages', 'Orders', 'Items', 'Days Active', 'Packages / Active Day', 'Labels Voided'])
         ->and($lines[1])->toBe(['Packer', '1', '1', '0', '1', '1.0', '0']);
 });
+
+it('lists a user who only voided labels in range', function (): void {
+    $supervisor = User::factory()->create(['name' => 'Supervisor']);
+    PackageLabel::factory()->voided()->count(2)->create(['voided_by_user_id' => $supervisor->id]);
+
+    $row = collect(userReportRows())->firstWhere('user_name', 'Supervisor');
+
+    expect((int) $row['package_count'])->toBe(0)
+        ->and((int) $row['voided_count'])->toBe(2)
+        ->and($row['per_active_day'])->toBeNull();
+});
+
+it('counts a package on its ship date, the day the label is dated for', function (): void {
+    $packer = User::factory()->create(['name' => 'Packer']);
+    // Bought on the evening of October 31 after the cutoff, dated for Monday November 2.
+    Package::factory()->shipped()->create(['shipped_by_user_id' => $packer->id, 'shipped_at' => '2026-11-01 01:00:00', 'ship_date' => '2026-11-02']);
+
+    $page = Livewire::test(UserShipmentsReport::class)
+        ->filterTable('date_range', ['from' => '2026-10-01', 'until' => '2026-10-31'])
+        ->instance();
+    assert($page instanceof UserShipmentsReport);
+
+    expect($page->getFilteredSortedTableQuery()->get())->toHaveCount(0);
+});

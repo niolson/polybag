@@ -31,3 +31,4 @@ Tests for each grouping, the location filter, the drill-down URL and the export.
 ## Comments
 
 - 2026-11-24 — Done. Carrier grouping, Location filter (multi-location), Share and Avg Weight columns, Export CSV. Drill-downs open Packages with status shipped, the new Ship Date filter (on `packages.ship_date`, replacing the UTC-day Shipped filter), the Location and the row's channel, method or carrier; a period row's dates are cut to the report's range; a row with no id gets no link. A test follows a link into the Packages list and checks it lists exactly the packages counted. Averages multiply by `1.0` so SQLite doesn't divide integers.
+- 2026-11-25 — Review fixes. The Packages carrier filter offers every carrier in the rollup (OnTrac, Amazon Shipping), so a carrier drill-down shows as selected. Changing Group by moves the range to that grouping's default.

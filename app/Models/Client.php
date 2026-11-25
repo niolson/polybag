@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\LabelReferenceSource;
+use App\Filament\Pages\Reports\PrepaidDutiesReport;
 use App\Support\ExporterEin;
 use Database\Factories\ClientFactory;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -101,6 +102,14 @@ class Client extends Model
                 static::where('id', '!=', $client->id ?? 0)
                     ->where('is_default', true)
                     ->update(['is_default' => false]);
+            }
+        });
+
+        // A policy that starts or stops naming DDP shows or hides Prepaid
+        // Duties now, not when its cached answer runs out.
+        static::saved(function (Client $client): void {
+            if ($client->wasChanged('duties_policy') || $client->wasRecentlyCreated) {
+                PrepaidDutiesReport::forgetDdpInUse();
             }
         });
     }

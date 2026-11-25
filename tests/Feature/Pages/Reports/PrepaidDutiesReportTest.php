@@ -192,3 +192,14 @@ it('appears once a DDP label exists, whatever the client policies say', function
 
     expect(PrepaidDutiesReport::canAccess())->toBeTrue();
 });
+
+it('appears as soon as a client policy is changed to name DDP, despite the cached answer', function (): void {
+    $this->actingAs(User::factory()->create(['role' => Role::Manager]));
+    $client = Client::factory()->create(['duties_policy' => ['EU' => 'ddu']]);
+
+    expect(PrepaidDutiesReport::canAccess())->toBeFalse();
+
+    $client->update(['duties_policy' => ['EU' => 'ddp']]);
+
+    expect(PrepaidDutiesReport::canAccess())->toBeTrue();
+});
